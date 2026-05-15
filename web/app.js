@@ -627,12 +627,18 @@ async function renderSummary() {
     </div>
   `;
 
-  // KPI cards — render even when valued=false (em-dashes), to keep layout stable
-  function kpiCard(label, value, sub, tone) {
+  // KPI cards — render even when valued=false (em-dashes), to keep layout stable.
+  // flashId + flashVal attach a data-flash hook the flashOnRender helper reads
+  // to apply .flash-up / .flash-down (Spec 2 D7) when the underlying number
+  // changes between renders.
+  function kpiCard(label, value, sub, tone, flashId, flashVal) {
+    const flashAttrs = flashId
+      ? ` data-flash-id="${flashId}" data-flash-value="${Number.isFinite(flashVal) ? flashVal : ''}"`
+      : '';
     return `
       <div class="kpi-card">
         <div class="kpi-label">${label}</div>
-        <div class="kpi-value num ${tone || ''}">${value}</div>
+        <div class="kpi-value num ${tone || ''}"${flashAttrs}>${value}</div>
         ${sub ? `<div class="kpi-sub num">${sub}</div>` : '<div class="kpi-sub">&nbsp;</div>'}
       </div>
     `;
@@ -649,10 +655,10 @@ async function renderSummary() {
 
   const kpiRow = `
     <div class="kpi-row">
-      ${kpiCard('Total Value',     valueStr,                                `invested ${investedStr}`,         '')}
-      ${kpiCard('Total P&amp;L',   pnlStr,                                  pnlPctStr,                          pnlTone)}
-      ${kpiCard('Today\'s Change', todayStr,                                todayPctStr,                        todayTone)}
-      ${kpiCard('Cash',            '<span class="dim">—</span>',            '<span class="dim">unset</span>',   'dim')}
+      ${kpiCard('Total Value',     valueStr,                          `invested ${investedStr}`,         '',         'kpi-total-value', k.totalValue)}
+      ${kpiCard('Total P&amp;L',   pnlStr,                            pnlPctStr,                          pnlTone,    'kpi-total-pnl',   k.totalPnl)}
+      ${kpiCard('Today\'s Change', todayStr,                          todayPctStr,                        todayTone,  'kpi-today',       k.todayChange)}
+      ${kpiCard('Cash',            '<span class="dim">—</span>',      '<span class="dim">unset</span>',   'dim',      null,              null)}
     </div>
   `;
 
@@ -701,6 +707,37 @@ async function renderSummary() {
       document.cookie = `display_currency=${ccy}; path=/; SameSite=Lax; max-age=2592000`;
       renderSummary();
     });
+  }
+
+  // Flash any KPI value that moved since the last render (Spec 2 D7).
+  flashOnRender();
+}
+
+// flashOnRender walks every [data-flash-id] element on the page, compares
+// its data-flash-value attribute to the previously-rendered value, and adds
+// a .flash-up / .flash-down class if it moved. The class self-removes on
+// animationend so consecutive ticks keep flashing.
+const prevFlashValues = {};
+function flashOnRender() {
+  for (const el of document.querySelectorAll('[data-flash-id]')) {
+    const id = el.dataset.flashId;
+    const raw = el.dataset.flashValue;
+    if (raw === '' || raw == null) continue;
+    const newV = parseFloat(raw);
+    if (!Number.isFinite(newV)) continue;
+    const prevV = prevFlashValues[id];
+    if (prevV != null && Math.abs(newV - prevV) > 0.001) {
+      const dir = newV > prevV ? 'up' : 'down';
+      el.classList.remove('flash-up', 'flash-down');
+      // Force reflow so the same class re-applied tick-after-tick re-fires
+      // the animation. Reading offsetWidth is the canonical trick.
+      void el.offsetWidth;
+      el.classList.add(`flash-${dir}`);
+      el.addEventListener('animationend', () => {
+        el.classList.remove('flash-up', 'flash-down');
+      }, { once: true });
+    }
+    prevFlashValues[id] = newV;
   }
 }
 
