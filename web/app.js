@@ -150,6 +150,7 @@ function renderDashboard(user) {
     <div class="shell">
       <div class="topbar">
         <div class="brand">FT</div>
+        <div class="market-pill" id="market-pill" title="US markets (Spec 5 extends to multi-market)">—</div>
         <div class="right">
           <span class="dim" id="refresh-status">—</span>
           <button class="btn-ghost" id="refresh">refresh</button>
@@ -179,6 +180,52 @@ function renderDashboard(user) {
   }
   loadActiveTab();
   loadRefreshStatus();
+  startMarketPill();
+}
+
+// ---------- market status pill (top bar) -------------------------------
+
+let marketState = null;
+let marketTicker = null;
+
+async function startMarketPill() {
+  await refreshMarketStatus();
+  setInterval(refreshMarketStatus, 5 * 60 * 1000);
+  if (marketTicker) clearInterval(marketTicker);
+  marketTicker = setInterval(updateMarketPillText, 1000);
+}
+
+async function refreshMarketStatus() {
+  try {
+    marketState = await api('/api/marketstatus');
+    updateMarketPillText();
+  } catch (_) { /* leave pill at last known state */ }
+}
+
+function updateMarketPillText() {
+  const el = $('#market-pill');
+  if (!el || !marketState) return;
+  const us = marketState.us;
+  const dot = us.open ? '🟢' : '🔴';
+  const label = us.open ? 'US open' : 'US closed';
+  const remaining = formatCountdown(us.nextChange);
+  const verb = us.nextChangeKind === 'close' ? 'closes' : 'opens';
+  el.innerHTML = `${dot} <span class="mp-label">${escapeHTML(label)}</span> · ${escapeHTML(verb)} in <span class="num mp-eta">${escapeHTML(remaining)}</span>`;
+  el.classList.toggle('market-pill--open', us.open);
+}
+
+function formatCountdown(iso) {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return '0s';
+  const s = Math.floor(ms / 1000);
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
 }
 
 // ---------- export -------------------------------------------------------
@@ -571,6 +618,15 @@ async function renderSummary() {
 
   const k = s.kpis;
 
+  // USD/EUR toggle (Spec 2 D4). Cookie-backed; reload re-renders with FX.
+  const currency = s.currency || 'USD';
+  const toggle = `
+    <div class="currency-toggle" role="tablist" aria-label="Display currency">
+      <button class="ct-btn ${currency === 'USD' ? 'active' : ''}" data-ccy="USD" role="tab">USD</button>
+      <button class="ct-btn ${currency === 'EUR' ? 'active' : ''}" data-ccy="EUR" role="tab">EUR</button>
+    </div>
+  `;
+
   // KPI cards — render even when valued=false (em-dashes), to keep layout stable
   function kpiCard(label, value, sub, tone) {
     return `
@@ -636,7 +692,16 @@ async function renderSummary() {
     </p>
   `;
 
-  content.innerHTML = kpiRow + donutRow + footer;
+  content.innerHTML = toggle + kpiRow + donutRow + footer;
+
+  // Wire toggle clicks
+  for (const btn of document.querySelectorAll('.ct-btn')) {
+    btn.addEventListener('click', () => {
+      const ccy = btn.dataset.ccy;
+      document.cookie = `display_currency=${ccy}; path=/; SameSite=Lax; max-age=2592000`;
+      renderSummary();
+    });
+  }
 }
 
 // formatMoney mirrors the server's fmtMoney for client-side fallbacks.
