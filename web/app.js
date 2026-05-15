@@ -129,9 +129,10 @@ function renderLogin() {
 
 const state = {
   user: null,
-  tab: 'stocks',        // 'stocks' | 'crypto' | 'heatmap' | 'news' | 'crypto-news'
+  tab: 'summary',       // 'summary' | 'stocks' | 'crypto' | 'heatmap' | 'news' | 'crypto-news'
   stocks: null,         // array of stock rows
   crypto: null,         // array of crypto rows
+  summary: null,        // cached summary response
   heatmapSector: '',    // '' = all sectors
   loading: false,
   error: null,
@@ -159,6 +160,7 @@ function renderDashboard(user) {
         </div>
       </div>
       <div class="tabbar">
+        <button class="tab ${state.tab === 'summary' ? 'active' : ''}" data-tab="summary">Summary</button>
         <button class="tab ${state.tab === 'stocks' ? 'active' : ''}" data-tab="stocks">Stocks &amp; ETFs</button>
         <button class="tab ${state.tab === 'crypto' ? 'active' : ''}" data-tab="crypto">Crypto</button>
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
@@ -526,7 +528,9 @@ async function loadActiveTab() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading…</div>';
   try {
-    if (state.tab === 'stocks') {
+    if (state.tab === 'summary') {
+      await renderSummary();
+    } else if (state.tab === 'stocks') {
       if (state.stocks == null) {
         const res = await api('/api/holdings/stocks');
         state.stocks = res.holdings || [];
@@ -550,6 +554,97 @@ async function loadActiveTab() {
       <div class="loss">error: ${escapeHTML(err.message)}</div>
     </div>`;
   }
+}
+
+// ---------- summary -----------------------------------------------------
+
+async function renderSummary() {
+  const content = $('#content');
+  let s;
+  try {
+    s = await api('/api/summary');
+    state.summary = s;
+  } catch (err) {
+    content.innerHTML = `<div class="empty"><div class="loss">summary failed: ${escapeHTML(err.message)}</div></div>`;
+    return;
+  }
+
+  const k = s.kpis;
+
+  // KPI cards — render even when valued=false (em-dashes), to keep layout stable
+  function kpiCard(label, value, sub, tone) {
+    return `
+      <div class="kpi-card">
+        <div class="kpi-label">${label}</div>
+        <div class="kpi-value num ${tone || ''}">${value}</div>
+        ${sub ? `<div class="kpi-sub num">${sub}</div>` : '<div class="kpi-sub">&nbsp;</div>'}
+      </div>
+    `;
+  }
+
+  const valueStr  = k.valued ? formatMoney(k.totalValue) : '—';
+  const investedStr = formatMoney(k.totalInvested);
+  const pnlTone = k.totalPnl > 0 ? 'gain' : k.totalPnl < 0 ? 'loss' : '';
+  const pnlStr  = k.valued && Number.isFinite(k.totalPnl) ? `${k.totalPnl >= 0 ? '+' : '-'}${formatMoney(Math.abs(k.totalPnl))}` : '—';
+  const pnlPctStr = k.totalPnlPct != null ? `${k.totalPnlPct >= 0 ? '+' : ''}${k.totalPnlPct.toFixed(2)}%` : '—';
+  const todayTone = k.todayChange > 0 ? 'gain' : k.todayChange < 0 ? 'loss' : '';
+  const todayStr = k.valued ? `${k.todayChange >= 0 ? '+' : '-'}${formatMoney(Math.abs(k.todayChange))}` : '—';
+  const todayPctStr = k.todayChangePct != null ? `${k.todayChangePct >= 0 ? '+' : ''}${k.todayChangePct.toFixed(2)}%` : '';
+
+  const kpiRow = `
+    <div class="kpi-row">
+      ${kpiCard('Total Value',     valueStr,                                `invested ${investedStr}`,         '')}
+      ${kpiCard('Total P&amp;L',   pnlStr,                                  pnlPctStr,                          pnlTone)}
+      ${kpiCard('Today\'s Change', todayStr,                                todayPctStr,                        todayTone)}
+      ${kpiCard('Cash',            '<span class="dim">—</span>',            '<span class="dim">unset</span>',   'dim')}
+    </div>
+  `;
+
+  // Three donuts side by side
+  function donutCard(title, svg, legend) {
+    const legendHTML = (legend || []).map(row => `
+      <li>
+        <span class="legend-dot" style="background:${row.color}"></span>
+        <span class="legend-label">${escapeHTML(row.label)}</span>
+        <span class="legend-value num">${escapeHTML(row.valueStr)}</span>
+        ${row.pct != null ? `<span class="legend-pct num dim">${row.pct.toFixed(1)}%</span>` : ''}
+      </li>
+    `).join('');
+    return `
+      <div class="donut-card">
+        <div class="donut-title">${title}</div>
+        <div class="donut-svg">${svg}</div>
+        <ul class="donut-legend">${legendHTML}</ul>
+      </div>
+    `;
+  }
+
+  const donutRow = `
+    <div class="donut-row">
+      ${donutCard('Asset class',     s.donuts.assetClass,     s.legends.assetClass)}
+      ${donutCard('Crypto core / alt', s.donuts.cryptoCoreAlt, s.legends.cryptoCoreAlt)}
+      ${donutCard('Stocks by sector', s.donuts.stocksBySector, s.legends.stocksBySector)}
+    </div>
+  `;
+
+  const footer = `
+    <p class="dim" style="font-size:0.78rem; margin-top:1.5rem">
+      ${s.counts.stocks} stock${s.counts.stocks === 1 ? '' : 's'} ·
+      ${s.counts.crypto} crypto holding${s.counts.crypto === 1 ? '' : 's'} ·
+      FX EUR→USD ${Number(s.fxEURUSD).toFixed(4)} ·
+      as of ${new Date(s.asOf).toLocaleString()}
+    </p>
+  `;
+
+  content.innerHTML = kpiRow + donutRow + footer;
+}
+
+// formatMoney mirrors the server's fmtMoney for client-side fallbacks.
+function formatMoney(usd) {
+  const abs = Math.abs(usd);
+  if (abs >= 1_000_000) return `$${(usd / 1_000_000).toFixed(2)}M`;
+  if (abs >= 10_000)    return `$${Math.round(usd).toLocaleString('en-US')}`;
+  return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // ---------- heatmap ------------------------------------------------------

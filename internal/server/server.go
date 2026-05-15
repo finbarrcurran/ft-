@@ -68,6 +68,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/holdings/stocks", s.requireUser(s.handleListStocks))
 	s.mux.HandleFunc("GET /api/holdings/crypto", s.requireUser(s.handleListCrypto))
 
+	// Summary — aggregate KPIs + donut SVGs.
+	s.mux.HandleFunc("GET /api/summary", s.requireUser(s.handleSummary))
+
 	// Refresh — accepts cookie OR bearer token (humans + bot both call this).
 	s.mux.HandleFunc("POST /api/refresh", s.requireUserOrToken(s.handleRefresh))
 	s.mux.HandleFunc("GET /api/refresh-status", s.requireUserOrToken(s.handleRefreshStatus))
