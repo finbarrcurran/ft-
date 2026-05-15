@@ -74,12 +74,25 @@ func (s *Server) handleNews(
 	_, _ = w.Write(body)
 }
 
-// GET /api/feargreed
+// GET /api/feargreed         — crypto (alternative.me)
+// GET /api/feargreed/stocks  — stocks (CNN)
 //
-// Crypto Fear & Greed Index (0–100) from alternative.me. Cached for 1h
-// using the news_cache table with scope='feargreed'.
+// Both 0–100 + classification. Cached in news_cache for 1h, scoped per source.
+
 func (s *Server) handleFearGreed(w http.ResponseWriter, r *http.Request) {
-	const scope = "feargreed"
+	s.handleFearGreedScope(w, r, "feargreed", market.FetchFearGreed)
+}
+
+func (s *Server) handleFearGreedStocks(w http.ResponseWriter, r *http.Request) {
+	s.handleFearGreedScope(w, r, "feargreed_stocks", market.FetchStockFearGreed)
+}
+
+func (s *Server) handleFearGreedScope(
+	w http.ResponseWriter,
+	r *http.Request,
+	scope string,
+	fetcher func(ctx context.Context) (*market.FearGreed, error),
+) {
 	if payload, fetchedAt, err := s.store.GetNewsCache(r.Context(), scope); err == nil {
 		if time.Since(fetchedAt) < newsTTL {
 			w.Header().Set("Content-Type", "application/json")
@@ -88,15 +101,21 @@ func (s *Server) handleFearGreed(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fg, err := market.FetchFearGreed(r.Context())
+	fg, err := fetcher(r.Context())
 	if err != nil {
-		slog.Warn("fear/greed fetch", "err", err)
-		if payload, _, cerr := s.store.GetNewsCache(r.Context(), scope); cerr == nil {
+		slog.Warn("fear/greed fetch", "scope", scope, "err", err)
+		// 6h stale fallback per Spec 2 §D6 risk note.
+		if payload, fetchedAt, cerr := s.store.GetNewsCache(r.Context(), scope); cerr == nil &&
+			time.Since(fetchedAt) < 6*time.Hour {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(payload))
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"value": nil, "classification": "", "error": err.Error()})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"value":          nil,
+			"classification": "",
+			"error":          err.Error(),
+		})
 		return
 	}
 	body, _ := json.Marshal(map[string]any{
