@@ -54,16 +54,20 @@ func (s *Store) SeedHoldings(ctx context.Context, userID int64) (nStocks, nCrypt
 	}
 
 	for _, h := range seedCrypto(userID) {
+		isCore := 0
+		if h.Classification == "core" {
+			isCore = 1
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO crypto_holdings (
-			    user_id, name, symbol, classification, category, wallet,
+			    user_id, name, symbol, classification, is_core, category, wallet,
 			    quantity_held, quantity_staked,
 			    avg_buy_eur, cost_basis_eur, current_price_eur, current_value_eur,
 			    avg_buy_usd, cost_basis_usd, current_price_usd, current_value_usd,
 			    rsi14, change_7d_pct, change_30d_pct, strategy_note,
 			    updated_at
-			 ) VALUES (?,?,?,?,?,?, ?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, strftime('%s','now'))`,
-			h.UserID, h.Name, h.Symbol, h.Classification, strPtrToNull(h.Category), strPtrToNull(h.Wallet),
+			 ) VALUES (?,?,?,?,?,?,?, ?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, strftime('%s','now'))`,
+			h.UserID, h.Name, h.Symbol, h.Classification, isCore, strPtrToNull(h.Category), strPtrToNull(h.Wallet),
 			h.QuantityHeld, h.QuantityStaked,
 			fp(h.AvgBuyEUR), fp(h.CostBasisEUR), fp(h.CurrentPriceEUR), fp(h.CurrentValueEUR),
 			fp(h.AvgBuyUSD), fp(h.CostBasisUSD), fp(h.CurrentPriceUSD), fp(h.CurrentValueUSD),

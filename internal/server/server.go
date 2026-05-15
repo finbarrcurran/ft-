@@ -84,6 +84,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/news/market", s.requireUser(s.handleMarketNews))
 	s.mux.HandleFunc("GET /api/news/crypto", s.requireUser(s.handleCryptoNews))
 	s.mux.HandleFunc("GET /api/feargreed", s.requireUser(s.handleFearGreed))
+	s.mux.HandleFunc("GET /api/feargreed/stocks", s.requireUser(s.handleFearGreedStocks))
 
 	// Bot-facing endpoints — cookie OR bearer token. Designed for the OpenClaw
 	// skill but curl-friendly for humans too.

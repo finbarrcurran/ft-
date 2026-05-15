@@ -92,7 +92,7 @@ func (s *Store) DeleteAllStockHoldings(ctx context.Context, userID int64) error 
 
 func (s *Store) ListCryptoHoldings(ctx context.Context, userID int64) ([]*domain.CryptoHolding, error) {
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT id, user_id, name, symbol, classification, category, wallet,
+		`SELECT id, user_id, name, symbol, classification, is_core, category, wallet,
 		        quantity_held, quantity_staked,
 		        avg_buy_eur, cost_basis_eur, current_price_eur, current_value_eur,
 		        avg_buy_usd, cost_basis_usd, current_price_usd, current_value_usd,
@@ -117,16 +117,20 @@ func (s *Store) ListCryptoHoldings(ctx context.Context, userID int64) ([]*domain
 }
 
 func (s *Store) InsertCryptoHolding(ctx context.Context, h *domain.CryptoHolding) (int64, error) {
+	isCore := 0
+	if h.IsCore || h.Classification == "core" {
+		isCore = 1
+	}
 	res, err := s.DB.ExecContext(ctx,
 		`INSERT INTO crypto_holdings (
-		    user_id, name, symbol, classification, category, wallet,
+		    user_id, name, symbol, classification, is_core, category, wallet,
 		    quantity_held, quantity_staked,
 		    avg_buy_eur, cost_basis_eur, current_price_eur, current_value_eur,
 		    avg_buy_usd, cost_basis_usd, current_price_usd, current_value_usd,
 		    rsi14, change_7d_pct, change_30d_pct, strategy_note,
 		    updated_at
-		 ) VALUES (?,?,?,?,?,?, ?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, strftime('%s','now'))`,
-		h.UserID, h.Name, h.Symbol, h.Classification, strPtrToNull(h.Category), strPtrToNull(h.Wallet),
+		 ) VALUES (?,?,?,?,?,?,?, ?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, strftime('%s','now'))`,
+		h.UserID, h.Name, h.Symbol, h.Classification, isCore, strPtrToNull(h.Category), strPtrToNull(h.Wallet),
 		h.QuantityHeld, h.QuantityStaked,
 		fp(h.AvgBuyEUR), fp(h.CostBasisEUR), fp(h.CurrentPriceEUR), fp(h.CurrentValueEUR),
 		fp(h.AvgBuyUSD), fp(h.CostBasisUSD), fp(h.CurrentPriceUSD), fp(h.CurrentValueUSD),
@@ -198,12 +202,13 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 func scanCrypto(r Scannable) (*domain.CryptoHolding, error) {
 	var h domain.CryptoHolding
 	var category, wallet sql.NullString
+	var isCore int64
 	var avgEur, costEur, priceEur, valueEur sql.NullFloat64
 	var avgUsd, costUsd, priceUsd, valueUsd sql.NullFloat64
 	var rsi, c7, c30, daily sql.NullFloat64
 	var updatedAt int64
 	if err := r.Scan(
-		&h.ID, &h.UserID, &h.Name, &h.Symbol, &h.Classification, &category, &wallet,
+		&h.ID, &h.UserID, &h.Name, &h.Symbol, &h.Classification, &isCore, &category, &wallet,
 		&h.QuantityHeld, &h.QuantityStaked,
 		&avgEur, &costEur, &priceEur, &valueEur,
 		&avgUsd, &costUsd, &priceUsd, &valueUsd,
@@ -212,6 +217,7 @@ func scanCrypto(r Scannable) (*domain.CryptoHolding, error) {
 	); err != nil {
 		return nil, err
 	}
+	h.IsCore = isCore != 0
 	h.Category = nsToPtr(category)
 	h.Wallet = nsToPtr(wallet)
 	h.AvgBuyEUR = nfToPtr(avgEur)

@@ -33,6 +33,33 @@
 * { box-sizing: border-box; }
 * { border-color: rgb(var(--color-border)); }
 
+/* ----- tabular numerals (Spec 2 D8) -----------------------------------
+ * Any element rendering a number should carry `class="num"` (cell, KPI value,
+ * tooltip). Together with right-align this gives every numeric column the
+ * "trader screen" look — digits stack vertically and the eye scans down a
+ * column without drifting. */
+.num, td.num, th.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  text-align: right;
+}
+
+/* ----- flash-on-tick (Spec 2 D7) --------------------------------------
+ * A cell whose value just changed gets `.flash-up` or `.flash-down` for the
+ * duration of one animation (~600ms). Classes self-remove on animationend
+ * (wired in app.js). Don't fire on no-change — only when the actual value
+ * moved. */
+@keyframes flash-up {
+  0%   { background-color: rgb(var(--color-gain) / 0.30); }
+  100% { background-color: transparent; }
+}
+@keyframes flash-down {
+  0%   { background-color: rgb(var(--color-loss) / 0.30); }
+  100% { background-color: transparent; }
+}
+.flash-up   { animation: flash-up   600ms ease-out; }
+.flash-down { animation: flash-down 600ms ease-out; }
+
 html, body {
   margin: 0;
   padding: 0;

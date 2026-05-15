@@ -118,6 +118,7 @@ type CryptoHolding struct {
 	Name           string  `json:"name"`
 	Symbol         string  `json:"symbol"`
 	Classification string  `json:"classification"` // "core" | "alt"
+	IsCore         bool    `json:"isCore"`
 	Category       *string `json:"category"`
 	Wallet         *string `json:"wallet"`
 
