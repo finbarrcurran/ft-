@@ -74,6 +74,6 @@ echo "https://${DOMAIN} → http://127.0.0.1:8081 on this box."
 echo
 echo "Next steps:"
 echo "  - sudo -u ft /opt/ft/bin/ft help          # subcommand reference"
-echo "  - sudo -u ft /opt/ft/bin/deploy.sh        # subsequent deploys (git pull + rebuild)"
+echo "  - sudo /opt/ft/bin/deploy.sh              # subsequent deploys (git pull + rebuild + restart)"
 echo "  - sudo -u ft /opt/ft/bin/backup-db.sh     # run a backup manually"
 echo "  - sudo journalctl -u ft -f                # follow logs"

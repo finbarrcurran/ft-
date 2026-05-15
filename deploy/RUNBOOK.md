@@ -40,7 +40,7 @@
 ## Subsequent deploys
 
 ```bash
-sudo -u ft /opt/ft/bin/deploy.sh
+sudo /opt/ft/bin/deploy.sh
 ```
 
 That does `git pull` → `make build` → `install binary` → `systemctl restart ft` → `/healthz` check.
