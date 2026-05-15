@@ -426,6 +426,96 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
 .chip .value.alert-amber  { color: rgb(var(--color-amber)); }
 .chip .value.alert-green  { color: rgb(var(--color-gain)); }
 
+/* ----- summary tab -------------------------------------------------- */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+.kpi-card {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.9rem 1.1rem;
+}
+.kpi-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-dim));
+  margin-bottom: 0.5rem;
+}
+.kpi-value {
+  font-family: var(--font-mono);
+  font-size: 1.7rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: rgb(var(--color-text));
+}
+.kpi-value.gain { color: rgb(var(--color-gain)); }
+.kpi-value.loss { color: rgb(var(--color-loss)); }
+.kpi-value.dim  { color: rgb(var(--color-text-dim)); }
+.kpi-sub {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: rgb(var(--color-text-muted));
+  margin-top: 0.3rem;
+}
+
+.donut-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.donut-card {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+}
+.donut-title {
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-dim));
+  margin-bottom: 0.6rem;
+  text-align: center;
+}
+.donut-svg {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.6rem;
+}
+.donut-svg svg { max-width: 200px; height: auto; }
+.donut-legend {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.78rem;
+}
+.donut-legend li {
+  display: grid;
+  grid-template-columns: 14px 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.15rem 0;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.legend-label { color: rgb(var(--color-text)); }
+.legend-value { font-family: var(--font-mono); color: rgb(var(--color-text-muted)); }
+.legend-pct   { font-family: var(--font-mono); min-width: 3.5em; text-align: right; }
+
 /* ----- import modal ------------------------------------------------- */
 
 .modal-overlay {
