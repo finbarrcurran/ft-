@@ -167,6 +167,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
         <button class="tab ${state.tab === 'news' ? 'active' : ''}" data-tab="news">News</button>
         <button class="tab ${state.tab === 'crypto-news' ? 'active' : ''}" data-tab="crypto-news">Crypto News</button>
+        <button class="tab ${state.tab === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>
       </div>
       <div class="content" id="content"></div>
     </div>
@@ -595,6 +596,8 @@ async function loadActiveTab() {
       await renderNews('market');
     } else if (state.tab === 'crypto-news') {
       await renderNews('crypto');
+    } else if (state.tab === 'settings') {
+      await renderSettings();
     }
   } catch (err) {
     content.innerHTML = `<div class="empty">
@@ -954,8 +957,11 @@ function renderStocks() {
         <span class="dot"></span>${a.status}
       </span>
     `;
+    const noteCell = r.note
+      ? `<td class="note-cell" title="${escapeHTML(r.note)}">${escapeHTML(r.note.length > 30 ? r.note.slice(0, 28) + '…' : r.note)}</td>`
+      : `<td class="dim">—</td>`;
     return `
-      <tr>
+      <tr data-row-id="${r.id}" data-row-kind="stock">
         <td>${badge}</td>
         <td>
           <div>${escapeHTML(r.name)}</div>
@@ -963,17 +969,25 @@ function renderStocks() {
         </td>
         <td class="num">${fmtUSD.format(r.investedUsd)}</td>
         <td class="num">${dash(r.avgOpenPrice, fmtNum2)}</td>
-        <td class="num">${dash(r.currentPrice, fmtNum2)}</td>
-        <td class="num">${dashSigned(m.pnlUsd, fmtNum2, '$')}</td>
+        <td class="num" data-flash-id="stock-${r.id}-price" data-flash-value="${r.currentPrice ?? ''}">${dash(r.currentPrice, fmtNum2)}</td>
+        <td class="num" data-flash-id="stock-${r.id}-pnl" data-flash-value="${m.pnlUsd ?? ''}">${dashSigned(m.pnlUsd, fmtNum2, '$')}</td>
         <td class="num">${pct(m.pnlPct, 2)}</td>
         <td class="num">${dash(r.rsi14, fmtNum2)}</td>
         <td class="num">${dash(r.stopLoss, fmtNum2)}</td>
         <td class="num">${pct(m.distanceToSlPct, 1)}</td>
+        ${noteCell}
+        <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="stock" title="Edit">✎</button></td>
       </tr>
     `;
   }).join('');
 
-  $('#content').innerHTML = chips + `
+  const toolbar = `
+    <div class="table-toolbar">
+      <button class="btn-ghost" id="add-stock">+ Add stock</button>
+    </div>
+  `;
+
+  $('#content').innerHTML = chips + toolbar + `
     <div class="tablewrap">
       <table class="holdings">
         <thead>
@@ -988,12 +1002,18 @@ function renderStocks() {
             <th class="num">RSI(14)</th>
             <th class="num">Stop Loss</th>
             <th class="num">Dist to SL</th>
+            <th>Note</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>${body}</tbody>
       </table>
     </div>
   `;
+
+  $('#add-stock').addEventListener('click', () => openHoldingModal({ kind: 'stock', mode: 'add' }));
+  wireRowActions('stock');
+  flashOnRender();
 }
 
 // ---------- crypto table --------------------------------------------------
@@ -1048,26 +1068,37 @@ function renderCrypto() {
 
   const body = rows.map((r) => {
     const m = r.metrics;
+    const noteCell = r.note
+      ? `<td class="note-cell" title="${escapeHTML(r.note)}">${escapeHTML(r.note.length > 30 ? r.note.slice(0, 28) + '…' : r.note)}</td>`
+      : `<td class="dim">—</td>`;
     return `
-      <tr>
+      <tr data-row-id="${r.id}" data-row-kind="crypto">
         <td>
           <div>${escapeHTML(r.name)} <span class="ticker">${escapeHTML(r.symbol)}</span></div>
           <div class="ticker">${r.category ? escapeHTML(r.category) : '—'}${r.wallet ? ' · <span class="dim">' + escapeHTML(r.wallet) + '</span>' : ''}</div>
         </td>
         <td><span class="tag ${r.classification === 'core' ? 'core' : ''}">${escapeHTML(r.classification)}</span></td>
         <td class="num">${fmtNum6.format(m.totalQuantity)}</td>
-        <td class="num">${dash(r.currentPriceUsd, fmtNum4)}</td>
+        <td class="num" data-flash-id="crypto-${r.id}-price" data-flash-value="${r.currentPriceUsd ?? ''}">${dash(r.currentPriceUsd, fmtNum4)}</td>
         <td class="num">${dash(r.costBasisUsd, fmtNum2)}</td>
-        <td class="num">${dash(m.currentValueUsd, fmtNum2)}</td>
-        <td class="num">${dashSigned(m.pnlUsd, fmtNum2, '$')}</td>
+        <td class="num" data-flash-id="crypto-${r.id}-value" data-flash-value="${m.currentValueUsd ?? ''}">${dash(m.currentValueUsd, fmtNum2)}</td>
+        <td class="num" data-flash-id="crypto-${r.id}-pnl" data-flash-value="${m.pnlUsd ?? ''}">${dashSigned(m.pnlUsd, fmtNum2, '$')}</td>
         <td class="num">${pct(m.pnlPct, 2)}</td>
         <td class="num">${pct(r.change7dPct, 1)}</td>
         <td class="num">${pct(r.change30dPct, 1)}</td>
+        ${noteCell}
+        <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="crypto" title="Edit">✎</button></td>
       </tr>
     `;
   }).join('');
 
-  $('#content').innerHTML = chips + `
+  const toolbar = `
+    <div class="table-toolbar">
+      <button class="btn-ghost" id="add-crypto">+ Add crypto</button>
+    </div>
+  `;
+
+  $('#content').innerHTML = chips + toolbar + `
     <div class="tablewrap">
       <table class="holdings">
         <thead>
@@ -1082,12 +1113,17 @@ function renderCrypto() {
             <th class="num">P&amp;L %</th>
             <th class="num">7d %</th>
             <th class="num">30d %</th>
+            <th>Note</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>${body}</tbody>
       </table>
     </div>
   `;
+  $('#add-crypto').addEventListener('click', () => openHoldingModal({ kind: 'crypto', mode: 'add' }));
+  wireRowActions('crypto');
+  flashOnRender();
 }
 
 // ---------- event handlers ------------------------------------------------
@@ -1148,6 +1184,300 @@ async function onLogout() {
   state.stocks = null;
   state.crypto = null;
   renderLogin();
+}
+
+// ---------- Spec 3: holdings modal + Settings tab -----------------------
+
+// Per-row edit button → reuse the same openHoldingModal in edit mode.
+function wireRowActions(kind) {
+  for (const btn of document.querySelectorAll(`.row-edit[data-row-kind="${kind}"]`)) {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.rowId, 10);
+      const list = kind === 'stock' ? state.stocks : state.crypto;
+      const holding = (list || []).find((h) => h.id === id);
+      if (holding) openHoldingModal({ kind, mode: 'edit', holding });
+    });
+  }
+}
+
+// Form schemas. Each field has: name (JSON key), label, type, optional opts.
+const stockFields = [
+  { name: 'name',         label: 'Name',           type: 'text',     required: true },
+  { name: 'ticker',       label: 'Ticker',         type: 'text' },
+  { name: 'category',     label: 'Category',       type: 'text' },
+  { name: 'sector',       label: 'Sector',         type: 'text' },
+  { name: 'investedUsd',  label: 'Invested ($)',   type: 'number', required: true, step: '0.01' },
+  { name: 'avgOpenPrice', label: 'Avg open price', type: 'number', step: '0.01' },
+  { name: 'currentPrice', label: 'Current price',  type: 'number', step: '0.01' },
+  { name: 'stopLoss',     label: 'Stop loss',      type: 'number', step: '0.01' },
+  { name: 'takeProfit',   label: 'Take profit',    type: 'number', step: '0.01' },
+  { name: 'beta',         label: 'Beta (manual)',  type: 'number', step: '0.01' },
+  { name: 'strategyNote', label: 'Strategy note',  type: 'textarea' },
+  { name: 'note',         label: 'Note',           type: 'textarea' },
+];
+const cryptoFields = [
+  { name: 'name',           label: 'Name',                 type: 'text',     required: true },
+  { name: 'symbol',         label: 'Symbol',               type: 'text',     required: true },
+  { name: 'classification', label: 'Classification',       type: 'select', options: ['core', 'alt'] },
+  { name: 'volTier',        label: 'Volatility tier',      type: 'select', options: ['low','medium','high','extreme'] },
+  { name: 'category',       label: 'Category',             type: 'text' },
+  { name: 'wallet',         label: 'Wallet',               type: 'text' },
+  { name: 'quantityHeld',   label: 'Quantity held',        type: 'number', step: 'any', required: true },
+  { name: 'quantityStaked', label: 'Quantity staked',      type: 'number', step: 'any' },
+  { name: 'avgBuyEur',      label: 'Avg buy €',            type: 'number', step: '0.0001' },
+  { name: 'costBasisEur',   label: 'Cost basis €',         type: 'number', step: '0.01' },
+  { name: 'currentPriceEur',label: 'Current price €',      type: 'number', step: '0.0001' },
+  { name: 'strategyNote',   label: 'Strategy note',        type: 'textarea' },
+  { name: 'note',           label: 'Note',                 type: 'textarea' },
+];
+
+function openHoldingModal({ kind, mode, holding }) {
+  const fields = kind === 'stock' ? stockFields : cryptoFields;
+  const isEdit = mode === 'edit';
+  const title = `${isEdit ? 'Edit' : 'Add'} ${kind === 'stock' ? 'stock' : 'crypto'} holding`;
+
+  // Build form HTML
+  const fieldRows = fields.map((f) => {
+    const id = `hm-${f.name}`;
+    const val = isEdit && holding ? (holding[f.name] ?? '') : '';
+    const req = f.required ? 'required' : '';
+    let input;
+    if (f.type === 'textarea') {
+      input = `<textarea id="${id}" name="${f.name}" rows="2" ${req}>${escapeHTML(String(val ?? ''))}</textarea>`;
+    } else if (f.type === 'select') {
+      input = `<select id="${id}" name="${f.name}">` +
+        f.options.map((o) => `<option value="${o}" ${o === val ? 'selected' : ''}>${o}</option>`).join('') +
+        `</select>`;
+    } else {
+      const step = f.step ? ` step="${f.step}"` : '';
+      input = `<input id="${id}" name="${f.name}" type="${f.type}" value="${escapeHTML(String(val ?? ''))}" ${req}${step} />`;
+    }
+    return `
+      <div class="form-row">
+        <label for="${id}">${escapeHTML(f.label)}${f.required ? ' *' : ''}</label>
+        ${input}
+      </div>
+    `;
+  }).join('');
+
+  const reasonField = isEdit ? `
+    <div class="form-row">
+      <label for="hm-reason">Reason (optional)</label>
+      <input id="hm-reason" name="reason" type="text" placeholder="e.g. moved stop after technical break" />
+    </div>
+  ` : '';
+
+  const errBox = `<div class="error" id="hm-err"></div>`;
+
+  // Modal mount
+  closeImportModal(); // dispose any existing modal first
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">${title}</div>
+            ${isEdit && holding ? `<div class="desc tabular">${escapeHTML(holding.name)} ${holding.ticker || holding.symbol || ''}</div>` : ''}
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="hm-form" class="holding-form">
+            ${fieldRows}
+            ${reasonField}
+            ${errBox}
+          </form>
+        </div>
+        <div class="modal-foot">
+          ${isEdit ? `<button class="btn-danger" id="hm-delete">Delete</button>` : ''}
+          <button class="btn-secondary" id="hm-cancel">Cancel</button>
+          <button class="btn-primary" id="hm-save">${isEdit ? 'Save changes' : 'Add holding'}</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#hm-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#hm-save').addEventListener('click', () => submitHoldingForm({ kind, mode, holding }));
+  if (isEdit) $('#hm-delete').addEventListener('click', () => deleteHoldingFromModal({ kind, holding }));
+}
+
+async function submitHoldingForm({ kind, mode, holding }) {
+  const form = $('#hm-form');
+  const err = $('#hm-err');
+  err.textContent = '';
+
+  const fields = kind === 'stock' ? stockFields : cryptoFields;
+  const body = {};
+  for (const f of fields) {
+    const el = form.querySelector(`[name="${f.name}"]`);
+    if (!el) continue;
+    let v = el.value;
+    if (f.type === 'number') {
+      if (v === '') v = null;
+      else v = parseFloat(v);
+    } else if (f.type === 'text' || f.type === 'textarea' || f.type === 'select') {
+      v = v.trim();
+      if (v === '' && f.name !== 'name' && f.name !== 'symbol' && f.name !== 'classification' && f.name !== 'volTier') {
+        v = null;
+      }
+    }
+    body[f.name] = v;
+  }
+  // Required-field sanity
+  if (!body.name || (kind === 'crypto' && !body.symbol)) {
+    err.textContent = 'name' + (kind === 'crypto' ? ' and symbol' : '') + ' required';
+    return;
+  }
+  // Crypto-specific: isCore defaults from classification
+  if (kind === 'crypto') {
+    body.isCore = body.classification === 'core';
+  }
+  // Update reason
+  if (mode === 'edit') {
+    const reasonEl = form.querySelector('[name="reason"]');
+    if (reasonEl && reasonEl.value.trim()) {
+      body.reason = reasonEl.value.trim();
+    }
+  }
+
+  const path = kind === 'stock' ? '/api/holdings/stocks' : '/api/holdings/crypto';
+  const url = mode === 'add' ? path : `${path}/${holding.id}`;
+  const method = mode === 'add' ? 'POST' : 'PUT';
+
+  try {
+    await api(url, { method, body: JSON.stringify(body) });
+    closeImportModal();
+    // Refetch the affected list + summary so the UI catches up
+    if (kind === 'stock') state.stocks = null; else state.crypto = null;
+    state.summary = null;
+    loadActiveTab();
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+async function deleteHoldingFromModal({ kind, holding }) {
+  const reasonEl = $('#hm-form').querySelector('[name="reason"]');
+  const reason = reasonEl ? reasonEl.value.trim() : '';
+  if (!confirm(`Soft-delete ${holding.name}? You can restore it from Settings → Deleted holdings.`)) return;
+  const path = kind === 'stock' ? '/api/holdings/stocks' : '/api/holdings/crypto';
+  try {
+    await api(`${path}/${holding.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason: reason || 'soft-deleted from edit modal' }),
+    });
+    closeImportModal();
+    if (kind === 'stock') state.stocks = null; else state.crypto = null;
+    state.summary = null;
+    loadActiveTab();
+  } catch (e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
+
+// ---------- Settings tab (Spec 3 D6 restore UI + D13 audit log) ----------
+
+async function renderSettings() {
+  const content = $('#content');
+  content.innerHTML = '<div class="empty">loading…</div>';
+
+  const [delStocks, delCrypto, audit] = await Promise.all([
+    api('/api/holdings/stocks/deleted').catch(() => ({ holdings: [] })),
+    api('/api/holdings/crypto/deleted').catch(() => ({ holdings: [] })),
+    api('/api/audit?limit=100').catch(() => ({ audit: [] })),
+  ]);
+
+  const delStocksRows = (delStocks.holdings || []).map((h) => `
+    <tr>
+      <td>${escapeHTML(h.name)}</td>
+      <td class="ticker">${escapeHTML(h.ticker || '—')}</td>
+      <td class="num">${fmtUSD.format(h.investedUsd || 0)}</td>
+      <td class="dim">${escapeHTML(h.deletedAt || '')}</td>
+      <td><button class="btn-ghost" data-restore-kind="stock" data-restore-id="${h.id}">Restore</button></td>
+    </tr>
+  `).join('') || `<tr><td colspan="5" class="dim" style="text-align:center; padding:0.7rem">No deleted stock holdings.</td></tr>`;
+
+  const delCryptoRows = (delCrypto.holdings || []).map((h) => `
+    <tr>
+      <td>${escapeHTML(h.name)} <span class="ticker">${escapeHTML(h.symbol)}</span></td>
+      <td>${escapeHTML(h.classification)}</td>
+      <td class="num">${fmtNum6.format((h.quantityHeld || 0) + (h.quantityStaked || 0))}</td>
+      <td class="dim">${escapeHTML(h.deletedAt || '')}</td>
+      <td><button class="btn-ghost" data-restore-kind="crypto" data-restore-id="${h.id}">Restore</button></td>
+    </tr>
+  `).join('') || `<tr><td colspan="5" class="dim" style="text-align:center; padding:0.7rem">No deleted crypto holdings.</td></tr>`;
+
+  const auditRows = (audit.audit || []).map((a) => {
+    const tickerOrSymbol = a.ticker || a.symbol || '—';
+    let changesPreview = '';
+    try {
+      const c = JSON.parse(a.changes || '{}');
+      if (a.action === 'update') {
+        const keys = Object.keys(c).slice(0, 3);
+        changesPreview = keys.map((k) => `${k}`).join(', ');
+        if (Object.keys(c).length > 3) changesPreview += ` +${Object.keys(c).length - 3}`;
+      } else if (a.action === 'create') {
+        changesPreview = 'created';
+      }
+    } catch (_) { /* keep empty */ }
+    return `
+      <tr>
+        <td class="num dim">${escapeHTML(new Date(a.ts).toLocaleString())}</td>
+        <td>${escapeHTML(a.action)}</td>
+        <td>${escapeHTML(a.holdingKind)}</td>
+        <td class="ticker">${escapeHTML(tickerOrSymbol)}</td>
+        <td class="dim" style="font-size:0.78rem">${escapeHTML(changesPreview)}</td>
+        <td class="dim" style="font-size:0.78rem">${escapeHTML(a.reason || '')}</td>
+      </tr>
+    `;
+  }).join('') || `<tr><td colspan="6" class="dim" style="text-align:center; padding:0.7rem">No audit entries yet. Audit log fills as you create / edit / delete / restore holdings.</td></tr>`;
+
+  content.innerHTML = `
+    <h2 class="settings-h">Settings</h2>
+
+    <section class="settings-block">
+      <h3 class="settings-h3">Deleted stock holdings</h3>
+      <div class="tablewrap"><table class="holdings"><thead><tr>
+        <th>Name</th><th>Ticker</th><th class="num">Invested $</th><th>Deleted</th><th></th>
+      </tr></thead><tbody>${delStocksRows}</tbody></table></div>
+    </section>
+
+    <section class="settings-block">
+      <h3 class="settings-h3">Deleted crypto holdings</h3>
+      <div class="tablewrap"><table class="holdings"><thead><tr>
+        <th>Name / Symbol</th><th>Class</th><th class="num">Qty</th><th>Deleted</th><th></th>
+      </tr></thead><tbody>${delCryptoRows}</tbody></table></div>
+    </section>
+
+    <section class="settings-block">
+      <h3 class="settings-h3">Audit log <span class="dim" style="font-size:0.78rem; font-weight:normal">(latest 100)</span></h3>
+      <div class="tablewrap"><table class="holdings"><thead><tr>
+        <th>When</th><th>Action</th><th>Kind</th><th>Ticker / Sym</th><th>Changed</th><th>Reason</th>
+      </tr></thead><tbody>${auditRows}</tbody></table></div>
+    </section>
+  `;
+
+  // Wire restore buttons
+  for (const btn of document.querySelectorAll('[data-restore-id]')) {
+    btn.addEventListener('click', async () => {
+      const kind = btn.dataset.restoreKind;
+      const id = btn.dataset.restoreId;
+      const path = kind === 'stock' ? '/api/holdings/stocks' : '/api/holdings/crypto';
+      try {
+        await api(`${path}/${id}/restore`, { method: 'POST' });
+        if (kind === 'stock') state.stocks = null; else state.crypto = null;
+        state.summary = null;
+        renderSettings();
+      } catch (e) {
+        alert('Restore failed: ' + e.message);
+      }
+    });
+  }
 }
 
 // ---------- boot ----------------------------------------------------------
