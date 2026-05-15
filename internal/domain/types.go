@@ -107,6 +107,13 @@ type StockHolding struct {
 	// Daily change percent — populated by the market refresh, used by movers.
 	DailyChangePct *float64 `json:"dailyChangePct"`
 
+	// Spec 3 extensions
+	Note           *string    `json:"note"`
+	Beta           *float64   `json:"beta"`
+	EarningsDate   *string    `json:"earningsDate"`   // ISO YYYY-MM-DD, fed by future Yahoo poll
+	ExDividendDate *string    `json:"exDividendDate"` // ISO YYYY-MM-DD, fed by future Yahoo poll
+	DeletedAt      *time.Time `json:"deletedAt"`      // nil when active; non-nil when soft-deleted
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -144,7 +151,28 @@ type CryptoHolding struct {
 	Change30dPct   *float64 `json:"change30dPct"`
 
 	StrategyNote string    `json:"strategyNote"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+
+	// Spec 3 extensions
+	Note      *string    `json:"note"`
+	VolTier   string     `json:"volTier"`         // "low" | "medium" | "high" | "extreme"
+	DeletedAt *time.Time `json:"deletedAt"`       // nil when active; non-nil when soft-deleted
+
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// HoldingsAudit is one row of the audit log table.
+type HoldingsAudit struct {
+	ID          int64     `json:"id"`
+	Timestamp   time.Time `json:"ts"`
+	UserID      int64     `json:"-"`
+	HoldingKind string    `json:"holdingKind"` // "stock" | "crypto"
+	HoldingID   int64     `json:"holdingId"`
+	Ticker      *string   `json:"ticker,omitempty"`
+	Symbol      *string   `json:"symbol,omitempty"`
+	Action      string    `json:"action"` // "create" | "update" | "soft_delete" | "restore" | "import_replace"
+	Changes     string    `json:"changes"` // raw JSON string of the diff
+	Reason      *string   `json:"reason,omitempty"`
+	Actor       string    `json:"actor"`
 }
 
 // AlertResult is the structured outcome of running alert rules on a holding.
