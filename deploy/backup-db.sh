@@ -17,6 +17,11 @@ DB_PATH=/var/lib/ft/ft.db
 TIMESTAMP=$(date -u +%Y-%m-%d)
 BACKUP_FILE="$BACKUP_DIR/ft-$TIMESTAMP.db"
 
+# Run from a directory the ft user can always read. Without this, calling the
+# script from somewhere ft can't enter (e.g. /home/curran) triggers GNU find's
+# "Failed to restore initial working directory" fatal error during pruning.
+cd /
+
 if [[ ! -f "$DB_PATH" ]]; then
     echo "ERROR: source DB missing at $DB_PATH" >&2
     exit 2
