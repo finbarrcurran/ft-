@@ -5,8 +5,9 @@ env
 /etc/ft/env
 
 # Build artifacts
+# Note: the binary name `ft` matches a package dir under cmd/, so we anchor
+# to the root /bin/ directory — never use a bare `ft` rule.
 /bin/
-ft
 
 # Database
 *.db
