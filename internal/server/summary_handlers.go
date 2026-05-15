@@ -32,7 +32,12 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 
 	// FX snapshot from meta (used for EUR display + currency-converted totals)
 	fx := s.store.GetMetaFloat(r.Context(), "fx_snapshot_eur_usd", 1.08)
-	currency := "USD" // Chunk 2C will read the display_currency cookie here.
+
+	// Chunk 2C: read display_currency cookie. Defaults to USD; accepts EUR.
+	currency := "USD"
+	if c, err := r.Cookie("display_currency"); err == nil && c.Value == "EUR" {
+		currency = "EUR"
+	}
 
 	// ---- KPI numbers --------------------------------------------------
 	var (

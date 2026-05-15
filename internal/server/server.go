@@ -71,6 +71,9 @@ func (s *Server) routes() {
 	// Summary — aggregate KPIs + donut SVGs.
 	s.mux.HandleFunc("GET /api/summary", s.requireUser(s.handleSummary))
 
+	// Market status (US-only in this iteration; Spec 5 extends to multi-market)
+	s.mux.HandleFunc("GET /api/marketstatus", s.requireUser(s.handleMarketStatus))
+
 	// Refresh — accepts cookie OR bearer token (humans + bot both call this).
 	s.mux.HandleFunc("POST /api/refresh", s.requireUserOrToken(s.handleRefresh))
 	s.mux.HandleFunc("GET /api/refresh-status", s.requireUserOrToken(s.handleRefreshStatus))

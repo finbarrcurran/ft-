@@ -426,6 +426,64 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
 .chip .value.alert-amber  { color: rgb(var(--color-amber)); }
 .chip .value.alert-green  { color: rgb(var(--color-gain)); }
 
+/* ----- market status pill (top bar) -------------------------------- */
+
+.market-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 1rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 9999px;
+  color: rgb(var(--color-text-muted));
+}
+.market-pill .mp-label {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}
+.market-pill .mp-eta { color: rgb(var(--color-text)); }
+.market-pill--open {
+  border-color: rgb(var(--color-gain) / 0.45);
+  background: rgb(var(--color-gain) / 0.06);
+  color: rgb(var(--color-text));
+}
+.market-pill--open .mp-label { color: rgb(var(--color-gain)); }
+
+/* ----- USD / EUR toggle (Summary tab) ------------------------------ */
+
+.currency-toggle {
+  display: inline-flex;
+  margin-bottom: 1rem;
+  margin-left: auto;
+  background: rgb(var(--color-surface-sunken));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 9999px;
+  padding: 2px;
+  float: right;
+}
+.ct-btn {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.85rem;
+  background: transparent;
+  border: 0;
+  border-radius: 9999px;
+  color: rgb(var(--color-text-muted));
+  cursor: pointer;
+}
+.ct-btn.active {
+  background: rgb(var(--color-surface-raised));
+  color: rgb(var(--color-text));
+}
+
+/* Clear the float so kpi-row sits below toggle cleanly */
+.kpi-row { clear: both; }
+
 /* ----- summary tab -------------------------------------------------- */
 
 .kpi-row {
