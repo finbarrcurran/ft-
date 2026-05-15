@@ -68,6 +68,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/holdings/stocks", s.requireUser(s.handleListStocks))
 	s.mux.HandleFunc("GET /api/holdings/crypto", s.requireUser(s.handleListCrypto))
 
+	// Holdings CRUD (Spec 3) — every mutation writes one audit row.
+	s.mux.HandleFunc("POST /api/holdings/stocks", s.requireUser(s.handleCreateStock))
+	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}", s.requireUser(s.handleUpdateStock))
+	s.mux.HandleFunc("DELETE /api/holdings/stocks/{id}", s.requireUser(s.handleSoftDeleteStock))
+	s.mux.HandleFunc("POST /api/holdings/stocks/{id}/restore", s.requireUser(s.handleRestoreStock))
+	s.mux.HandleFunc("GET /api/holdings/stocks/deleted", s.requireUser(s.handleListDeletedStocks))
+	s.mux.HandleFunc("POST /api/holdings/crypto", s.requireUser(s.handleCreateCrypto))
+	s.mux.HandleFunc("PUT /api/holdings/crypto/{id}", s.requireUser(s.handleUpdateCrypto))
+	s.mux.HandleFunc("DELETE /api/holdings/crypto/{id}", s.requireUser(s.handleSoftDeleteCrypto))
+	s.mux.HandleFunc("POST /api/holdings/crypto/{id}/restore", s.requireUser(s.handleRestoreCrypto))
+	s.mux.HandleFunc("GET /api/holdings/crypto/deleted", s.requireUser(s.handleListDeletedCrypto))
+	s.mux.HandleFunc("GET /api/audit", s.requireUser(s.handleListAudit))
+
 	// Summary — aggregate KPIs + donut SVGs.
 	s.mux.HandleFunc("GET /api/summary", s.requireUser(s.handleSummary))
 
