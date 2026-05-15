@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook: refuses to commit anything that looks like an API key or
+# similar secret. Registered via:
+#
+#     git config core.hooksPath .githooks
+#
+# Bypass for true emergencies (e.g. you really did mean to commit a test
+# fixture that pattern-matches a secret):
+#
+#     git commit --no-verify
+#
+# Patterns intentionally tuned conservative — they catch shape, not value.
+
+set -euo pipefail
+
+# Patterns to flag.
+PATTERNS=(
+    # Vendor-specific env-var assignments
+    'FINNHUB[_A-Z]*=[A-Za-z0-9_-]{20,}'
+    'NEWSAPI[_A-Z]*=[A-Za-z0-9_-]{20,}'
+    'CRYPTOPANIC[_A-Z]*=[A-Za-z0-9_-]{20,}'
+    'TWELVEDATA[_A-Z]*=[A-Za-z0-9_-]{20,}'
+    # Generic: any *_KEY / *_TOKEN / *_SECRET assignment with 16+ char value
+    '[A-Z][A-Z0-9_]+_(KEY|TOKEN|SECRET)=[A-Za-z0-9_/-]{16,}'
+    # Bearer-token-style: ft_st_<32 hex>
+    'ft_st_[a-f0-9]{32}'
+    # Generic high-entropy hex blobs (40+ chars)
+    '\b[a-f0-9]{40,}\b'
+)
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+if [[ -z "$STAGED" ]]; then
+    exit 0
+fi
+
+FAIL=0
+
+# Walk staged files, run each pattern.
+while IFS= read -r file; do
+    # Skip binary files
+    if ! git diff --cached -- "$file" | grep -qE '^[+-]' 2>/dev/null; then
+        continue
+    fi
+    for pattern in "${PATTERNS[@]}"; do
+        # Examine only added lines (+ prefix), ignore diff context.
+        matches=$(git diff --cached -- "$file" \
+            | grep -E '^\+' \
+            | grep -E "$pattern" \
+            || true)
+        if [[ -n "$matches" ]]; then
+            echo "✘ Possible secret in $file (pattern: $pattern):" >&2
+            echo "$matches" | sed 's/^/    /' >&2
+            FAIL=1
+        fi
+    done
+done <<< "$STAGED"
+
+if [[ $FAIL -ne 0 ]]; then
+    echo >&2
+    echo "Commit refused. If this is a false positive, run with --no-verify." >&2
+    exit 1
+fi
+
+exit 0

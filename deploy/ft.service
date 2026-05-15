@@ -1,0 +1,55 @@
+[Unit]
+Description=FT — Finance Tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ft
+Group=ft
+WorkingDirectory=/opt/ft
+ExecStart=/opt/ft/bin/ft
+Restart=on-failure
+RestartSec=3s
+
+# Environment
+Environment=FT_ADDR=127.0.0.1:8081
+Environment=FT_DB_PATH=/var/lib/ft/ft.db
+Environment=FT_BASE_URL=https://ft.curranhouse.dev
+Environment=FT_COOKIE_SECURE=true
+Environment=FT_COOKIE_DOMAIN=ft.curranhouse.dev
+Environment=FT_SESSION_DAYS=30
+Environment=FT_REFRESH_INTERVAL=15m
+
+# Secrets — loaded from /etc/ft/env (root-only, mode 0600). Optional; the
+# service still starts if the file is missing. Add keys with: sudoedit /etc/ft/env
+EnvironmentFile=-/etc/ft/env
+
+# Hardening — matches HCT's profile so the two services have the same defaults.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ft
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+# Resource limits — leave headroom on the 3.7 GB jarvis box.
+LimitNOFILE=4096
+MemoryHigh=150M
+MemoryMax=250M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

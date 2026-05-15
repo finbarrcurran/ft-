@@ -1,0 +1,9 @@
+# /etc/cron.d/ft-backup
+# Installed by deploy/install.sh.
+# Runs the nightly SQLite backup as the ft service user.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
+# Daily at 03:15 UTC. Log to /var/log/ft/backup.log.
+15 3 * * * ft /opt/ft/bin/backup-db.sh >> /var/log/ft/backup.log 2>&1

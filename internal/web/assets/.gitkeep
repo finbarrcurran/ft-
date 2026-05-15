@@ -1,0 +1,2 @@
+# This directory is populated by `make sync-assets` from web/.
+# Empty by default so `go:embed all:assets` doesn't fail on a missing dir.
