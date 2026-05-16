@@ -982,15 +982,35 @@ async function renderHeatmap() {
   const w = Math.max(640, Math.floor(window.innerWidth - 64));
   const h = Math.floor(w * 0.55);
 
+  // Spec 6 D2 — load mode preference (lazy; persists on change).
+  if (state.heatmapMode == null) {
+    try {
+      const r = await api('/api/preferences/heatmap_mode');
+      state.heatmapMode = r.value === 'my_holdings' ? 'my_holdings' : 'market_cap';
+    } catch (_) { state.heatmapMode = 'market_cap'; }
+  }
+  const mode = state.heatmapMode;
+
   const legendStops = [-3, -2, -1, 0, 1, 2, 3];
 
   const sectorOptions = ['', ...SECTORS]
     .map((s) => `<option value="${escapeHTML(s)}" ${s === state.heatmapSector ? 'selected' : ''}>${s === '' ? 'All sectors' : escapeHTML(s)}</option>`)
     .join('');
 
+  const modeOptions = [
+    { v: 'market_cap', l: 'Market cap (S&P 500)' },
+    { v: 'my_holdings', l: 'My holdings' },
+  ].map(o => `<option value="${o.v}" ${o.v === mode ? 'selected' : ''}>${o.l}</option>`).join('');
+
+  const caption = mode === 'my_holdings'
+    ? 'Your portfolio · sized by position value · colored by daily change'
+    : 'S&P 500 · sized by market cap · colored by daily change';
+
   const legendHTML = `
     <div class="heatmap-legend">
-      <span>Sector</span>
+      <span>View</span>
+      <select id="heatmap-mode" class="hm-select">${modeOptions}</select>
+      <span style="margin-left:0.6rem">Sector</span>
       <select id="heatmap-sector" class="hm-select">${sectorOptions}</select>
       <span style="margin-left:1rem">Daily %</span>
       <span class="stops">
@@ -1003,13 +1023,29 @@ async function renderHeatmap() {
       </span>
       <span style="margin-left:auto" class="dim">held = amber stripe · hover for details</span>
     </div>
+    <div class="heatmap-caption">${escapeHTML(caption)}</div>
   `;
 
   content.innerHTML = legendHTML + `<div class="heatmap-wrap" id="heatmap-svg">loading…</div>
     <div class="heatmap-note">
-      Tile size = market cap · color = today's % change. Live prices populated
-      on each refresh; tiles update silently when the background scheduler runs.
+      ${mode === 'my_holdings'
+        ? 'Only your active stock holdings are shown. Empty sectors hidden.'
+        : 'Live prices populated on each refresh; tiles update silently when the background scheduler runs.'}
     </div>`;
+
+  $('#heatmap-mode').addEventListener('change', async (ev) => {
+    const v = ev.target.value === 'my_holdings' ? 'my_holdings' : 'market_cap';
+    state.heatmapMode = v;
+    try {
+      await api('/api/preferences/heatmap_mode', {
+        method: 'PUT',
+        body: JSON.stringify({ value: v }),
+      });
+    } catch (e) {
+      console.warn('heatmap_mode persist failed', e.message);
+    }
+    renderHeatmap();
+  });
 
   $('#heatmap-sector').addEventListener('change', (ev) => {
     state.heatmapSector = ev.target.value;
@@ -1017,7 +1053,7 @@ async function renderHeatmap() {
   });
 
   try {
-    const params = new URLSearchParams({ w: String(w), h: String(h) });
+    const params = new URLSearchParams({ w: String(w), h: String(h), mode });
     if (state.heatmapSector) params.set('sector', state.heatmapSector);
     const res = await fetch(`/api/heatmap.svg?${params}`, { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`status ${res.status}`);

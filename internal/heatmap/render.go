@@ -15,6 +15,13 @@ type RenderOptions struct {
 	PaddingTop   float64         // sector top padding for label (default 18)
 	Held         map[string]bool // ticker → true
 	Sector       string          // optional filter: only render this sector (e.g., "Technology")
+
+	// Spec 6 D3 — when non-nil, render this slice instead of the package-level
+	// S&P 500 sample dataset. Used for "my holdings" mode: caller passes one
+	// MarketTile per holding (size via MarketCapB → position value USD).
+	// Empty slice renders an empty SVG. Live overlay is NOT applied to the
+	// override path; the caller is responsible for fresh values.
+	Source []MarketTile
 }
 
 // Defaults applied if a zero value is passed.
@@ -39,10 +46,16 @@ func (o *RenderOptions) defaults() {
 func Render(opts RenderOptions) string {
 	opts.defaults()
 
-	// Build per-request tile slice with live quotes merged in + Held marked.
-	// We don't mutate the package-level Tiles; the live overlay returns fresh
-	// values.
-	source := applyLive()
+	// Build per-request tile slice. Two paths:
+	//   * Source override (Spec 6 my-holdings) → use caller-supplied tiles
+	//     verbatim; the caller already has live values.
+	//   * Default → merge package-level Tiles with live overlay.
+	var source []MarketTile
+	if opts.Source != nil {
+		source = opts.Source
+	} else {
+		source = applyLive()
+	}
 	tiles := make([]*MarketTile, 0, len(source))
 	for i := range source {
 		t := source[i] // copy

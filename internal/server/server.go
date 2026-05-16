@@ -107,6 +107,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/feargreed", s.requireUser(s.handleFearGreed))
 	s.mux.HandleFunc("GET /api/feargreed/stocks", s.requireUser(s.handleFearGreedStocks))
 
+	// Spec 6: per-user preferences (key/value).
+	s.mux.HandleFunc("GET /api/preferences", s.requireUser(s.handleListPreferences))
+	s.mux.HandleFunc("GET /api/preferences/{key}", s.requireUser(s.handleGetPreference))
+	s.mux.HandleFunc("PUT /api/preferences/{key}", s.requireUser(s.handleSetPreference))
+
 	// Spec 4: Watchlist + Framework Scoring — all require cookie auth.
 	s.mux.HandleFunc("GET /api/watchlist", s.requireUser(s.handleListWatchlist))
 	s.mux.HandleFunc("POST /api/watchlist", s.requireUser(s.handleCreateWatchlist))
