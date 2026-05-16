@@ -14,6 +14,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"ft/internal/auth"
 	"ft/internal/config"
 	"ft/internal/frameworks"
 	"ft/internal/refresh"
@@ -46,6 +47,8 @@ func main() {
 		runSeed(os.Args[2:])
 	case "daily":
 		runDaily(os.Args[2:])
+	case "token":
+		runToken(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 	default:
@@ -115,6 +118,8 @@ USAGE
   ft serve                 run server (explicit)
   ft seed [--user-id N]    load Fin's real 23 stocks + 13 crypto into the DB
   ft daily [--user-id N]   run the Spec 3 D8/D10/D11 daily job once (sparklines + calendar + beta)
+  ft token create --user-id N --name NAME    mint a new ft_st_… service token
+  ft token list [--user-id N]                list service tokens (no plaintext)
   ft help                  print this usage
 
 ENVIRONMENT
@@ -240,6 +245,72 @@ func runServe() {
 		slog.Error("shutdown", "err", err)
 	}
 	slog.Info("shutdown complete")
+}
+
+// runToken handles `ft token create` and `ft token list`.
+//
+// Plaintext token is printed ONCE on creation. Only the sha256 hash is
+// persisted, so there's no way to recover the plaintext later — if Fin loses
+// it he must mint a new one and update the consuming skill's config.
+func runToken(args []string) {
+	sub := "list"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	switch sub {
+	case "create":
+		fs := flag.NewFlagSet("token create", flag.ExitOnError)
+		userID := fs.Int64("user-id", 1, "user id who owns the token")
+		name := fs.String("name", "", "human-readable label, e.g. openclaw")
+		_ = fs.Parse(args)
+		if *name == "" {
+			fmt.Fprintln(os.Stderr, "--name is required (e.g. --name openclaw)")
+			os.Exit(2)
+		}
+		plain, hash, err := auth.NewServiceToken()
+		must("generate token", err)
+		id, err := st.CreateServiceToken(context.Background(), *userID, *name, nil, hash)
+		must("persist token", err)
+		fmt.Printf("token id   : %d\n", id)
+		fmt.Printf("token name : %s\n", *name)
+		fmt.Printf("user_id    : %d\n", *userID)
+		fmt.Println()
+		fmt.Println("Save this — it is shown ONCE and only the hash is stored:")
+		fmt.Println()
+		fmt.Println("  " + plain)
+		fmt.Println()
+	case "list":
+		fs := flag.NewFlagSet("token list", flag.ExitOnError)
+		userID := fs.Int64("user-id", 1, "user id")
+		_ = fs.Parse(args)
+		tokens, err := st.ListServiceTokens(context.Background(), *userID)
+		must("list tokens", err)
+		if len(tokens) == 0 {
+			fmt.Println("no service tokens for user", *userID)
+			return
+		}
+		fmt.Printf("%-4s  %-24s  %-20s  %s\n", "ID", "NAME", "CREATED", "STATUS")
+		for _, t := range tokens {
+			status := "active"
+			if t.RevokedAt != nil {
+				status = "revoked " + t.RevokedAt.Format(time.RFC3339)
+			}
+			fmt.Printf("%-4d  %-24s  %-20s  %s\n",
+				t.ID, t.Name, t.CreatedAt.Format(time.RFC3339), status)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "unknown token subcommand: %s\n", sub)
+		fmt.Fprintln(os.Stderr, "  ft token create --user-id N --name NAME")
+		fmt.Fprintln(os.Stderr, "  ft token list [--user-id N]")
+		os.Exit(2)
+	}
 }
 
 func must(what string, err error) {
