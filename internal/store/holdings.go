@@ -22,6 +22,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         stop_loss, take_profit, strategy_note,
         daily_change_pct,
         note, beta, earnings_date, ex_dividend_date, deleted_at,
+        exchange_override,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -355,7 +356,7 @@ type Scannable interface {
 func scanStock(r Scannable) (*domain.StockHolding, error) {
 	var h domain.StockHolding
 	var ticker, category, sector, techSetup, rrView sql.NullString
-	var note, earningsDate, exDivDate sql.NullString
+	var note, earningsDate, exDivDate, exchangeOverride sql.NullString
 	var avgOpen, currentPrice sql.NullFloat64
 	var rsi, ma50, ma200, beta sql.NullFloat64
 	var goldenCross sql.NullInt64
@@ -373,6 +374,7 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&stopLoss, &takeProfit, &h.StrategyNote,
 		&dailyChange,
 		&note, &beta, &earningsDate, &exDivDate, &deletedAt,
+		&exchangeOverride,
 		&updatedAt,
 	); err != nil {
 		return nil, err
@@ -399,6 +401,7 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	h.Beta = nfToPtr(beta)
 	h.EarningsDate = nsToPtrNonEmpty(earningsDate)
 	h.ExDividendDate = nsToPtrNonEmpty(exDivDate)
+	h.ExchangeOverride = nsToPtrNonEmpty(exchangeOverride)
 	if deletedAt.Valid {
 		t := time.Unix(deletedAt.Int64, 0)
 		h.DeletedAt = &t

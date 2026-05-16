@@ -3,6 +3,7 @@ package server
 import (
 	"ft/internal/alert"
 	"ft/internal/domain"
+	"ft/internal/marketdata"
 	"ft/internal/metrics"
 	"ft/internal/sparkline"
 	"net/http"
@@ -33,6 +34,7 @@ type stockResp struct {
 	SuggestedSLPct float64             `json:"suggestedSlPct"` // negative; from risk_rules.go
 	SuggestedTPPct float64             `json:"suggestedTpPct"` // positive; from risk_rules.go
 	Score         *scoreSummary        `json:"score,omitempty"` // Spec 4 D7
+	Market        *marketdata.MarketStatus `json:"market,omitempty"` // Spec 5 D3
 }
 
 type cryptoResp struct {
@@ -65,6 +67,7 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 	}
 	closes, _ := s.store.GetAllSparklineCloses(r.Context(), "stock", tickers, 30)
 	scoreByID, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "holding", ids)
+	now := time.Now().UTC()
 
 	out := make([]stockResp, 0, len(holdings))
 	for _, h := range holdings {
@@ -74,6 +77,20 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 			series = closes[*h.Ticker]
 		}
 		slPct, tpPct := domain.SuggestStockRisk(h.Beta)
+		// Resolve exchange: explicit override wins, else suffix rule.
+		var exch string
+		if h.ExchangeOverride != nil && *h.ExchangeOverride != "" {
+			exch = *h.ExchangeOverride
+		} else if h.Ticker != nil {
+			exch = marketdata.ExchangeForTicker(*h.Ticker)
+		}
+		var marketPtr *marketdata.MarketStatus
+		if exch != "" {
+			st := marketdata.Status(exch, now)
+			if st.Exchange != "" {
+				marketPtr = &st
+			}
+		}
 		out = append(out, stockResp{
 			StockHolding:    h,
 			Metrics:         m,
@@ -84,6 +101,7 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 			SuggestedSLPct:  slPct,
 			SuggestedTPPct:  tpPct,
 			Score:           toScoreSummary(scoreByID[h.ID]),
+			Market:          marketPtr,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"holdings": out})

@@ -1,0 +1,19 @@
+{
+  "exchange": "B3",
+  "year": 2026,
+  "closures": [
+    {"date": "2026-01-01", "name": "New Year's Day"},
+    {"date": "2026-02-16", "name": "Carnival Monday"},
+    {"date": "2026-02-17", "name": "Carnival Tuesday"},
+    {"date": "2026-04-03", "name": "Good Friday"},
+    {"date": "2026-04-21", "name": "Tiradentes Day"},
+    {"date": "2026-05-01", "name": "Labour Day"},
+    {"date": "2026-06-04", "name": "Corpus Christi"},
+    {"date": "2026-09-07", "name": "Independence Day"},
+    {"date": "2026-10-12", "name": "Our Lady of Aparecida"},
+    {"date": "2026-11-02", "name": "All Souls' Day"},
+    {"date": "2026-11-15", "name": "Republic Day"},
+    {"date": "2026-12-25", "name": "Christmas Day"}
+  ],
+  "half_days": []
+}

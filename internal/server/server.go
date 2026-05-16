@@ -84,8 +84,10 @@ func (s *Server) routes() {
 	// Summary — aggregate KPIs + donut SVGs.
 	s.mux.HandleFunc("GET /api/summary", s.requireUser(s.handleSummary))
 
-	// Market status (US-only in this iteration; Spec 5 extends to multi-market)
+	// Market status — /api/marketstatus is the back-compat shape (US only);
+	// /api/marketstatus/all is the multi-exchange Spec 5 endpoint.
 	s.mux.HandleFunc("GET /api/marketstatus", s.requireUser(s.handleMarketStatus))
+	s.mux.HandleFunc("GET /api/marketstatus/all", s.requireUser(s.handleMarketStatusAll))
 
 	// Refresh — accepts cookie OR bearer token (humans + bot both call this).
 	s.mux.HandleFunc("POST /api/refresh", s.requireUserOrToken(s.handleRefresh))

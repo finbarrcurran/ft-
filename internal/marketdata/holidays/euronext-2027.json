@@ -1,0 +1,12 @@
+{
+  "exchange": "EURONEXT",
+  "year": 2027,
+  "closures": [
+    {"date": "2027-01-01", "name": "New Year's Day"},
+    {"date": "2027-03-26", "name": "Good Friday"},
+    {"date": "2027-03-29", "name": "Easter Monday"},
+    {"date": "2027-12-27", "name": "Christmas Day (observed)"},
+    {"date": "2027-12-28", "name": "Boxing Day (observed)"}
+  ],
+  "half_days": []
+}

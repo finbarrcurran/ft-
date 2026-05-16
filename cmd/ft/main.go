@@ -17,6 +17,7 @@ import (
 	"ft/internal/auth"
 	"ft/internal/config"
 	"ft/internal/frameworks"
+	"ft/internal/marketdata"
 	"ft/internal/refresh"
 	"ft/internal/server"
 	"ft/internal/store"
@@ -147,6 +148,11 @@ func runServe() {
 	// Spec 4: load Jordi/Cowen framework definitions. Malformed JSON disables
 	// that framework with a warning but doesn't crash the server.
 	must("frameworks", frameworks.Load())
+
+	// Spec 5: load multi-exchange holiday calendars from embedded JSON. Bad
+	// files log a warning and are skipped; we never crash for missing data
+	// (worst-case the affected exchange treats every day as a trading day).
+	must("holidays", marketdata.LoadHolidays())
 
 	srv := server.New(cfg, st)
 

@@ -114,6 +114,9 @@ type StockHolding struct {
 	ExDividendDate *string    `json:"exDividendDate"` // ISO YYYY-MM-DD, fed by future Yahoo poll
 	DeletedAt      *time.Time `json:"deletedAt"`      // nil when active; non-nil when soft-deleted
 
+	// Spec 5: optional override for the ticker→exchange suffix rule.
+	ExchangeOverride *string `json:"exchangeOverride"`
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 

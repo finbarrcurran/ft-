@@ -1,0 +1,25 @@
+{
+  "exchange": "TSE",
+  "year": 2027,
+  "closures": [
+    {"date": "2027-01-01", "name": "New Year's Day"},
+    {"date": "2027-01-04", "name": "Bank Holiday"},
+    {"date": "2027-01-11", "name": "Coming-of-Age Day"},
+    {"date": "2027-02-11", "name": "National Foundation Day"},
+    {"date": "2027-02-23", "name": "Emperor's Birthday"},
+    {"date": "2027-03-22", "name": "Vernal Equinox (observed)"},
+    {"date": "2027-04-29", "name": "Showa Day"},
+    {"date": "2027-05-03", "name": "Constitution Memorial Day"},
+    {"date": "2027-05-04", "name": "Greenery Day"},
+    {"date": "2027-05-05", "name": "Children's Day"},
+    {"date": "2027-07-19", "name": "Marine Day"},
+    {"date": "2027-08-11", "name": "Mountain Day"},
+    {"date": "2027-09-20", "name": "Respect for the Aged Day"},
+    {"date": "2027-09-23", "name": "Autumn Equinox"},
+    {"date": "2027-10-11", "name": "Sports Day"},
+    {"date": "2027-11-03", "name": "Culture Day"},
+    {"date": "2027-11-23", "name": "Labour Thanksgiving Day"},
+    {"date": "2027-12-31", "name": "Year-end Bank Holiday"}
+  ],
+  "half_days": []
+}

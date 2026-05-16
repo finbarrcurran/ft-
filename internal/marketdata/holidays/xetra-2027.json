@@ -1,0 +1,12 @@
+{
+  "exchange": "XETRA",
+  "year": 2027,
+  "closures": [
+    {"date": "2027-01-01", "name": "New Year's Day"},
+    {"date": "2027-03-26", "name": "Good Friday"},
+    {"date": "2027-03-29", "name": "Easter Monday"},
+    {"date": "2027-12-24", "name": "Christmas Eve"},
+    {"date": "2027-12-31", "name": "New Year's Eve"}
+  ],
+  "half_days": []
+}

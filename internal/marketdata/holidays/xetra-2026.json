@@ -1,0 +1,14 @@
+{
+  "exchange": "XETRA",
+  "year": 2026,
+  "closures": [
+    {"date": "2026-01-01", "name": "New Year's Day"},
+    {"date": "2026-04-03", "name": "Good Friday"},
+    {"date": "2026-04-06", "name": "Easter Monday"},
+    {"date": "2026-05-01", "name": "Labour Day"},
+    {"date": "2026-12-24", "name": "Christmas Eve"},
+    {"date": "2026-12-25", "name": "Christmas Day"},
+    {"date": "2026-12-31", "name": "New Year's Eve"}
+  ],
+  "half_days": []
+}

@@ -1,0 +1,21 @@
+{
+  "exchange": "HKEX",
+  "year": 2027,
+  "closures": [
+    {"date": "2027-01-01", "name": "New Year's Day"},
+    {"date": "2027-02-08", "name": "Lunar New Year"},
+    {"date": "2027-02-09", "name": "Lunar New Year"},
+    {"date": "2027-03-26", "name": "Good Friday"},
+    {"date": "2027-03-29", "name": "Easter Monday"},
+    {"date": "2027-04-05", "name": "Ching Ming Festival"},
+    {"date": "2027-05-03", "name": "Labour Day (observed)"},
+    {"date": "2027-05-14", "name": "Buddha's Birthday"},
+    {"date": "2027-06-09", "name": "Tuen Ng Festival"},
+    {"date": "2027-07-01", "name": "HKSAR Establishment Day"},
+    {"date": "2027-09-16", "name": "Mid-Autumn Festival"},
+    {"date": "2027-10-01", "name": "National Day"},
+    {"date": "2027-10-08", "name": "Chung Yeung Festival"},
+    {"date": "2027-12-27", "name": "Christmas (observed)"}
+  ],
+  "half_days": []
+}
