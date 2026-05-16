@@ -127,37 +127,34 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 	stockWG.Wait()
 
 	// ---- Crypto: CoinGecko market_chart per symbol -------------------------
-	cryptoSem := make(chan struct{}, 3) // CoinGecko free tier ~30 req/min
-	var cryptoWG sync.WaitGroup
-	var cryptoMu sync.Mutex
+	// CoinGecko free tier penalises bursts hard (sticky 429 for ~minutes).
+	// Sequential with a 2.5s gap fits well under the ~30 req/min limit and
+	// completes 13 symbols in ~30s.
 	for _, h := range cryptos {
-		h := h
-		cryptoWG.Add(1)
-		cryptoSem <- struct{}{}
-		go func() {
-			defer cryptoWG.Done()
-			defer func() { <-cryptoSem }()
-
-			pts, err := market.FetchCryptoDailyCloses(ctx, h.Symbol, days)
-			if err != nil {
-				cryptoMu.Lock()
-				r.Errors = append(r.Errors, fmt.Sprintf("crypto history %s: %s", h.Symbol, err))
-				cryptoMu.Unlock()
-				return
+		pts, err := market.FetchCryptoDailyCloses(ctx, h.Symbol, days)
+		if err != nil {
+			r.Errors = append(r.Errors, fmt.Sprintf("crypto history %s: %s", h.Symbol, err))
+			// Still gap before next call so we don't compound the rate-limit.
+			select {
+			case <-ctx.Done():
+				break
+			case <-time.After(2500 * time.Millisecond):
 			}
-			trimmed := tailDailyCloses(pts, days)
-			toStore := make([]store.PricePoint, 0, len(trimmed))
-			for _, p := range trimmed {
-				toStore = append(toStore, store.PricePoint{Date: p.Date, Close: p.Close})
-			}
-			if err := s.Store.InsertPriceHistoryBatch(ctx, h.Symbol, "crypto", toStore); err == nil {
-				cryptoMu.Lock()
-				r.CryptoHistoryOK++
-				cryptoMu.Unlock()
-			}
-		}()
+			continue
+		}
+		trimmed := tailDailyCloses(pts, days)
+		toStore := make([]store.PricePoint, 0, len(trimmed))
+		for _, p := range trimmed {
+			toStore = append(toStore, store.PricePoint{Date: p.Date, Close: p.Close})
+		}
+		if err := s.Store.InsertPriceHistoryBatch(ctx, h.Symbol, "crypto", toStore); err == nil {
+			r.CryptoHistoryOK++
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(2500 * time.Millisecond):
+		}
 	}
-	cryptoWG.Wait()
 
 	// ---- Prune ----
 	if n, err := s.Store.PrunePriceHistory(ctx, days+5); err == nil {
