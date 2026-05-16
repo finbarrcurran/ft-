@@ -121,10 +121,11 @@ func (s *Server) routes() {
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
 
-	// Spec 6: per-user preferences (key/value).
-	s.mux.HandleFunc("GET /api/preferences", s.requireUser(s.handleListPreferences))
-	s.mux.HandleFunc("GET /api/preferences/{key}", s.requireUser(s.handleGetPreference))
-	s.mux.HandleFunc("PUT /api/preferences/{key}", s.requireUser(s.handleSetPreference))
+	// Spec 6: per-user preferences (key/value). Token-or-cookie so the
+	// FT bot can read/write the Sunday-nudge skip flag (Spec 9b D12).
+	s.mux.HandleFunc("GET /api/preferences", s.requireUserOrToken(s.handleListPreferences))
+	s.mux.HandleFunc("GET /api/preferences/{key}", s.requireUserOrToken(s.handleGetPreference))
+	s.mux.HandleFunc("PUT /api/preferences/{key}", s.requireUserOrToken(s.handleSetPreference))
 
 	// Spec 4: Watchlist + Framework Scoring — all require cookie auth.
 	s.mux.HandleFunc("GET /api/watchlist", s.requireUser(s.handleListWatchlist))

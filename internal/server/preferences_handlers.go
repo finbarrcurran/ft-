@@ -81,6 +81,11 @@ func validPreferenceValue(key, value string) bool {
 	switch key {
 	case "heatmap_mode":
 		return value == "market_cap" || value == "my_holdings"
+	case "news_filter_mode":
+		return value == "all" || value == "mine"
+	case "regime_skip_week":
+		// ISO week format like "2026-W20" or "skip" — short and bounded.
+		return len(value) <= 24
 	}
 	return true
 }
