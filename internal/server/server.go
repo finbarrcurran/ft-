@@ -118,6 +118,11 @@ func (s *Server) routes() {
 	// Spec 9b D9: screener — S&P sample with live overlay + filters.
 	s.mux.HandleFunc("GET /api/screener", s.requireUser(s.handleScreener))
 
+	// Spec 9c: per-holding levels (S/R candidates + suggested SL/TP/R-mult).
+	// Token-or-cookie so the bot's /levels command works.
+	s.mux.HandleFunc("GET /api/holdings/stocks/{id}/levels", s.requireUserOrToken(s.handleStockLevels))
+	s.mux.HandleFunc("GET /api/holdings/crypto/{id}/levels", s.requireUserOrToken(s.handleCryptoLevels))
+
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
 

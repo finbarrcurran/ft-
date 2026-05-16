@@ -30,7 +30,16 @@ type stockMutationReq struct {
 	Beta           *float64 `json:"beta"`
 	EarningsDate   *string  `json:"earningsDate"`
 	ExDividendDate *string  `json:"exDividendDate"`
-	Reason         *string  `json:"reason,omitempty"` // for update audit row
+	// Spec 9c — Percoco levels + stage. ATR/vol_tier_auto are refresh-
+	// managed; user can override stage when correcting after an out-of-
+	// FT eToro sale.
+	Support1    *float64 `json:"support1"`
+	Support2    *float64 `json:"support2"`
+	Resistance1 *float64 `json:"resistance1"`
+	Resistance2 *float64 `json:"resistance2"`
+	SetupType   *string  `json:"setupType"`
+	Stage       *string  `json:"stage"`
+	Reason      *string  `json:"reason,omitempty"` // for update audit row
 }
 
 type cryptoMutationReq struct {
@@ -48,7 +57,14 @@ type cryptoMutationReq struct {
 	StrategyNote    string   `json:"strategyNote"`
 	Note            *string  `json:"note"`
 	VolTier         string   `json:"volTier"`
-	Reason          *string  `json:"reason,omitempty"`
+	// Spec 9c additions:
+	Support1    *float64 `json:"support1"`
+	Support2    *float64 `json:"support2"`
+	Resistance1 *float64 `json:"resistance1"`
+	Resistance2 *float64 `json:"resistance2"`
+	SetupType   *string  `json:"setupType"`
+	Stage       *string  `json:"stage"`
+	Reason      *string  `json:"reason,omitempty"`
 }
 
 type restoreReq struct {
@@ -134,6 +150,32 @@ func (s *Server) handleUpdateStock(w http.ResponseWriter, r *http.Request) {
 		h.Beta = req.Beta
 	} else {
 		h.Beta = old.Beta
+	}
+	// Spec 9c — refresh-owned fields always preserved.
+	h.ATRWeekly = old.ATRWeekly
+	h.VolTierAuto = old.VolTierAuto
+	h.TP1HitAt = old.TP1HitAt
+	h.TP2HitAt = old.TP2HitAt
+	h.TimeStopReviewAt = old.TimeStopReviewAt
+	// Stage default if absent — preserve old.
+	if req.Stage == nil {
+		h.Stage = old.Stage
+	}
+	if req.SetupType == nil {
+		h.SetupType = old.SetupType
+	}
+	// Levels default if absent — preserve old.
+	if req.Support1 == nil {
+		h.Support1 = old.Support1
+	}
+	if req.Support2 == nil {
+		h.Support2 = old.Support2
+	}
+	if req.Resistance1 == nil {
+		h.Resistance1 = old.Resistance1
+	}
+	if req.Resistance2 == nil {
+		h.Resistance2 = old.Resistance2
 	}
 
 	if err := s.store.UpdateStockHolding(r.Context(), h); err != nil {
@@ -309,6 +351,30 @@ func (s *Server) handleUpdateCrypto(w http.ResponseWriter, r *http.Request) {
 	h.Change7dPct = old.Change7dPct
 	h.Change30dPct = old.Change30dPct
 	h.DailyChangePct = old.DailyChangePct
+	// Spec 9c — refresh-owned + stage preservation.
+	h.ATRWeekly = old.ATRWeekly
+	h.VolTierAuto = old.VolTierAuto
+	h.TP1HitAt = old.TP1HitAt
+	h.TP2HitAt = old.TP2HitAt
+	h.TimeStopReviewAt = old.TimeStopReviewAt
+	if req.Stage == nil {
+		h.Stage = old.Stage
+	}
+	if req.SetupType == nil {
+		h.SetupType = old.SetupType
+	}
+	if req.Support1 == nil {
+		h.Support1 = old.Support1
+	}
+	if req.Support2 == nil {
+		h.Support2 = old.Support2
+	}
+	if req.Resistance1 == nil {
+		h.Resistance1 = old.Resistance1
+	}
+	if req.Resistance2 == nil {
+		h.Resistance2 = old.Resistance2
+	}
 
 	if err := s.store.UpdateCryptoHolding(r.Context(), h); err != nil {
 		mapStoreError(w, err)
@@ -418,6 +484,10 @@ func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 // ===========================================================================
 
 func stockFromReq(req stockMutationReq) *domain.StockHolding {
+	stage := "pre_tp1"
+	if req.Stage != nil && *req.Stage != "" {
+		stage = *req.Stage
+	}
 	return &domain.StockHolding{
 		Name:           strings.TrimSpace(req.Name),
 		Ticker:         normalizeTickerPtr(req.Ticker),
@@ -433,10 +503,21 @@ func stockFromReq(req stockMutationReq) *domain.StockHolding {
 		Beta:           req.Beta,
 		EarningsDate:   trimStrPtr(req.EarningsDate),
 		ExDividendDate: trimStrPtr(req.ExDividendDate),
+		// Spec 9c
+		Support1:    req.Support1,
+		Support2:    req.Support2,
+		Resistance1: req.Resistance1,
+		Resistance2: req.Resistance2,
+		SetupType:   trimStrPtr(req.SetupType),
+		Stage:       stage,
 	}
 }
 
 func cryptoFromReq(req cryptoMutationReq) *domain.CryptoHolding {
+	stage := "pre_tp1"
+	if req.Stage != nil && *req.Stage != "" {
+		stage = *req.Stage
+	}
 	return &domain.CryptoHolding{
 		Name:            strings.TrimSpace(req.Name),
 		Symbol:          req.Symbol,
@@ -452,6 +533,13 @@ func cryptoFromReq(req cryptoMutationReq) *domain.CryptoHolding {
 		StrategyNote:    strings.TrimSpace(req.StrategyNote),
 		Note:            trimStrPtr(req.Note),
 		VolTier:         req.VolTier,
+		// Spec 9c
+		Support1:    req.Support1,
+		Support2:    req.Support2,
+		Resistance1: req.Resistance1,
+		Resistance2: req.Resistance2,
+		SetupType:   trimStrPtr(req.SetupType),
+		Stage:       stage,
 	}
 }
 
