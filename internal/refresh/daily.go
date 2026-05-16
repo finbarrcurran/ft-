@@ -67,7 +67,10 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 	stockSem := make(chan struct{}, 4)
 	var stockWG sync.WaitGroup
 	var stockMu sync.Mutex
-	yahooRange := pickYahooRange(days)
+	// Spec 9c: fetch 2y window once per ticker; we trim closes for the
+	// sparkline AND store full OHLC for ATR/S-R. pickYahooRange retained
+	// in case we want to revert to per-`days`-sized fetches.
+	_ = pickYahooRange
 
 	for _, h := range stocks {
 		if h.Ticker == nil || *h.Ticker == "" {
