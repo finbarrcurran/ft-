@@ -36,6 +36,7 @@ const fmtUSD = new Intl.NumberFormat('en-US', {
 const fmtEUR = new Intl.NumberFormat('en-IE', {
   style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2,
 });
+const fmtNum1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fmtNum2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtNum4 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 const fmtNum6 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 6 });
@@ -62,6 +63,63 @@ function escapeHTML(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[c]);
+}
+
+// suggestedDelta compares the manual SL/TP price against the suggested % rule
+// to surface an ↑ / ↓ icon (Spec 3 D11). Returns {icon, title} for the cell.
+//
+//   kind 'sl': manual *tighter* (closer to entry) than suggested → ↑ (more conservative)
+//   kind 'tp': manual *lower target* than suggested → ↓ (less ambitious)
+function suggestedDelta(entryPrice, manualPrice, suggestedPct, kind) {
+  if (entryPrice == null || manualPrice == null || suggestedPct == null) {
+    return { icon: '', title: '' };
+  }
+  const manualPct = ((manualPrice - entryPrice) / entryPrice) * 100;
+  const diff = manualPct - suggestedPct; // signed
+  if (Math.abs(diff) < 0.5) return { icon: '', title: 'Manual ≈ suggested' };
+  if (kind === 'sl') {
+    // SL is negative; "tighter" means manualPct > suggestedPct (smaller drawdown allowed).
+    const tighter = manualPct > suggestedPct;
+    const ic = tighter ? '↑' : '↓';
+    return {
+      icon: ` <span class="suggested-arrow ${tighter ? 'up' : 'down'}">${ic}</span>`,
+      title: `Suggested ${suggestedPct.toFixed(1)}% vs your ${manualPct.toFixed(1)}%`,
+    };
+  }
+  // TP is positive; "more ambitious" means manualPct > suggestedPct.
+  const higher = manualPct > suggestedPct;
+  const ic = higher ? '↑' : '↓';
+  return {
+    icon: ` <span class="suggested-arrow ${higher ? 'up' : 'down'}">${ic}</span>`,
+    title: `Suggested ${suggestedPct.toFixed(1)}% vs your ${manualPct.toFixed(1)}%`,
+  };
+}
+
+// earningsCell + exDivCell — Spec 3 D10.
+// Date strings are 'YYYY-MM-DD' from Yahoo calendarEvents.
+function daysUntilISO(iso) {
+  if (!iso) return null;
+  const parts = iso.split('-');
+  if (parts.length !== 3) return null;
+  const target = Date.UTC(+parts[0], +parts[1] - 1, +parts[2]);
+  const today = new Date();
+  const todayUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return Math.round((target - todayUTC) / (1000 * 60 * 60 * 24));
+}
+function earningsCell(iso) {
+  const d = daysUntilISO(iso);
+  if (d == null) return '<span class="dim">—</span>';
+  if (d < 0) return `<span class="dim" title="${escapeHTML(iso)}">past</span>`;
+  let cls = 'dim';
+  if (d <= 7) cls = 'earn-soon';
+  else if (d <= 30) cls = 'earn-mid';
+  return `<span class="${cls}" title="${escapeHTML(iso)}">in ${d}d</span>`;
+}
+function exDivCell(iso) {
+  const d = daysUntilISO(iso);
+  if (d == null) return '<span class="dim">—</span>';
+  if (d < 0) return `<span class="dim" title="${escapeHTML(iso)}">past</span>`;
+  return `<span title="${escapeHTML(iso)}">${d <= 30 ? `in ${d}d` : iso}</span>`;
 }
 
 // ---------- screens -------------------------------------------------------
@@ -960,12 +1018,19 @@ function renderStocks() {
     const noteCell = r.note
       ? `<td class="note-cell" title="${escapeHTML(r.note)}">${escapeHTML(r.note.length > 30 ? r.note.slice(0, 28) + '…' : r.note)}</td>`
       : `<td class="dim">—</td>`;
+    // SL/TP suggestion comparison: arrow only when manual is set and the
+    // direction is clear. ↑ means manual SL is tighter (less drawdown allowed),
+    // ↓ means manual SL is looser (more drawdown allowed). Both render in cell.
+    const slDelta = suggestedDelta(r.avgOpenPrice, r.stopLoss, r.suggestedSlPct, 'sl');
+    const tpDelta = suggestedDelta(r.avgOpenPrice, r.takeProfit, r.suggestedTpPct, 'tp');
+    const sparkSvg = r.sparklineSvg || '<span class="sparkline-empty">—</span>';
+    const tickerCell = `<span class="ticker-hover" data-row-id="${r.id}" data-row-kind="stock" tabindex="0">${escapeHTML(r.ticker || '—')}</span>`;
     return `
       <tr data-row-id="${r.id}" data-row-kind="stock">
         <td>${badge}</td>
         <td>
           <div>${escapeHTML(r.name)}</div>
-          <div class="ticker">${escapeHTML(r.ticker || '—')}${r.category ? ' · <span class="dim">' + escapeHTML(r.category) + '</span>' : ''}</div>
+          <div class="ticker">${tickerCell}${r.category ? ' · <span class="dim">' + escapeHTML(r.category) + '</span>' : ''}</div>
         </td>
         <td class="num">${fmtUSD.format(r.investedUsd)}</td>
         <td class="num">${dash(r.avgOpenPrice, fmtNum2)}</td>
@@ -975,6 +1040,11 @@ function renderStocks() {
         <td class="num">${dash(r.rsi14, fmtNum2)}</td>
         <td class="num">${dash(r.stopLoss, fmtNum2)}</td>
         <td class="num">${pct(m.distanceToSlPct, 1)}</td>
+        <td class="num suggested" title="${slDelta.title}">${fmtNum1.format(r.suggestedSlPct)}%${slDelta.icon}</td>
+        <td class="num suggested" title="${tpDelta.title}">${fmtNum1.format(r.suggestedTpPct)}%${tpDelta.icon}</td>
+        <td>${earningsCell(r.earningsDate)}</td>
+        <td>${exDivCell(r.exDividendDate)}</td>
+        <td class="sparkline-cell">${sparkSvg}</td>
         ${noteCell}
         <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="stock" title="Edit">✎</button></td>
       </tr>
@@ -1002,6 +1072,11 @@ function renderStocks() {
             <th class="num">RSI(14)</th>
             <th class="num">Stop Loss</th>
             <th class="num">Dist to SL</th>
+            <th class="num" title="Suggested stop-loss % per beta">Sug SL</th>
+            <th class="num" title="Suggested take-profit % per beta">Sug TP</th>
+            <th title="Next earnings">Earn</th>
+            <th title="Next ex-dividend">Ex-Div</th>
+            <th>30-day</th>
             <th>Note</th>
             <th></th>
           </tr>
@@ -1013,6 +1088,7 @@ function renderStocks() {
 
   $('#add-stock').addEventListener('click', () => openHoldingModal({ kind: 'stock', mode: 'add' }));
   wireRowActions('stock');
+  wireTickerHover('stock');
   flashOnRender();
 }
 
@@ -1071,10 +1147,12 @@ function renderCrypto() {
     const noteCell = r.note
       ? `<td class="note-cell" title="${escapeHTML(r.note)}">${escapeHTML(r.note.length > 30 ? r.note.slice(0, 28) + '…' : r.note)}</td>`
       : `<td class="dim">—</td>`;
+    const sparkSvg = r.sparklineSvg || '<span class="sparkline-empty">—</span>';
+    const symbolCell = `<span class="ticker-hover" data-row-id="${r.id}" data-row-kind="crypto" tabindex="0">${escapeHTML(r.symbol)}</span>`;
     return `
       <tr data-row-id="${r.id}" data-row-kind="crypto">
         <td>
-          <div>${escapeHTML(r.name)} <span class="ticker">${escapeHTML(r.symbol)}</span></div>
+          <div>${escapeHTML(r.name)} ${symbolCell}</div>
           <div class="ticker">${r.category ? escapeHTML(r.category) : '—'}${r.wallet ? ' · <span class="dim">' + escapeHTML(r.wallet) + '</span>' : ''}</div>
         </td>
         <td><span class="tag ${r.classification === 'core' ? 'core' : ''}">${escapeHTML(r.classification)}</span></td>
@@ -1086,6 +1164,9 @@ function renderCrypto() {
         <td class="num">${pct(m.pnlPct, 2)}</td>
         <td class="num">${pct(r.change7dPct, 1)}</td>
         <td class="num">${pct(r.change30dPct, 1)}</td>
+        <td class="num suggested" title="Suggested SL for ${escapeHTML(r.volTier || 'medium')}-vol">${fmtNum1.format(r.suggestedSlPct)}%</td>
+        <td class="num suggested" title="Suggested TP for ${escapeHTML(r.volTier || 'medium')}-vol">${fmtNum1.format(r.suggestedTpPct)}%</td>
+        <td class="sparkline-cell">${sparkSvg}</td>
         ${noteCell}
         <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="crypto" title="Edit">✎</button></td>
       </tr>
@@ -1113,6 +1194,9 @@ function renderCrypto() {
             <th class="num">P&amp;L %</th>
             <th class="num">7d %</th>
             <th class="num">30d %</th>
+            <th class="num" title="Suggested stop-loss % per vol tier">Sug SL</th>
+            <th class="num" title="Suggested take-profit % per vol tier">Sug TP</th>
+            <th>30-day</th>
             <th>Note</th>
             <th></th>
           </tr>
@@ -1123,6 +1207,7 @@ function renderCrypto() {
   `;
   $('#add-crypto').addEventListener('click', () => openHoldingModal({ kind: 'crypto', mode: 'add' }));
   wireRowActions('crypto');
+  wireTickerHover('crypto');
   flashOnRender();
 }
 
@@ -1197,6 +1282,111 @@ function wireRowActions(kind) {
       const holding = (list || []).find((h) => h.id === id);
       if (holding) openHoldingModal({ kind, mode: 'edit', holding });
     });
+  }
+}
+
+// ---------- Spec 3 D9: ticker hover popover -----------------------------
+//
+// Single floating element reused across rows. mouseenter shows; mouseleave on
+// both the ticker AND the popover removes it (so the user can hover into the
+// popover itself if needed). Position chosen above-row when there's room,
+// otherwise below.
+
+let _popoverEl = null;
+let _popoverHideTimer = null;
+
+function ensurePopover() {
+  if (_popoverEl) return _popoverEl;
+  _popoverEl = document.createElement('div');
+  _popoverEl.className = 'ticker-popover';
+  _popoverEl.setAttribute('aria-hidden', 'true');
+  _popoverEl.addEventListener('mouseenter', () => {
+    if (_popoverHideTimer) { clearTimeout(_popoverHideTimer); _popoverHideTimer = null; }
+  });
+  _popoverEl.addEventListener('mouseleave', schedulePopoverHide);
+  document.body.appendChild(_popoverEl);
+  return _popoverEl;
+}
+function schedulePopoverHide() {
+  if (_popoverHideTimer) clearTimeout(_popoverHideTimer);
+  _popoverHideTimer = setTimeout(() => {
+    if (_popoverEl) {
+      _popoverEl.classList.remove('show');
+      _popoverEl.setAttribute('aria-hidden', 'true');
+    }
+  }, 120);
+}
+
+function showPopover(kind, id, anchor) {
+  const list = kind === 'stock' ? state.stocks : state.crypto;
+  const r = (list || []).find((x) => x.id === id);
+  if (!r) return;
+
+  // Render content. Sparkline is the row's regular SVG scaled up via CSS — no
+  // separate "large" SVG round-trip needed thanks to viewBox.
+  const price = kind === 'stock' ? r.currentPrice : r.currentPriceUsd;
+  const change = kind === 'stock' ? (r.metrics && r.metrics.pnlPct) : r.dailyChangePct;
+  const today = kind === 'stock' ? r.dailyChangePct : r.dailyChangePct;
+  const alertBadge = r.alert
+    ? `<span class="alert-badge ${r.alert.status}"><span class="dot"></span>${r.alert.status}</span>`
+    : '';
+  const big = (r.sparklineSvg || '<span class="sparkline-empty">—</span>').replace(
+    'class="sparkline"',
+    'class="sparkline sparkline-lg"'
+  );
+  const labelTicker = kind === 'stock' ? (r.ticker || '') : r.symbol;
+  const direction30 = r.sparkline30dPct != null
+    ? `<span class="${r.sparkline30dPct > 0 ? 'gain' : r.sparkline30dPct < 0 ? 'loss' : ''}">${r.sparkline30dPct > 0 ? '+' : ''}${fmtNum1.format(r.sparkline30dPct)}% 30d</span>`
+    : '';
+
+  const html = `
+    <div class="popover-head">
+      <div class="popover-name">${escapeHTML(r.name)} <span class="popover-tk">${escapeHTML(labelTicker)}</span></div>
+      ${alertBadge}
+    </div>
+    <div class="popover-stats">
+      <div>${price != null ? `<strong>${fmtNum2.format(price)}</strong>` : '—'} ${today != null ? pct(today, 2) : ''}</div>
+      <div class="dim">${direction30}</div>
+    </div>
+    <div class="popover-spark">${big}</div>
+    ${r.note ? `<div class="popover-note">${escapeHTML(r.note)}</div>` : ''}
+  `;
+
+  const pop = ensurePopover();
+  pop.innerHTML = html;
+
+  // Position: prefer above the anchor; flip below if not enough room.
+  const rect = anchor.getBoundingClientRect();
+  pop.style.visibility = 'hidden';
+  pop.classList.add('show');
+  const popH = pop.offsetHeight;
+  const popW = pop.offsetWidth;
+  pop.style.visibility = '';
+
+  const margin = 6;
+  const spaceAbove = rect.top;
+  const wantsBelow = spaceAbove < popH + margin + 20;
+  const top = wantsBelow ? (rect.bottom + margin) : (rect.top - popH - margin);
+
+  // Horizontal: anchor centred on ticker, clamped to viewport.
+  let left = rect.left + (rect.width / 2) - (popW / 2);
+  left = Math.max(8, Math.min(left, window.innerWidth - popW - 8));
+
+  pop.style.top = `${Math.max(8, top) + window.scrollY}px`;
+  pop.style.left = `${left + window.scrollX}px`;
+  pop.setAttribute('aria-hidden', 'false');
+}
+
+function wireTickerHover(kind) {
+  for (const el of document.querySelectorAll(`.ticker-hover[data-row-kind="${kind}"]`)) {
+    const id = parseInt(el.dataset.rowId, 10);
+    el.addEventListener('mouseenter', () => {
+      if (_popoverHideTimer) { clearTimeout(_popoverHideTimer); _popoverHideTimer = null; }
+      showPopover(kind, id, el);
+    });
+    el.addEventListener('mouseleave', schedulePopoverHide);
+    el.addEventListener('focus', () => showPopover(kind, id, el));
+    el.addEventListener('blur', schedulePopoverHide);
   }
 }
 

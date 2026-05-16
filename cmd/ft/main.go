@@ -43,6 +43,8 @@ func main() {
 		runServe()
 	case "seed":
 		runSeed(os.Args[2:])
+	case "daily":
+		runDaily(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 	default:
@@ -73,6 +75,37 @@ func runSeed(args []string) {
 	fmt.Printf("seeded: %d stock holdings, %d crypto holdings (user_id=%d)\n", nStocks, nCrypto, *userID)
 }
 
+// runDaily executes the Spec 3 daily background job once: price_history
+// backfill + earnings/ex-div + beta auto-resolve. Intended as a one-shot for
+// first deploy (so sparklines render before the next 04:00 UTC cron) and as a
+// manual diagnostic ("why did NVDA's sparkline disappear?").
+func runDaily(args []string) {
+	fs := flag.NewFlagSet("daily", flag.ExitOnError)
+	userID := fs.Int64("user-id", 1, "user id whose holdings to refresh")
+	days := fs.Int("days", 30, "history depth in days")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	res := refresh.New(st).RunDailyJob(ctx, *userID, *days)
+	fmt.Printf("daily: stocks_history=%d/%d crypto_history=%d/%d calendar=%d beta=%d pruned=%d errs=%d took=%s\n",
+		res.StocksHistoryOK, res.StocksProcessed,
+		res.CryptoHistoryOK, res.CryptoProcessed,
+		res.CalendarOK, res.BetaOK, res.PrunedRows, len(res.Errors),
+		res.FinishedAt.Sub(res.StartedAt).Round(time.Millisecond),
+	)
+	for _, e := range res.Errors {
+		fmt.Fprintln(os.Stderr, "  err:", e)
+	}
+}
+
 func printUsage(w *os.File) {
 	fmt.Fprint(w, `FT — Finance Tracker
 
@@ -80,6 +113,7 @@ USAGE
   ft                       run server (default)
   ft serve                 run server (explicit)
   ft seed [--user-id N]    load Fin's real 23 stocks + 13 crypto into the DB
+  ft daily [--user-id N]   run the Spec 3 D8/D10/D11 daily job once (sparklines + calendar + beta)
   ft help                  print this usage
 
 ENVIRONMENT
@@ -169,6 +203,18 @@ func runServe() {
 	} else {
 		slog.Info("auto-refresh disabled (FT_REFRESH_INTERVAL=0)")
 	}
+
+	// Daily background job at 04:00 UTC: sparkline history + calendar + beta.
+	// Best-effort, decoupled from the 15-min refresh so a transient Yahoo
+	// rate-limit can't take down both.
+	go func() {
+		dailySvc := refresh.New(st)
+		refresh.ScheduleDailyJob(bgCtx, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 5*time.Minute)
+			defer cancel()
+			dailySvc.RunDailyJob(ctx, 1, 30)
+		})
+	}()
 
 	go func() {
 		slog.Info("listening", "addr", cfg.Addr, "cookie_secure", cfg.CookieSecure)

@@ -1026,3 +1026,114 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   font-family: var(--font-mono);
   color: rgb(var(--color-text-muted));
 }
+
+/* ----- Spec 3 D8: sparkline cell --------------------------------------- */
+.sparkline-cell {
+  width: 110px;
+  padding-top: 6px;
+  padding-bottom: 0;
+  vertical-align: middle;
+}
+.sparkline {
+  display: inline-block;
+  vertical-align: middle;
+}
+.sparkline-empty {
+  color: rgb(var(--color-text-dim));
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+/* ----- Spec 3 D11: suggested SL/TP columns ----------------------------- */
+.suggested {
+  color: rgb(var(--color-text-muted));
+  font-family: var(--font-mono);
+}
+.suggested-arrow {
+  margin-left: 0.25rem;
+  font-weight: 700;
+}
+.suggested-arrow.up   { color: rgb(var(--color-gain)); }
+.suggested-arrow.down { color: rgb(var(--color-loss)); }
+
+/* ----- Spec 3 D10: earnings / ex-div cells ----------------------------- */
+.earn-soon {
+  color: rgb(var(--color-loss));
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.earn-mid {
+  color: rgb(var(--color-amber));
+  font-family: var(--font-mono);
+}
+
+/* ----- Spec 3 D9: ticker hover popover --------------------------------- */
+.ticker-hover {
+  cursor: help;
+  border-bottom: 1px dashed rgb(var(--color-text-dim) / 0.5);
+  text-decoration: none;
+}
+.ticker-hover:focus {
+  outline: none;
+  border-bottom-color: rgb(var(--color-accent));
+}
+.ticker-popover {
+  position: absolute;
+  z-index: 1000;
+  width: 260px;
+  background: rgb(var(--color-surface-raised));
+  border: 1px solid rgb(var(--color-border-strong));
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.45);
+  padding: 0.7rem 0.85rem;
+  font-size: 0.85rem;
+  color: rgb(var(--color-text));
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 80ms ease, transform 80ms ease;
+}
+.ticker-popover.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+.ticker-popover .popover-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.ticker-popover .popover-name {
+  font-weight: 600;
+}
+.ticker-popover .popover-tk {
+  color: rgb(var(--color-text-muted));
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+}
+.ticker-popover .popover-stats {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  margin-bottom: 0.5rem;
+}
+.ticker-popover .popover-spark {
+  background: rgb(var(--color-surface-sunken));
+  border-radius: var(--radius2);
+  padding: 0.35rem 0.5rem;
+  line-height: 0;
+}
+.ticker-popover .sparkline-lg {
+  width: 220px !important;
+  height: 60px !important;
+}
+.ticker-popover .popover-note {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed rgb(var(--color-border));
+  color: rgb(var(--color-text-muted));
+  font-size: 0.78rem;
+  line-height: 1.45;
+}

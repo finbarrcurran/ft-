@@ -113,6 +113,47 @@ type geckoMarketChart struct {
 	Prices [][]float64 `json:"prices"` // [unix_ms, price]
 }
 
+// FetchCryptoDailyCloses returns trailing daily closes for a single crypto
+// symbol. Used by the Spec 3 D8 sparkline cron. Empty result if the symbol
+// isn't in SymbolToGeckoID. Each DailyClose carries an ISO 'YYYY-MM-DD' date.
+func FetchCryptoDailyCloses(ctx context.Context, symbol string, days int) ([]DailyClose, error) {
+	id, ok := SymbolToGeckoID[strings.ToUpper(symbol)]
+	if !ok {
+		return nil, fmt.Errorf("unknown crypto symbol %q", symbol)
+	}
+	if days <= 0 {
+		days = 30
+	}
+	u, _ := url.Parse(fmt.Sprintf("https://api.coingecko.com/api/v3/coins/%s/market_chart", id))
+	q := u.Query()
+	q.Set("vs_currency", "usd")
+	q.Set("days", fmt.Sprintf("%d", days))
+	q.Set("interval", "daily")
+	u.RawQuery = q.Encode()
+
+	var data geckoMarketChart
+	if err := httpGetJSON(ctx, u.String(), &data); err != nil {
+		return nil, err
+	}
+	out := make([]DailyClose, 0, len(data.Prices))
+	seen := map[string]bool{}
+	for _, row := range data.Prices {
+		if len(row) < 2 || row[1] <= 0 {
+			continue
+		}
+		ts := int64(row[0] / 1000) // unix ms → s
+		date := time.Unix(ts, 0).UTC().Format("2006-01-02")
+		// CoinGecko sometimes returns two points for the same day; dedupe to last.
+		if seen[date] {
+			out[len(out)-1].Close = row[1]
+			continue
+		}
+		seen[date] = true
+		out = append(out, DailyClose{Date: date, Close: row[1]})
+	}
+	return out, nil
+}
+
 func fetchPctChange(ctx context.Context, geckoID string, days int) (float64, error) {
 	u, _ := url.Parse(fmt.Sprintf("https://api.coingecko.com/api/v3/coins/%s/market_chart", geckoID))
 	q := u.Query()

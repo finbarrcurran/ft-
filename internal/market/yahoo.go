@@ -198,7 +198,7 @@ func fetchYahoo(ctx context.Context, ticker string) (*StockQuote, error) {
 	}
 
 	// Best-effort: also try chart for RSI(14). Failures here don't fail the quote.
-	if closes, err := fetchYahooChartCloses(ctx, ticker); err == nil && len(closes) >= 15 {
+	if closes, err := fetchYahooChartCloses(ctx, ticker, "3mo"); err == nil && len(closes) >= 15 {
 		rsi := ComputeRSI14(closes)
 		out.RSI14 = &rsi
 	}
@@ -213,12 +213,42 @@ func fetchYahoo(ctx context.Context, ticker string) (*StockQuote, error) {
 // Default range is 3 months (~63 trading days). Adjust the URL if you need
 // more for MA200 reliability.
 func FetchYahooChartCloses(ctx context.Context, ticker string) ([]float64, error) {
-	return fetchYahooChartCloses(ctx, ticker)
+	return fetchYahooChartCloses(ctx, ticker, "3mo")
 }
 
-func fetchYahooChartCloses(ctx context.Context, ticker string) ([]float64, error) {
-	u := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?range=3mo&interval=1d",
-		url.PathEscape(ticker))
+func fetchYahooChartCloses(ctx context.Context, ticker, rng string) ([]float64, error) {
+	pts, err := fetchYahooChartDailyPoints(ctx, ticker, rng)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]float64, 0, len(pts))
+	for _, p := range pts {
+		out = append(out, p.Close)
+	}
+	return out, nil
+}
+
+// DailyClose pairs an ISO date ("YYYY-MM-DD") with that day's closing price.
+type DailyClose struct {
+	Date  string
+	Close float64
+}
+
+// FetchYahooDailyCloses returns trailing daily (date, close) pairs for a stock
+// ticker. Used by the daily sparkline cron — chart endpoint timestamps are
+// converted from epoch-seconds to UTC date strings.
+//
+// `rng` is the Yahoo range string: "1mo", "3mo", "6mo", "1y", etc.
+func FetchYahooDailyCloses(ctx context.Context, ticker, rng string) ([]DailyClose, error) {
+	return fetchYahooChartDailyPoints(ctx, ticker, rng)
+}
+
+func fetchYahooChartDailyPoints(ctx context.Context, ticker, rng string) ([]DailyClose, error) {
+	if rng == "" {
+		rng = "3mo"
+	}
+	u := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?range=%s&interval=1d",
+		url.PathEscape(ticker), url.QueryEscape(rng))
 	raw, err := yahoo.yahooGet(ctx, u)
 	if err != nil {
 		return nil, err
@@ -226,6 +256,7 @@ func fetchYahooChartCloses(ctx context.Context, ticker string) ([]float64, error
 	var env struct {
 		Chart struct {
 			Result []struct {
+				Timestamp  []int64 `json:"timestamp"`
 				Indicators struct {
 					Quote []struct {
 						Close []*float64 `json:"close"`
@@ -240,12 +271,112 @@ func fetchYahooChartCloses(ctx context.Context, ticker string) ([]float64, error
 	if len(env.Chart.Result) == 0 || len(env.Chart.Result[0].Indicators.Quote) == 0 {
 		return nil, fmt.Errorf("no chart")
 	}
-	rawCloses := env.Chart.Result[0].Indicators.Quote[0].Close
-	out := make([]float64, 0, len(rawCloses))
-	for _, c := range rawCloses {
-		if c != nil {
-			out = append(out, *c)
+	res := env.Chart.Result[0]
+	rawCloses := res.Indicators.Quote[0].Close
+	out := make([]DailyClose, 0, len(rawCloses))
+	for i, c := range rawCloses {
+		if c == nil || *c <= 0 || i >= len(res.Timestamp) {
+			continue
 		}
+		date := time.Unix(res.Timestamp[i], 0).UTC().Format("2006-01-02")
+		out = append(out, DailyClose{Date: date, Close: *c})
 	}
 	return out, nil
+}
+
+// CalendarDates carries the next earnings + ex-dividend dates for a ticker.
+// Either field may be empty if the upstream didn't return one (Yahoo free
+// tier is patchy outside US; we render "—" then). ISO 'YYYY-MM-DD'.
+type CalendarDates struct {
+	Ticker       string
+	EarningsDate string
+	ExDivDate    string
+}
+
+// FetchYahooCalendarDates pulls upcoming earnings + ex-dividend dates via
+// quoteSummary?modules=calendarEvents. Both fields are best-effort; missing
+// values come back as empty strings.
+func FetchYahooCalendarDates(ctx context.Context, ticker string) (*CalendarDates, error) {
+	u := fmt.Sprintf("https://query1.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=calendarEvents",
+		url.PathEscape(ticker))
+	raw, err := yahoo.yahooGet(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		QuoteSummary struct {
+			Result []struct {
+				CalendarEvents struct {
+					Earnings struct {
+						EarningsDate []struct {
+							Raw int64 `json:"raw"`
+						} `json:"earningsDate"`
+					} `json:"earnings"`
+					ExDividendDate struct {
+						Raw int64 `json:"raw"`
+					} `json:"exDividendDate"`
+				} `json:"calendarEvents"`
+			} `json:"result"`
+			Error any `json:"error"`
+		} `json:"quoteSummary"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	if len(env.QuoteSummary.Result) == 0 {
+		return nil, fmt.Errorf("no calendarEvents")
+	}
+	ce := env.QuoteSummary.Result[0].CalendarEvents
+	out := &CalendarDates{Ticker: ticker}
+	if len(ce.Earnings.EarningsDate) > 0 && ce.Earnings.EarningsDate[0].Raw > 0 {
+		out.EarningsDate = time.Unix(ce.Earnings.EarningsDate[0].Raw, 0).UTC().Format("2006-01-02")
+	}
+	if ce.ExDividendDate.Raw > 0 {
+		out.ExDivDate = time.Unix(ce.ExDividendDate.Raw, 0).UTC().Format("2006-01-02")
+	}
+	return out, nil
+}
+
+// FetchYahooBeta returns the 5y monthly beta for a ticker via
+// quoteSummary?modules=summaryDetail. Returns (nil, error) if Yahoo doesn't
+// have beta for this ticker (common for ETFs and some non-US listings).
+func FetchYahooBeta(ctx context.Context, ticker string) (*float64, error) {
+	u := fmt.Sprintf("https://query1.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=summaryDetail,defaultKeyStatistics",
+		url.PathEscape(ticker))
+	raw, err := yahoo.yahooGet(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		QuoteSummary struct {
+			Result []struct {
+				SummaryDetail struct {
+					Beta struct {
+						Raw float64 `json:"raw"`
+					} `json:"beta"`
+				} `json:"summaryDetail"`
+				DefaultKeyStatistics struct {
+					Beta3Y struct {
+						Raw float64 `json:"raw"`
+					} `json:"beta3Year"`
+				} `json:"defaultKeyStatistics"`
+			} `json:"result"`
+		} `json:"quoteSummary"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	if len(env.QuoteSummary.Result) == 0 {
+		return nil, fmt.Errorf("no summaryDetail")
+	}
+	r := env.QuoteSummary.Result[0]
+	if r.SummaryDetail.Beta.Raw != 0 {
+		v := r.SummaryDetail.Beta.Raw
+		return &v, nil
+	}
+	if r.DefaultKeyStatistics.Beta3Y.Raw != 0 {
+		v := r.DefaultKeyStatistics.Beta3Y.Raw
+		return &v, nil
+	}
+	return nil, fmt.Errorf("no beta for %s", ticker)
 }
