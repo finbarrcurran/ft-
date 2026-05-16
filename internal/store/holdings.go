@@ -23,6 +23,9 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         daily_change_pct,
         note, beta, earnings_date, ex_dividend_date, deleted_at,
         exchange_override,
+        support_1, support_2, resistance_1, resistance_2,
+        atr_weekly, vol_tier_auto, setup_type, stage,
+        tp1_hit_at, tp2_hit_at, time_stop_review_at,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -130,6 +133,11 @@ func execInsertStock(ctx context.Context, e execer, h *domain.StockHolding) (int
 // the fields editable from the Spec 3 D5 Edit modal are touched; market-data
 // fields (RSI/MAs etc.) are managed by the refresh service. updated_at bumps
 // on every call.
+//
+// Spec 9c additions: support_1/2, resistance_1/2, setup_type, stage. Stage
+// is normally auto-managed (via tp1_hit endpoint) but allowed here for
+// admin/correction flows. Tip-hit timestamps and ATR/vol_tier_auto are
+// NOT user-editable — refresh service / daily cron owns them.
 func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE stock_holdings SET
@@ -137,12 +145,16 @@ func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) 
 		   invested_usd = ?, avg_open_price = ?, current_price = ?,
 		   stop_loss = ?, take_profit = ?,
 		   strategy_note = ?, note = ?,
+		   support_1 = ?, support_2 = ?, resistance_1 = ?, resistance_2 = ?,
+		   setup_type = ?, stage = ?,
 		   updated_at = strftime('%s','now')
 		 WHERE user_id = ? AND id = ?`,
 		h.Name, strPtrToNull(h.Ticker), strPtrToNull(h.Category), strPtrToNull(h.Sector),
 		h.InvestedUSD, fp(h.AvgOpenPrice), fp(h.CurrentPrice),
 		fp(h.StopLoss), fp(h.TakeProfit),
 		h.StrategyNote, strPtrToNull(h.Note),
+		fp(h.Support1), fp(h.Support2), fp(h.Resistance1), fp(h.Resistance2),
+		strPtrToNull(h.SetupType), h.Stage,
 		h.UserID, h.ID,
 	)
 	return err
@@ -189,6 +201,9 @@ const cryptoSelectCols = `id, user_id, name, symbol, classification, is_core, ca
         avg_buy_usd, cost_basis_usd, current_price_usd, current_value_usd,
         rsi14, change_7d_pct, change_30d_pct, daily_change_pct, strategy_note,
         note, vol_tier, deleted_at,
+        support_1, support_2, resistance_1, resistance_2,
+        atr_weekly, vol_tier_auto, setup_type, stage,
+        tp1_hit_at, tp2_hit_at, time_stop_review_at,
         updated_at`
 
 func (s *Store) ListCryptoHoldings(ctx context.Context, userID int64) ([]*domain.CryptoHolding, error) {
@@ -303,6 +318,8 @@ func (s *Store) UpdateCryptoHolding(ctx context.Context, h *domain.CryptoHolding
 		   quantity_held = ?, quantity_staked = ?,
 		   avg_buy_eur = ?, cost_basis_eur = ?,
 		   strategy_note = ?, note = ?,
+		   support_1 = ?, support_2 = ?, resistance_1 = ?, resistance_2 = ?,
+		   setup_type = ?, stage = ?,
 		   updated_at = strftime('%s','now')
 		 WHERE user_id = ? AND id = ?`,
 		h.Name, h.Symbol, h.Classification, isCore, tier,
@@ -310,6 +327,8 @@ func (s *Store) UpdateCryptoHolding(ctx context.Context, h *domain.CryptoHolding
 		h.QuantityHeld, h.QuantityStaked,
 		fp(h.AvgBuyEUR), fp(h.CostBasisEUR),
 		h.StrategyNote, strPtrToNull(h.Note),
+		fp(h.Support1), fp(h.Support2), fp(h.Resistance1), fp(h.Resistance2),
+		strPtrToNull(h.SetupType), h.Stage,
 		h.UserID, h.ID,
 	)
 	return err
@@ -365,6 +384,11 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	var dailyChange sql.NullFloat64
 	var deletedAt sql.NullInt64
 	var updatedAt int64
+	// Spec 9c columns:
+	var support1, support2, resistance1, resistance2 sql.NullFloat64
+	var atrWeekly sql.NullFloat64
+	var volTierAuto, setupType, stage, timeStopReviewAt sql.NullString
+	var tp1HitAt, tp2HitAt sql.NullInt64
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -375,10 +399,34 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&dailyChange,
 		&note, &beta, &earningsDate, &exDivDate, &deletedAt,
 		&exchangeOverride,
+		&support1, &support2, &resistance1, &resistance2,
+		&atrWeekly, &volTierAuto, &setupType, &stage,
+		&tp1HitAt, &tp2HitAt, &timeStopReviewAt,
 		&updatedAt,
 	); err != nil {
 		return nil, err
 	}
+	h.Support1 = nfToPtr(support1)
+	h.Support2 = nfToPtr(support2)
+	h.Resistance1 = nfToPtr(resistance1)
+	h.Resistance2 = nfToPtr(resistance2)
+	h.ATRWeekly = nfToPtr(atrWeekly)
+	h.VolTierAuto = nsToPtrNonEmpty(volTierAuto)
+	h.SetupType = nsToPtrNonEmpty(setupType)
+	if stage.Valid && stage.String != "" {
+		h.Stage = stage.String
+	} else {
+		h.Stage = "pre_tp1"
+	}
+	if tp1HitAt.Valid {
+		t := time.Unix(tp1HitAt.Int64, 0).UTC()
+		h.TP1HitAt = &t
+	}
+	if tp2HitAt.Valid {
+		t := time.Unix(tp2HitAt.Int64, 0).UTC()
+		h.TP2HitAt = &t
+	}
+	h.TimeStopReviewAt = nsToPtrNonEmpty(timeStopReviewAt)
 	h.Ticker = nsToPtr(ticker)
 	h.Category = nsToPtr(category)
 	h.Sector = nsToPtr(sector)
@@ -420,6 +468,11 @@ func scanCrypto(r Scannable) (*domain.CryptoHolding, error) {
 	var rsi, c7, c30, daily sql.NullFloat64
 	var deletedAt sql.NullInt64
 	var updatedAt int64
+	// Spec 9c columns:
+	var support1, support2, resistance1, resistance2 sql.NullFloat64
+	var atrWeekly sql.NullFloat64
+	var volTierAuto, setupType, stage, timeStopReviewAt sql.NullString
+	var tp1HitAt, tp2HitAt sql.NullInt64
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &h.Symbol, &h.Classification, &isCore, &category, &wallet,
 		&h.QuantityHeld, &h.QuantityStaked,
@@ -427,6 +480,9 @@ func scanCrypto(r Scannable) (*domain.CryptoHolding, error) {
 		&avgUsd, &costUsd, &priceUsd, &valueUsd,
 		&rsi, &c7, &c30, &daily, &h.StrategyNote,
 		&note, &h.VolTier, &deletedAt,
+		&support1, &support2, &resistance1, &resistance2,
+		&atrWeekly, &volTierAuto, &setupType, &stage,
+		&tp1HitAt, &tp2HitAt, &timeStopReviewAt,
 		&updatedAt,
 	); err != nil {
 		return nil, err
@@ -451,6 +507,28 @@ func scanCrypto(r Scannable) (*domain.CryptoHolding, error) {
 		t := time.Unix(deletedAt.Int64, 0)
 		h.DeletedAt = &t
 	}
+	// Spec 9c fields:
+	h.Support1 = nfToPtr(support1)
+	h.Support2 = nfToPtr(support2)
+	h.Resistance1 = nfToPtr(resistance1)
+	h.Resistance2 = nfToPtr(resistance2)
+	h.ATRWeekly = nfToPtr(atrWeekly)
+	h.VolTierAuto = nsToPtrNonEmpty(volTierAuto)
+	h.SetupType = nsToPtrNonEmpty(setupType)
+	if stage.Valid && stage.String != "" {
+		h.Stage = stage.String
+	} else {
+		h.Stage = "pre_tp1"
+	}
+	if tp1HitAt.Valid {
+		t := time.Unix(tp1HitAt.Int64, 0).UTC()
+		h.TP1HitAt = &t
+	}
+	if tp2HitAt.Valid {
+		t := time.Unix(tp2HitAt.Int64, 0).UTC()
+		h.TP2HitAt = &t
+	}
+	h.TimeStopReviewAt = nsToPtrNonEmpty(timeStopReviewAt)
 	h.UpdatedAt = time.Unix(updatedAt, 0)
 	return &h, nil
 }

@@ -2,6 +2,10 @@
 // calendar dates (earnings + ex-div), and auto-resolves beta for stocks
 // missing it. Designed to run at 04:00 UTC, well after US market close.
 //
+// Spec 9c extension: also fetches 2y daily OHLC bars per stock, stores in
+// daily_bars, and runs technicals.Refresh (ATR, vol_tier_auto, S/R
+// candidates).
+//
 // All steps are best-effort: per-ticker failures are logged but never abort
 // the whole job. Partial data is better than no data — sparklines render
 // even if a few tickers fall over.
@@ -13,6 +17,7 @@ import (
 	"fmt"
 	"ft/internal/market"
 	"ft/internal/store"
+	"ft/internal/technicals"
 	"log/slog"
 	"sync"
 	"time"
@@ -76,15 +81,21 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 			defer stockWG.Done()
 			defer func() { <-stockSem }()
 
-			// 1) Price history → price_history table.
-			if pts, err := market.FetchYahooDailyCloses(ctx, ticker, yahooRange); err != nil {
+			// 1) Fetch 2y OHLC bars (Spec 9c). Used for BOTH the existing
+			// sparkline (trim to trailing `days` closes) AND the daily_bars
+			// store for ATR/vol-tier/S-R computation.
+			bars, err := market.FetchYahooDailyBars(ctx, ticker, "2y")
+			if err != nil {
 				stockMu.Lock()
 				r.Errors = append(r.Errors, fmt.Sprintf("history %s: %s", ticker, err))
 				stockMu.Unlock()
 			} else {
-				// Trim to trailing `days` points so we don't store more than
-				// we render (Yahoo's 1mo can return 22 trading days, 3mo ~63).
-				trimmed := tailDailyCloses(pts, days)
+				// Sparkline: trim to trailing `days` and store in price_history.
+				closes := make([]market.DailyClose, 0, len(bars))
+				for _, b := range bars {
+					closes = append(closes, market.DailyClose{Date: b.Date, Close: b.Close})
+				}
+				trimmed := tailDailyCloses(closes, days)
 				toStore := make([]store.PricePoint, 0, len(trimmed))
 				for _, p := range trimmed {
 					toStore = append(toStore, store.PricePoint{Date: p.Date, Close: p.Close})
@@ -97,6 +108,25 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 					stockMu.Lock()
 					r.StocksHistoryOK++
 					stockMu.Unlock()
+				}
+				// daily_bars: full 2y OHLC.
+				ohlcRows := make([]store.DailyBarRow, 0, len(bars))
+				for _, b := range bars {
+					ohlcRows = append(ohlcRows, store.DailyBarRow{
+						Date: b.Date, Open: b.Open, High: b.High, Low: b.Low, Close: b.Close, Volume: b.Volume,
+					})
+				}
+				if err := s.Store.BulkInsertDailyBars(ctx, ticker, "stock", ohlcRows); err == nil {
+					// Run the technicals pipeline (ATR, vol-tier, S/R).
+					var price float64
+					if h.CurrentPrice != nil {
+						price = *h.CurrentPrice
+					} else if len(bars) > 0 {
+						price = bars[len(bars)-1].Close
+					}
+					if atrW, volT, err := technicals.Refresh(ctx, s.Store, ticker, "stock", price); err == nil && atrW > 0 {
+						_ = s.Store.SetStockTechnicals(ctx, h.ID, atrW, volT)
+					}
 				}
 			}
 

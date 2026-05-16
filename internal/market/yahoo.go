@@ -284,6 +284,87 @@ func fetchYahooChartDailyPoints(ctx context.Context, ticker, rng string) ([]Dail
 	return out, nil
 }
 
+// OHLCBar is one daily candle from Yahoo. All values in USD (or whatever
+// the ticker's native currency is — yahoo doesn't convert).
+type OHLCBar struct {
+	Date   string  // ISO YYYY-MM-DD
+	Open   float64
+	High   float64
+	Low    float64
+	Close  float64
+	Volume float64
+}
+
+// FetchYahooDailyBars returns full OHLC bars for the given range. Used by
+// Spec 9c's ATR + S/R detection pipeline. Standard ranges: "1mo", "3mo",
+// "6mo", "1y", "2y", "5y", "max".
+func FetchYahooDailyBars(ctx context.Context, ticker, rng string) ([]OHLCBar, error) {
+	if rng == "" {
+		rng = "2y"
+	}
+	u := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?range=%s&interval=1d",
+		url.PathEscape(ticker), url.QueryEscape(rng))
+	raw, err := yahoo.yahooGet(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		Chart struct {
+			Result []struct {
+				Timestamp  []int64 `json:"timestamp"`
+				Indicators struct {
+					Quote []struct {
+						Open   []*float64 `json:"open"`
+						High   []*float64 `json:"high"`
+						Low    []*float64 `json:"low"`
+						Close  []*float64 `json:"close"`
+						Volume []*float64 `json:"volume"`
+					} `json:"quote"`
+				} `json:"indicators"`
+			} `json:"result"`
+		} `json:"chart"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	if len(env.Chart.Result) == 0 || len(env.Chart.Result[0].Indicators.Quote) == 0 {
+		return nil, fmt.Errorf("no chart")
+	}
+	res := env.Chart.Result[0]
+	q := res.Indicators.Quote[0]
+	n := len(res.Timestamp)
+	out := make([]OHLCBar, 0, n)
+	for i := 0; i < n; i++ {
+		if i >= len(q.Close) || q.Close[i] == nil || *q.Close[i] <= 0 {
+			continue
+		}
+		bar := OHLCBar{
+			Date:  time.Unix(res.Timestamp[i], 0).UTC().Format("2006-01-02"),
+			Close: *q.Close[i],
+		}
+		if i < len(q.Open) && q.Open[i] != nil {
+			bar.Open = *q.Open[i]
+		} else {
+			bar.Open = bar.Close // fallback
+		}
+		if i < len(q.High) && q.High[i] != nil {
+			bar.High = *q.High[i]
+		} else {
+			bar.High = bar.Close
+		}
+		if i < len(q.Low) && q.Low[i] != nil {
+			bar.Low = *q.Low[i]
+		} else {
+			bar.Low = bar.Close
+		}
+		if i < len(q.Volume) && q.Volume[i] != nil {
+			bar.Volume = *q.Volume[i]
+		}
+		out = append(out, bar)
+	}
+	return out, nil
+}
+
 // CalendarDates carries the next earnings + ex-dividend dates for a ticker.
 // Either field may be empty if the upstream didn't return one (Yahoo free
 // tier is patchy outside US; we render "—" then). ISO 'YYYY-MM-DD'.

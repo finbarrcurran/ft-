@@ -18,10 +18,12 @@ import (
 	"ft/internal/config"
 	"ft/internal/frameworks"
 	"ft/internal/macro"
+	"ft/internal/market"
 	"ft/internal/marketdata"
 	"ft/internal/refresh"
 	"ft/internal/server"
 	"ft/internal/store"
+	"ft/internal/technicals"
 	"log/slog"
 	"net/http"
 	"os"
@@ -51,6 +53,8 @@ func main() {
 		runDaily(os.Args[2:])
 	case "token":
 		runToken(os.Args[2:])
+	case "backfill-bars":
+		runBackfillBars(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 	default:
@@ -122,6 +126,7 @@ USAGE
   ft daily [--user-id N]   run the Spec 3 D8/D10/D11 daily job once (sparklines + calendar + beta)
   ft token create --user-id N --name NAME    mint a new ft_st_… service token
   ft token list [--user-id N]                list service tokens (no plaintext)
+  ft backfill-bars [--user-id N] [--range 2y]  fetch 2y daily OHLC for all holdings (Spec 9c)
   ft help                  print this usage
 
 ENVIRONMENT
@@ -255,6 +260,89 @@ func runServe() {
 		slog.Error("shutdown", "err", err)
 	}
 	slog.Info("shutdown complete")
+}
+
+// runBackfillBars fetches ~2 years of daily OHLC for every active holding
+// (stock + crypto), stores in daily_bars, and runs the technicals refresh
+// (ATR, vol tier, S/R candidates). Spec 9c first-deploy bootstrap.
+//
+// Idempotent — UPSERT keys (ticker, kind, date). Re-run anytime.
+// Sequential w/ 1.5s gap to stay under Yahoo's free-tier limits.
+//
+// Crypto NOT fetched in v1 — CoinGecko's market_chart doesn't reliably
+// give OHLC on its free tier (only close + market cap). Crypto vol-tier
+// continues to use the user-set value until a different OHLC source lands.
+func runBackfillBars(args []string) {
+	fs := flag.NewFlagSet("backfill-bars", flag.ExitOnError)
+	userID := fs.Int64("user-id", 1, "user id whose holdings to backfill")
+	rng := fs.String("range", "2y", "Yahoo range string: 1y, 2y, 5y, max")
+	gap := fs.Int("gap-ms", 1500, "sleep between tickers (ms) to avoid rate limits")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	stocks, err := st.ListStockHoldings(ctx, *userID)
+	must("list stocks", err)
+
+	fmt.Printf("backfill-bars: %d stock holdings, range=%s, gap=%dms\n", len(stocks), *rng, *gap)
+	okCount, failCount, skipCount, srCount := 0, 0, 0, 0
+
+	for i, h := range stocks {
+		if h.Ticker == nil || *h.Ticker == "" {
+			skipCount++
+			continue
+		}
+		ticker := *h.Ticker
+		bars, err := market.FetchYahooDailyBars(ctx, ticker, *rng)
+		if err != nil {
+			fmt.Printf("  [%d/%d] %-10s  fetch failed: %s\n", i+1, len(stocks), ticker, err.Error())
+			failCount++
+			time.Sleep(time.Duration(*gap) * time.Millisecond)
+			continue
+		}
+		rows := make([]store.DailyBarRow, 0, len(bars))
+		for _, b := range bars {
+			rows = append(rows, store.DailyBarRow{
+				Date: b.Date, Open: b.Open, High: b.High, Low: b.Low, Close: b.Close, Volume: b.Volume,
+			})
+		}
+		if err := st.BulkInsertDailyBars(ctx, ticker, "stock", rows); err != nil {
+			fmt.Printf("  [%d/%d] %-10s  store failed: %s\n", i+1, len(stocks), ticker, err.Error())
+			failCount++
+			time.Sleep(time.Duration(*gap) * time.Millisecond)
+			continue
+		}
+		// Run the technicals pipeline now that bars are stored.
+		var price float64
+		if h.CurrentPrice != nil {
+			price = *h.CurrentPrice
+		} else if len(bars) > 0 {
+			price = bars[len(bars)-1].Close
+		}
+		atrW, volT, err := technicals.Refresh(ctx, st, ticker, "stock", price)
+		if err == nil && atrW > 0 {
+			_ = st.SetStockTechnicals(ctx, h.ID, atrW, volT)
+			// Count SR candidates that landed.
+			cands, _ := st.GetSRCandidates(ctx, ticker, "stock")
+			srCount += len(cands)
+			fmt.Printf("  [%d/%d] %-10s  %d bars · ATR(14w) $%.2f · tier=%s · S/R %d\n",
+				i+1, len(stocks), ticker, len(rows), atrW, volT, len(cands))
+		} else {
+			fmt.Printf("  [%d/%d] %-10s  %d bars · ATR unavailable\n", i+1, len(stocks), ticker, len(rows))
+		}
+		okCount++
+		time.Sleep(time.Duration(*gap) * time.Millisecond)
+	}
+	fmt.Println()
+	fmt.Printf("done. ok=%d  failed=%d  skipped=%d  S/R candidates=%d\n", okCount, failCount, skipCount, srCount)
 }
 
 // runToken handles `ft token create` and `ft token list`.

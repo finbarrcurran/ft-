@@ -11,7 +11,10 @@ import (
 
 const watchlistCols = `id, user_id, ticker, kind, company_name, sector,
         current_price, target_entry_low, target_entry_high,
-        thesis_link, note, added_at, promoted_holding_id, deleted_at, updated_at`
+        thesis_link, note, added_at, promoted_holding_id, deleted_at,
+        support_1, support_2, resistance_1, resistance_2,
+        atr_weekly, vol_tier_auto, setup_type,
+        updated_at`
 
 // ListWatchlist returns active (non-deleted) entries for a user, newest first.
 func (s *Store) ListWatchlist(ctx context.Context, userID int64) ([]*domain.WatchlistEntry, error) {
@@ -125,11 +128,17 @@ func scanWatchlist(r scanner) (*domain.WatchlistEntry, error) {
 		updatedAt  int64
 		deletedAt  sql.NullInt64
 		promotedID sql.NullInt64
+		// Spec 9c
+		s1, s2, r1, r2 sql.NullFloat64
+		atrW           sql.NullFloat64
+		volAuto, setup sql.NullString
 	)
 	err := r.Scan(
 		&e.ID, &e.UserID, &e.Ticker, &e.Kind, &e.CompanyName, &e.Sector,
 		&e.CurrentPrice, &e.TargetEntryLow, &e.TargetEntryHigh,
-		&e.ThesisLink, &e.Note, &addedAt, &promotedID, &deletedAt, &updatedAt,
+		&e.ThesisLink, &e.Note, &addedAt, &promotedID, &deletedAt,
+		&s1, &s2, &r1, &r2, &atrW, &volAuto, &setup,
+		&updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -143,6 +152,35 @@ func scanWatchlist(r scanner) (*domain.WatchlistEntry, error) {
 	if deletedAt.Valid {
 		t := time.Unix(deletedAt.Int64, 0).UTC()
 		e.DeletedAt = &t
+	}
+	// Spec 9c
+	if s1.Valid {
+		v := s1.Float64
+		e.Support1 = &v
+	}
+	if s2.Valid {
+		v := s2.Float64
+		e.Support2 = &v
+	}
+	if r1.Valid {
+		v := r1.Float64
+		e.Resistance1 = &v
+	}
+	if r2.Valid {
+		v := r2.Float64
+		e.Resistance2 = &v
+	}
+	if atrW.Valid {
+		v := atrW.Float64
+		e.ATRWeekly = &v
+	}
+	if volAuto.Valid && volAuto.String != "" {
+		v := volAuto.String
+		e.VolTierAuto = &v
+	}
+	if setup.Valid && setup.String != "" {
+		v := setup.String
+		e.SetupType = &v
 	}
 	return &e, nil
 }

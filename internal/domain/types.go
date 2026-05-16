@@ -117,6 +117,19 @@ type StockHolding struct {
 	// Spec 5: optional override for the ticker→exchange suffix rule.
 	ExchangeOverride *string `json:"exchangeOverride"`
 
+	// Spec 9c — Percoco execution layer.
+	Support1         *float64   `json:"support1,omitempty"`
+	Support2         *float64   `json:"support2,omitempty"`
+	Resistance1      *float64   `json:"resistance1,omitempty"`
+	Resistance2     *float64   `json:"resistance2,omitempty"`
+	ATRWeekly        *float64   `json:"atrWeekly,omitempty"`
+	VolTierAuto      *string    `json:"volTierAuto,omitempty"`
+	SetupType        *string    `json:"setupType,omitempty"`         // 'A_breakout_retest' | 'B_support_bounce' | 'C_continuation'
+	Stage            string     `json:"stage"`                       // 'pre_tp1' | 'post_tp1' | 'runner' | 'stopped'
+	TP1HitAt         *time.Time `json:"tp1HitAt,omitempty"`
+	TP2HitAt         *time.Time `json:"tp2HitAt,omitempty"`
+	TimeStopReviewAt *string    `json:"timeStopReviewAt,omitempty"` // ISO YYYY-MM-DD
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -159,6 +172,19 @@ type CryptoHolding struct {
 	Note      *string    `json:"note"`
 	VolTier   string     `json:"volTier"`         // "low" | "medium" | "high" | "extreme"
 	DeletedAt *time.Time `json:"deletedAt"`       // nil when active; non-nil when soft-deleted
+
+	// Spec 9c — Percoco execution layer (same shape as StockHolding).
+	Support1         *float64   `json:"support1,omitempty"`
+	Support2         *float64   `json:"support2,omitempty"`
+	Resistance1      *float64   `json:"resistance1,omitempty"`
+	Resistance2      *float64   `json:"resistance2,omitempty"`
+	ATRWeekly        *float64   `json:"atrWeekly,omitempty"`
+	VolTierAuto      *string    `json:"volTierAuto,omitempty"`
+	SetupType        *string    `json:"setupType,omitempty"`
+	Stage            string     `json:"stage"`
+	TP1HitAt         *time.Time `json:"tp1HitAt,omitempty"`
+	TP2HitAt         *time.Time `json:"tp2HitAt,omitempty"`
+	TimeStopReviewAt *string    `json:"timeStopReviewAt,omitempty"`
 
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -212,6 +238,16 @@ type WatchlistEntry struct {
 	AddedAt            time.Time  `json:"addedAt"`
 	PromotedHoldingID  *int64     `json:"promotedHoldingId"`
 	DeletedAt          *time.Time `json:"deletedAt"`
+
+	// Spec 9c — levels carry through from watchlist to holding on promote.
+	Support1     *float64 `json:"support1,omitempty"`
+	Support2     *float64 `json:"support2,omitempty"`
+	Resistance1  *float64 `json:"resistance1,omitempty"`
+	Resistance2  *float64 `json:"resistance2,omitempty"`
+	ATRWeekly    *float64 `json:"atrWeekly,omitempty"`
+	VolTierAuto  *string  `json:"volTierAuto,omitempty"`
+	SetupType    *string  `json:"setupType,omitempty"`
+
 	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
