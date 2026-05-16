@@ -583,6 +583,72 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
 }
 .cowen-choice button { padding: 0.7rem 0.9rem; }
 
+/* Cowen capture form (D4) — radio-row + checkbox column + toast */
+.radio-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+.radio-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+.check-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.check-col label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.regime-history-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+.rh-side {
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-muted));
+  margin: 0 0 0.4rem 0;
+}
+.rh-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+.rh-list li {
+  padding: 0.25rem 0;
+  border-bottom: 1px dashed rgb(var(--color-border));
+}
+.rh-list li:last-child { border-bottom: none; }
+.amber-text { color: rgb(var(--color-amber)); }
+
+.regime-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: rgb(var(--color-surface-raised));
+  border: 1px solid rgb(var(--color-border-strong));
+  border-left: 3px solid rgb(var(--color-gain));
+  border-radius: var(--radius);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.9rem;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.4);
+  z-index: 9999;
+}
+
 /* ----- USD / EUR toggle (Summary tab) ------------------------------ */
 
 .currency-toggle {
@@ -1255,6 +1321,17 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   padding: 0.1rem 0.4rem;
   font-size: 0.8rem;
   font-family: var(--font-mono);
+}
+.dist-suppressed {
+  background: rgb(var(--color-surface));
+  color: rgb(var(--color-text-muted));
+  border: 1px dashed rgb(var(--color-border-strong));
+  border-radius: var(--radius2);
+  padding: 0.1rem 0.4rem;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  text-decoration: line-through;
+  cursor: help;
 }
 
 .score-badge {

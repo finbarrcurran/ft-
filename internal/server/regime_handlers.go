@@ -239,3 +239,13 @@ func (s *Server) currentEffectiveRegime(ctx context.Context) regime.Regime {
 	}
 	return regime.Effective(regime.Regime(jr), regime.Regime(cr))
 }
+
+// currentAlertMargin returns the proximity-alert margin scaled by the
+// current regime. Default is the alert package's 5%, multiplied per the
+// regime's AlertMarginMultiplier (1.0 stable, 0.6 shifting/defensive,
+// 0.8 unclassified).
+func (s *Server) currentAlertMargin(ctx context.Context) float64 {
+	eff := s.currentEffectiveRegime(ctx)
+	const base = 0.05 // alert.ProximityMargin — copied to avoid import cycle
+	return base * regime.AlertMarginMultiplier(eff)
+}

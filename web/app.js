@@ -616,10 +616,160 @@ function openEffectiveExplainer() {
   $('#eff-history').addEventListener('click', () => { closeImportModal(); switchTab('settings'); });
 }
 
-// openCowenCaptureForm is the 8-field weekly capture (D4). Defined later;
-// declared here as a stub so the choice modal can reference it before the
-// section that owns the implementation.
-let openCowenCaptureForm = () => alert('Cowen capture form — implemented in D4 below');
+// ---------- Cowen weekly capture form (Spec 9b D4) ----------------------
+//
+// 8 numeric/radio fields + 3 macro checkboxes + optional note. Posts to
+// /api/regime/cowen/auto and shows the classification + reason.
+// "Show me last week's values" pre-fills from regimeState.cowen.last_inputs.
+
+function openCowenCaptureForm() {
+  closeImportModal();
+  const last = regimeState && regimeState.cowen ? regimeState.cowen.last_inputs : null;
+  const lastJSON = last && typeof last === 'object' ? last : null;
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal score-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Cowen weekly capture</div>
+            <div class="desc">8 fields + 3 macro flags. Auto-classifies the Cowen regime.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          ${lastJSON ? `<button class="btn-ghost" id="cw-prefill" style="margin-bottom:0.8rem">↻ Pre-fill from last submission</button>` : ''}
+          <form id="cw-form">
+            <div class="form-row"><label>1. BTC vs 200wk MA (%)</label>
+              <input name="btc_vs_200wk_ma_pct" type="number" step="0.1" required placeholder="e.g. +28.4"/></div>
+            <div class="form-row"><label>2. BTC vs 200d MA (%)</label>
+              <input name="btc_vs_200d_ma_pct"  type="number" step="0.1" required placeholder="e.g. +12.3"/></div>
+            <div class="form-row"><label>3. Log regression band third</label>
+              <div class="radio-row">
+                ${['lower','middle','upper'].map(v => `<label><input type="radio" name="log_band_third" value="${v}" required/> ${v}</label>`).join('')}
+              </div></div>
+            <div class="form-row"><label>4. Risk indicator (0.00–1.00)</label>
+              <input name="risk_indicator" type="number" step="0.01" min="0" max="1" required placeholder="e.g. 0.62"/></div>
+            <div class="form-row"><label>5. BTC dominance (%)</label>
+              <input name="btc_dominance_pct" type="number" step="0.1" required placeholder="e.g. 54.2"/></div>
+            <div class="form-row"><label>   ↳ 4-week trend</label>
+              <div class="radio-row">
+                ${['rising','flat','falling'].map(v => `<label><input type="radio" name="btc_dominance_4wk" value="${v}" required/> ${v}</label>`).join('')}
+              </div></div>
+            <div class="form-row"><label>6. ETH/BTC</label>
+              <input name="eth_btc" type="number" step="0.0001" required placeholder="e.g. 0.0540"/></div>
+            <div class="form-row"><label>   ↳ 4-week trend</label>
+              <div class="radio-row">
+                ${['rising','flat','falling'].map(v => `<label><input type="radio" name="eth_btc_4wk" value="${v}" required/> ${v}</label>`).join('')}
+              </div></div>
+            <div class="form-row"><label>7. MVRV Z-Score band</label>
+              <div class="radio-row">
+                ${[['undervalued','undervalued'],['neutral','neutral'],['overvalued','overvalued'],['extreme_overvalued','extreme over']].map(([v,l]) => `<label><input type="radio" name="mvrv_z_band" value="${v}" required/> ${l}</label>`).join('')}
+              </div></div>
+            <div class="form-row"><label>8. Cycle phase</label>
+              <div class="radio-row">
+                ${[[1,'1 Accum.'],[2,'2 Early Bull'],[3,'3 Late Bull'],[4,'4 Euphoria']].map(([v,l]) => `<label><input type="radio" name="cycle_phase" value="${v}" required/> ${l}</label>`).join('')}
+              </div></div>
+            <div class="form-row"><label>9. Macro context (check all that apply)</label>
+              <div class="check-col">
+                <label><input type="checkbox" name="cpi_trending_down"/> CPI trending down</label>
+                <label><input type="checkbox" name="fed_not_hostile"/> Fed not hostile</label>
+                <label><input type="checkbox" name="recession_risk_low"/> Recession risk low</label>
+              </div></div>
+            <div class="form-row"><label>10. Note (optional)</label>
+              <textarea name="note" rows="2" placeholder="anything else"></textarea></div>
+            <div class="error" id="cw-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="cw-cancel">Cancel</button>
+          <button class="btn-primary" id="cw-save">Classify + save</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#cw-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  if (lastJSON && $('#cw-prefill')) {
+    $('#cw-prefill').addEventListener('click', () => cowenPrefill(lastJSON));
+  }
+  $('#cw-save').addEventListener('click', () => submitCowenCapture());
+}
+
+function cowenPrefill(d) {
+  const form = $('#cw-form');
+  const setVal = (name, val) => { const el = form.querySelector(`[name=${name}]`); if (el != null && val != null) el.value = val; };
+  const setRadio = (name, val) => { const el = form.querySelector(`[name=${name}][value="${val}"]`); if (el) el.checked = true; };
+  const setCheck = (name, val) => { const el = form.querySelector(`[name=${name}]`); if (el) el.checked = !!val; };
+  setVal('btc_vs_200wk_ma_pct', d.btc_vs_200wk_ma_pct);
+  setVal('btc_vs_200d_ma_pct',  d.btc_vs_200d_ma_pct);
+  setRadio('log_band_third',    d.log_band_third);
+  setVal('risk_indicator',      d.risk_indicator);
+  setVal('btc_dominance_pct',   d.btc_dominance_pct);
+  setRadio('btc_dominance_4wk', d.btc_dominance_4wk);
+  setVal('eth_btc',             d.eth_btc);
+  setRadio('eth_btc_4wk',       d.eth_btc_4wk);
+  setRadio('mvrv_z_band',       d.mvrv_z_band);
+  setRadio('cycle_phase',       d.cycle_phase);
+  setCheck('cpi_trending_down', d.cpi_trending_down);
+  setCheck('fed_not_hostile',   d.fed_not_hostile);
+  setCheck('recession_risk_low', d.recession_risk_low);
+}
+
+async function submitCowenCapture() {
+  const form = $('#cw-form');
+  const err = $('#cw-err');
+  err.textContent = '';
+  const num = (k) => { const v = form.querySelector(`[name=${k}]`).value.trim(); return v === '' ? null : parseFloat(v); };
+  const radio = (k) => { const el = form.querySelector(`[name=${k}]:checked`); return el ? el.value : null; };
+  const check = (k) => form.querySelector(`[name=${k}]`).checked;
+
+  const body = {
+    btc_vs_200wk_ma_pct: num('btc_vs_200wk_ma_pct'),
+    btc_vs_200d_ma_pct:  num('btc_vs_200d_ma_pct'),
+    log_band_third:      radio('log_band_third'),
+    risk_indicator:      num('risk_indicator'),
+    btc_dominance_pct:   num('btc_dominance_pct'),
+    btc_dominance_4wk:   radio('btc_dominance_4wk'),
+    eth_btc:             num('eth_btc'),
+    eth_btc_4wk:         radio('eth_btc_4wk'),
+    mvrv_z_band:         radio('mvrv_z_band'),
+    cycle_phase:         radio('cycle_phase') ? parseInt(radio('cycle_phase'), 10) : null,
+    cpi_trending_down:   check('cpi_trending_down'),
+    fed_not_hostile:     check('fed_not_hostile'),
+    recession_risk_low:  check('recession_risk_low'),
+    note:                form.querySelector('[name=note]').value.trim(),
+  };
+
+  // Bail early on missing required radios.
+  for (const k of ['log_band_third','btc_dominance_4wk','eth_btc_4wk','mvrv_z_band']) {
+    if (!body[k]) { err.textContent = 'Missing radio: ' + k; return; }
+  }
+  if (body.cycle_phase == null) { err.textContent = 'Missing cycle phase'; return; }
+  if (body.risk_indicator == null || body.risk_indicator < 0 || body.risk_indicator > 1) {
+    err.textContent = 'risk_indicator must be 0.00 – 1.00'; return;
+  }
+
+  try {
+    const res = await api('/api/regime/cowen/auto', { method: 'POST', body: JSON.stringify(body) });
+    closeImportModal();
+    await refreshRegime();
+    // Quick toast-ish modal showing the classification + reason
+    const toast = document.createElement('div');
+    toast.className = 'regime-toast';
+    toast.innerHTML = `
+      <span>✓ Cowen regime: <strong>${escapeHTML(res.regime.toUpperCase())}</strong></span>
+      <span class="dim"> — ${escapeHTML(res.reason || '')}</span>
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 6000);
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
 
 // ---------- export -------------------------------------------------------
 
@@ -2003,11 +2153,46 @@ async function renderSettings() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading…</div>';
 
-  const [delStocks, delCrypto, audit] = await Promise.all([
+  const [delStocks, delCrypto, audit, regimeHist] = await Promise.all([
     api('/api/holdings/stocks/deleted').catch(() => ({ holdings: [] })),
     api('/api/holdings/crypto/deleted').catch(() => ({ holdings: [] })),
     api('/api/audit?limit=100').catch(() => ({ audit: [] })),
+    api('/api/regime/history?limit=50').catch(() => ({ history: [] })),
   ]);
+
+  // Regime history table — Spec 9b D13. Two columns (Jordi / Cowen).
+  const hist = regimeHist.history || [];
+  const jordi = hist.filter(h => h.frameworkId === 'jordi');
+  const cowen = hist.filter(h => h.frameworkId === 'cowen');
+  const fmtRegimeRow = (h) => {
+    const r = (h.regime || 'unclassified').toUpperCase();
+    const tone = h.regime === 'stable' ? 'gain' : h.regime === 'shifting' ? 'amber-text' : h.regime === 'defensive' ? 'loss' : 'dim';
+    const when = new Date(h.ts).toLocaleDateString();
+    const src = h.source === 'auto_cowen_form' ? 'auto' : 'manual';
+    let extra = '';
+    if (h.source === 'auto_cowen_form' && h.inputsJson) {
+      try {
+        const inp = JSON.parse(h.inputsJson);
+        extra = ` <span class="dim">— phase ${inp.cycle_phase} · risk ${(inp.risk_indicator ?? 0).toFixed(2)}</span>`;
+      } catch (_) { /* */ }
+    }
+    return `<li>${escapeHTML(when)} → <span class="${tone}">${escapeHTML(r)}</span> <span class="dim">(${src})</span>${extra}</li>`;
+  };
+  const regimeHistoryHTML = `
+    <section class="settings-block">
+      <h3 class="settings-h3">Regime history <span class="dim" style="font-size:0.78rem; font-weight:normal">(latest 50 per side)</span></h3>
+      <div class="regime-history-grid">
+        <div>
+          <h4 class="rh-side">Jordi (stocks)</h4>
+          <ul class="rh-list">${jordi.map(fmtRegimeRow).join('') || '<li class="dim">No history yet.</li>'}</ul>
+        </div>
+        <div>
+          <h4 class="rh-side">Cowen (crypto)</h4>
+          <ul class="rh-list">${cowen.map(fmtRegimeRow).join('') || '<li class="dim">No history yet.</li>'}</ul>
+        </div>
+      </div>
+    </section>
+  `;
 
   const delStocksRows = (delStocks.holdings || []).map((h) => `
     <tr>
@@ -2056,6 +2241,8 @@ async function renderSettings() {
 
   content.innerHTML = `
     <h2 class="settings-h">Settings</h2>
+
+    ${regimeHistoryHTML}
 
     <section class="settings-block">
       <h3 class="settings-h3">Deleted stock holdings</h3>
@@ -2127,8 +2314,10 @@ async function boot() {
 
 const FRAMEWORK_THRESHOLD = 12; // default; per-framework value is loaded on the score screen.
 
-// Distance-to-entry classification for the watchlist table.
-function distanceToEntry(currentPrice, low, high) {
+// Distance-to-entry classification for the watchlist table. Spec 9b D6:
+// when `suppressed` is true, the "In range" pill is rendered with a strike
+// indicator so Fin knows the regime is gating the alert.
+function distanceToEntry(currentPrice, low, high, suppressed) {
   if (currentPrice == null) return { label: '—', cls: 'dim' };
   if (low == null && high == null) return { label: '—', cls: 'dim' };
   if (low != null && currentPrice < low) {
@@ -2139,7 +2328,9 @@ function distanceToEntry(currentPrice, low, high) {
     const pct = ((currentPrice - high) / high) * 100;
     return { label: `${pct.toFixed(1)}% above`, cls: 'dist-above' };
   }
-  return { label: 'In range', cls: 'dist-in' };
+  return suppressed
+    ? { label: 'In range (suppressed)', cls: 'dist-suppressed', title: 'Regime ≠ STABLE — alert suppressed' }
+    : { label: 'In range', cls: 'dist-in' };
 }
 
 // ---------- watchlist tab -----------------------------------------------
@@ -2165,7 +2356,7 @@ async function renderWatchlist() {
   }
 
   const rows = state.watchlist.map((e) => {
-    const dist = distanceToEntry(e.currentPrice, e.targetEntryLow, e.targetEntryHigh);
+    const dist = distanceToEntry(e.currentPrice, e.targetEntryLow, e.targetEntryHigh, !!e.alertSuppressed);
     const target = e.targetEntryLow != null && e.targetEntryHigh != null
       ? `$${fmtNum2.format(e.targetEntryLow)}–$${fmtNum2.format(e.targetEntryHigh)}`
       : e.targetEntryLow != null ? `≥ $${fmtNum2.format(e.targetEntryLow)}`
@@ -2189,7 +2380,7 @@ async function renderWatchlist() {
         <td><span class="dim">${escapeHTML(e.sector || '—')}</span></td>
         <td class="num">${dash(e.currentPrice, fmtNum2)}</td>
         <td class="num">${target}</td>
-        <td><span class="${dist.cls}">${dist.label}</span></td>
+        <td><span class="${dist.cls}"${dist.title ? ` title="${escapeHTML(dist.title)}"` : ''}>${dist.label}</span></td>
         <td>${scoreCell}</td>
         <td>${tagCell}</td>
         <td><span class="dim">${added}</span></td>

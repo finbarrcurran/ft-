@@ -69,10 +69,11 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 		DistanceToSLPct *float64 `json:"distanceToSlPct,omitempty"`
 	}
 	out := []alertOut{}
+	margin := s.currentAlertMargin(r.Context()) // Spec 9b D6
 
 	for _, h := range stocks {
 		m := metrics.ComputeStock(h)
-		ar := alert.Compute(h, m)
+		ar := alert.ComputeWithMargin(h, m, margin)
 		if ar.Status != domain.AlertRed && ar.Status != domain.AlertAmber {
 			continue
 		}
@@ -158,9 +159,10 @@ func (s *Server) handleBotSummary(w http.ResponseWriter, r *http.Request) {
 	// Stock totals + alert tally.
 	stockTotals := totalsForStocks(stocks)
 	alertTally := map[string]int{"red": 0, "amber": 0, "green": 0, "neutral": 0}
+	margin := s.currentAlertMargin(r.Context()) // Spec 9b D6
 	for _, h := range stocks {
 		m := metrics.ComputeStock(h)
-		ar := alert.Compute(h, m)
+		ar := alert.ComputeWithMargin(h, m, margin)
 		alertTally[string(ar.Status)]++
 	}
 

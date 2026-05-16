@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"ft/internal/domain"
 	"ft/internal/frameworks"
+	"ft/internal/regime"
 	"ft/internal/store"
 	"log/slog"
 	"net/http"
@@ -47,6 +48,15 @@ type watchlistReq struct {
 type watchlistRow struct {
 	*domain.WatchlistEntry
 	LatestScore *domain.FrameworkScore `json:"latestScore,omitempty"`
+
+	// Spec 9b D6: entry-zone state per regime.
+	//   InRange       — current price falls within [low, high]
+	//   AlertActive   — entry-zone alerts permitted (effective regime == stable)
+	//   AlertSuppressed — InRange && NOT AlertActive — UI shows
+	//                     "in range (suppressed)" badge
+	InRange         bool `json:"inRange"`
+	AlertActive     bool `json:"alertActive"`
+	AlertSuppressed bool `json:"alertSuppressed"`
 }
 
 // GET /api/watchlist
@@ -62,14 +72,39 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, e.ID)
 	}
 	scoreByID, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "watchlist", ids)
+	eff := s.currentEffectiveRegime(r.Context())
+	alertsActive := regime.GatesWatchlistEntryZone(eff)
+
 	out := make([]watchlistRow, 0, len(entries))
 	for _, e := range entries {
+		inRange := isInEntryZone(e)
 		out = append(out, watchlistRow{
-			WatchlistEntry: e,
-			LatestScore:    scoreByID[e.ID],
+			WatchlistEntry:  e,
+			LatestScore:     scoreByID[e.ID],
+			InRange:         inRange,
+			AlertActive:     inRange && alertsActive,
+			AlertSuppressed: inRange && !alertsActive,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"watchlist": out})
+}
+
+// isInEntryZone reports whether the entry's current price falls inside the
+// [target_entry_low, target_entry_high] band. Returns false if any required
+// field is missing.
+func isInEntryZone(e *domain.WatchlistEntry) bool {
+	if e.CurrentPrice == nil {
+		return false
+	}
+	p := *e.CurrentPrice
+	if e.TargetEntryLow != nil && p < *e.TargetEntryLow {
+		return false
+	}
+	if e.TargetEntryHigh != nil && p > *e.TargetEntryHigh {
+		return false
+	}
+	// At least one bound must be set to count as "in range".
+	return e.TargetEntryLow != nil || e.TargetEntryHigh != nil
 }
 
 // POST /api/watchlist

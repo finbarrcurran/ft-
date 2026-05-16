@@ -21,14 +21,19 @@ import (
 )
 
 // ProximityMargin is the spec D12 default of 5% on either side of a manual
-// SL/TP. When future regime overlays (Spec 9b) move to SHIFTING/DEFENSIVE,
-// tighten to 3% — leave as a const for now.
+// SL/TP. Spec 9b D6 scales this by a regime-driven multiplier.
 const ProximityMargin = 0.05
 
-// Compute returns the alert classification for a stock holding plus its
-// already-computed metrics. (We require metrics rather than recomputing here
-// so the handler only does the math once per row.)
+// Compute is the legacy entry point — uses the default ProximityMargin.
+// Kept for callers that don't have regime context yet.
 func Compute(h *domain.StockHolding, m metrics.StockMetrics) domain.AlertResult {
+	return ComputeWithMargin(h, m, ProximityMargin)
+}
+
+// ComputeWithMargin returns the alert classification for a stock holding
+// with a caller-provided proximity margin (Spec 9b D6 lets the regime
+// overlay tighten this from 5% to 3% when the macro is shifting/defensive).
+func ComputeWithMargin(h *domain.StockHolding, m metrics.StockMetrics, margin float64) domain.AlertResult {
 	// ---- RED checks ----
 	red := []string{}
 	if m.DistanceToSLPct != nil && *m.DistanceToSLPct <= 3 {
@@ -50,8 +55,8 @@ func Compute(h *domain.StockHolding, m metrics.StockMetrics) domain.AlertResult 
 		amber = append(amber, fmt.Sprintf("RSI %.0f (65–74, elevated)", *h.RSI14))
 	}
 	// AMBER_SL_PROXIMITY (Spec 3 D12): manual SL set, current price is within
-	// ProximityMargin of SL on the way down, and today's change is negative.
-	if reason, ok := slProximity(h, ProximityMargin); ok {
+	// margin of SL on the way down, and today's change is negative.
+	if reason, ok := slProximity(h, margin); ok {
 		amber = append(amber, reason)
 	}
 	if len(amber) > 0 {
@@ -74,8 +79,8 @@ func Compute(h *domain.StockHolding, m metrics.StockMetrics) domain.AlertResult 
 		}
 	}
 	// GREEN_TP_PROXIMITY (Spec 3 D12): manual TP set, current price is within
-	// ProximityMargin of TP on the way up, today's change is positive.
-	if reason, ok := tpProximity(h, ProximityMargin); ok {
+	// margin of TP on the way up, today's change is positive.
+	if reason, ok := tpProximity(h, margin); ok {
 		return domain.AlertResult{Status: domain.AlertGreen, Triggers: []string{reason}}
 	}
 

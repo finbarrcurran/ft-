@@ -68,6 +68,7 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 	closes, _ := s.store.GetAllSparklineCloses(r.Context(), "stock", tickers, 30)
 	scoreByID, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "holding", ids)
 	now := time.Now().UTC()
+	margin := s.currentAlertMargin(r.Context()) // Spec 9b D6 — regime-scaled
 
 	out := make([]stockResp, 0, len(holdings))
 	for _, h := range holdings {
@@ -94,7 +95,7 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 		out = append(out, stockResp{
 			StockHolding:    h,
 			Metrics:         m,
-			Alert:           alert.Compute(h, m),
+			Alert:           alert.ComputeWithMargin(h, m, margin),
 			SparklineSVG:    sparkline.RenderDefault(series),
 			SparklineDir:    sparkline.Direction(series),
 			Sparkline30dPct: sparkline.ChangePct(series),
