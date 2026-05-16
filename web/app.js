@@ -240,6 +240,7 @@ function renderDashboard(user) {
         <div class="brand">FT</div>
         <div class="market-pill" id="market-pill" title="Markets — click for all 7" tabindex="0">—</div>
         <div class="markets-dropdown" id="markets-dropdown" aria-hidden="true"></div>
+        <div class="regime-pills" id="regime-pills" title="Regime — Jordi / Cowen / Effective"></div>
         <div class="right">
           <span class="dim" id="refresh-status">—</span>
           <button class="btn-ghost" id="refresh">refresh</button>
@@ -272,6 +273,7 @@ function renderDashboard(user) {
   loadActiveTab();
   loadRefreshStatus();
   startMarketPill();
+  startRegimePills();
 }
 
 // ---------- market status pill (top bar) — Spec 5 D4 -------------------
@@ -402,6 +404,222 @@ function formatCountdown(iso) {
   if (mins > 0) return `${mins}m ${secs}s`;
   return `${secs}s`;
 }
+
+// ---------- regime pills (Spec 9b D3 + D5) ------------------------------
+//
+// Three pills in the top bar after the market dropdown: Jordi / Cowen /
+// Effective. Each clickable.
+//   * Jordi  → 4-button quick-set modal
+//   * Cowen  → choice modal: Quick set / Full Sunday capture
+//   * Effective → read-only explainer + link to history
+// Pills also flag stale (>14d): renders "⚠ STABLE (Jordi · 17d)".
+
+let regimeState = null;
+
+async function startRegimePills() {
+  await refreshRegime();
+  // Re-poll every 5 min so a Cowen form submission from another tab updates this one.
+  setInterval(refreshRegime, 5 * 60 * 1000);
+}
+
+async function refreshRegime() {
+  try {
+    regimeState = await api('/api/regime');
+    renderRegimePills();
+  } catch (_) { /* silent — pills stay at last known state */ }
+}
+
+function renderRegimePills() {
+  const el = $('#regime-pills');
+  if (!el || !regimeState) return;
+  const pills = [
+    { side: 'jordi',     label: 'Jordi',     data: regimeState.jordi },
+    { side: 'cowen',     label: 'Cowen',     data: regimeState.cowen },
+    { side: 'effective', label: 'Effective', data: { regime: regimeState.effective, stale: false } },
+  ];
+  el.innerHTML = pills.map(p => regimePillHTML(p)).join('');
+  for (const node of el.querySelectorAll('.regime-pill')) {
+    node.addEventListener('click', () => onRegimePillClick(node.dataset.side));
+    node.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onRegimePillClick(node.dataset.side); }
+    });
+  }
+}
+
+function regimePillHTML({ side, label, data }) {
+  const r = data.regime || 'unclassified';
+  const tone = r === 'stable' ? 'good' : r === 'shifting' ? 'amber' : r === 'defensive' ? 'bad' : 'dim';
+  const stale = data.stale ? ` ⚠ ${daysSinceLabel(data.set_at)}` : '';
+  const upper = (r === 'unclassified' ? 'UNSET' : r.toUpperCase());
+  return `<div class="regime-pill regime-${tone}" data-side="${side}" tabindex="0" role="button" aria-label="${escapeHTML(label + ' regime: ' + r)}">
+    <span class="rp-label">${escapeHTML(label)}</span>
+    <span class="rp-value">${upper}${stale}</span>
+  </div>`;
+}
+
+function daysSinceLabel(iso) {
+  if (!iso) return '';
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
+  return `${d}d`;
+}
+
+function onRegimePillClick(side) {
+  if (side === 'effective') return openEffectiveExplainer();
+  if (side === 'jordi') return openManualRegimeModal('jordi');
+  if (side === 'cowen') return openCowenChoiceModal();
+}
+
+// ----- Jordi quick-toggle modal (D5) -----
+function openManualRegimeModal(side) {
+  const cur = (regimeState && regimeState[side] && regimeState[side].regime) || 'unclassified';
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  const title = side === 'jordi' ? 'Set Jordi regime' : 'Quick set Cowen regime';
+  const subtitle = side === 'jordi'
+    ? 'Jordi regime is your judgment call on turbulence, dispersion, narrative.'
+    : 'Use the full Sunday capture form for a data-backed classification — this manual override is for emergencies.';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">${escapeHTML(title)}</div>
+            <div class="desc">${escapeHTML(subtitle)}</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="regime-choice">
+            ${['stable','shifting','defensive','unclassified'].map(v => `
+              <label class="regime-choice-btn regime-${v === 'stable' ? 'good' : v === 'shifting' ? 'amber' : v === 'defensive' ? 'bad' : 'dim'} ${v === cur ? 'selected' : ''}">
+                <input type="radio" name="regime" value="${v}" ${v === cur ? 'checked' : ''} />
+                <span>${v.toUpperCase()}</span>
+              </label>
+            `).join('')}
+          </div>
+          <div class="form-row">
+            <label for="rm-note">Note (optional)</label>
+            <input id="rm-note" name="note" type="text" placeholder="why this regime?" />
+          </div>
+          <div class="error" id="rm-err"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="rm-cancel">Cancel</button>
+          <button class="btn-primary" id="rm-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#rm-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  // Visually highlight the selected radio's parent button.
+  document.querySelectorAll('.regime-choice-btn input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      document.querySelectorAll('.regime-choice-btn').forEach(b => b.classList.remove('selected'));
+      inp.parentElement.classList.add('selected');
+    });
+  });
+  $('#rm-save').addEventListener('click', async () => {
+    const sel = document.querySelector('input[name="regime"]:checked');
+    if (!sel) { $('#rm-err').textContent = 'pick one'; return; }
+    const note = $('#rm-note').value.trim();
+    const path = side === 'jordi' ? '/api/regime/jordi' : '/api/regime/cowen/manual';
+    try {
+      await api(path, { method: 'POST', body: JSON.stringify({ regime: sel.value, note }) });
+      closeImportModal();
+      await refreshRegime();
+    } catch (e) {
+      $('#rm-err').textContent = e.message;
+    }
+  });
+}
+
+// ----- Cowen choice modal -----
+function openCowenChoiceModal() {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Set Cowen regime</div>
+            <div class="desc">Pick how to set it.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="cowen-choice">
+            <button class="btn-secondary" id="cowen-quick">Quick set (4 buttons)</button>
+            <button class="btn-primary" id="cowen-full">Full Sunday capture →</button>
+          </div>
+          <p class="dim" style="margin-top:0.8rem;font-size:0.8rem">
+            Quick set is for emergencies. The full Sunday capture form (8 fields + macro flags)
+            auto-classifies the regime and keeps a row in regime history for retrospective.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#cowen-quick').addEventListener('click', () => { closeImportModal(); openManualRegimeModal('cowen'); });
+  $('#cowen-full').addEventListener('click', () => { closeImportModal(); openCowenCaptureForm(); });
+}
+
+// ----- Effective regime explainer -----
+function openEffectiveExplainer() {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  const eff = (regimeState && regimeState.effective) || 'unclassified';
+  const mult = regimeState ? regimeState.alert_margin_multiplier : 1.0;
+  const j = regimeState ? regimeState.jordi.regime : '—';
+  const c = regimeState ? regimeState.cowen.regime : '—';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Effective regime</div>
+            <div class="desc">Read-only — derived from Jordi + Cowen.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <p>Jordi: <strong>${escapeHTML(j.toUpperCase())}</strong></p>
+          <p>Cowen: <strong>${escapeHTML(c.toUpperCase())}</strong></p>
+          <p>Effective: <strong>${escapeHTML(eff.toUpperCase())}</strong></p>
+          <p class="dim" style="margin-top:0.8rem;font-size:0.85rem">
+            Effective is the more defensive of the two. UNCLASSIFIED is treated as SHIFTING
+            for alert gating, but if only one side is unclassified, the classified one wins.
+            Proximity-alert margin multiplier: <strong>${mult.toFixed(2)}</strong>×.
+            Watchlist entry-zone alerts: <strong>${regimeState && regimeState.watchlist_alerts_active ? 'active' : 'suppressed'}</strong>.
+          </p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="eff-history">View history</button>
+          <button class="btn-primary" id="eff-close">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#eff-close').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#eff-history').addEventListener('click', () => { closeImportModal(); switchTab('settings'); });
+}
+
+// openCowenCaptureForm is the 8-field weekly capture (D4). Defined later;
+// declared here as a stub so the choice modal can reference it before the
+// section that owns the implementation.
+let openCowenCaptureForm = () => alert('Cowen capture form — implemented in D4 below');
 
 // ---------- export -------------------------------------------------------
 
