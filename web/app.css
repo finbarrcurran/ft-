@@ -609,6 +609,16 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   gap: 0.4rem;
   cursor: pointer;
 }
+/* Spec 9b D7/D8: donut placeholder when tag coverage < 50%. */
+.donut-card.placeholder .donut-placeholder {
+  padding: 1.5rem 0.8rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: rgb(var(--color-text-muted));
+}
+.donut-card.placeholder .donut-placeholder p { margin: 0 0 0.4rem 0; }
+.donut-card.placeholder { background: rgb(var(--color-surface) / 0.5); }
+
 .regime-history-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

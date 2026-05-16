@@ -1236,6 +1236,10 @@ async function renderSummary() {
     </div>
   `;
 
+  // Spec 9b D7+D8: bottleneck (stocks) + phase (crypto) donuts. Each only
+  // renders if at least 50% of the relevant holdings have a tag set.
+  const tagDonuts = renderTagDonuts(s);
+
   const footer = `
     <p class="dim" style="font-size:0.78rem; margin-top:1.5rem">
       ${s.counts.stocks} stock${s.counts.stocks === 1 ? '' : 's'} ·
@@ -1250,7 +1254,7 @@ async function renderSummary() {
   // Crypto yet, we pull fresh lists in the background.
   const staleBanner = `<div id="stale-score-banner"></div>`;
 
-  content.innerHTML = staleBanner + toggle + kpiRow + donutRow + footer;
+  content.innerHTML = staleBanner + toggle + kpiRow + donutRow + tagDonuts + footer;
 
   // Wire toggle clicks
   for (const btn of document.querySelectorAll('.ct-btn')) {
@@ -1266,6 +1270,58 @@ async function renderSummary() {
 
   // Stale-score nudge — defer to keep this render snappy.
   updateStaleScoreBanner();
+}
+
+// Spec 9b D7+D8 — Bottleneck (stocks) + Phase (crypto) donuts on Summary.
+// Conditional render: only show when ≥50% of holdings have a tagged score.
+// Below that threshold, render a placeholder nudging Fin to score more.
+function renderTagDonuts(s) {
+  const cov = s.tagCoverage || {};
+  const cn  = s.counts || {};
+  const sections = [];
+
+  function placeholder(title, total, tagged, label) {
+    const pct = total > 0 ? Math.round((tagged / total) * 100) : 0;
+    return `
+      <div class="donut-card placeholder">
+        <div class="donut-title">${escapeHTML(title)}</div>
+        <div class="donut-placeholder">
+          <p>Available once ≥ 50% of ${escapeHTML(label)} have a framework tag.</p>
+          <p class="dim">Currently <strong>${tagged}/${total}</strong> (${pct}%).</p>
+        </div>
+      </div>
+    `;
+  }
+
+  function donut(title, svg, legend) {
+    const legendHTML = (legend || []).map(row => `
+      <li>
+        <span class="legend-dot" style="background:${row.color}"></span>
+        <span class="legend-label">${escapeHTML(row.label)}</span>
+        <span class="legend-value num">${escapeHTML(row.valueStr)}</span>
+        ${row.pct != null ? `<span class="legend-pct num dim">${row.pct.toFixed(1)}%</span>` : ''}
+      </li>
+    `).join('');
+    return `
+      <div class="donut-card">
+        <div class="donut-title">${escapeHTML(title)}</div>
+        <div class="donut-svg">${svg}</div>
+        <ul class="donut-legend">${legendHTML}</ul>
+      </div>
+    `;
+  }
+
+  const bnReady = (cov.bottleneck || 0) >= 0.5;
+  sections.push(bnReady
+    ? donut('Bottleneck (stocks)', s.donuts.bottleneck, s.legends.bottleneck)
+    : placeholder('Bottleneck (stocks)', cn.stocks || 0, cn.stocksTagged || 0, 'stocks'));
+
+  const phReady = (cov.phase || 0) >= 0.5;
+  sections.push(phReady
+    ? donut('Cycle phase (crypto)', s.donuts.phase, s.legends.phase)
+    : placeholder('Cycle phase (crypto)', cn.crypto || 0, cn.cryptoTagged || 0, 'crypto'));
+
+  return `<div class="donut-row" style="margin-top:1rem">${sections.join('')}</div>`;
 }
 
 async function updateStaleScoreBanner() {

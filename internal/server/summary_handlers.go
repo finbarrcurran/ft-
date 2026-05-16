@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"ft/internal/domain"
 	"ft/internal/donut"
@@ -181,6 +182,23 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	coreAltLegend := buildLegend(coreAltSlices, currency, fx)
 	sectorLegend := buildLegend(sectorSlices, currency, fx)
 
+	// ---- Spec 9b D7/D8 — bottleneck (stocks) + phase (crypto) donuts -----
+	stockIDs := make([]int64, 0, len(stocks))
+	for _, h := range stocks {
+		stockIDs = append(stockIDs, h.ID)
+	}
+	cryptoIDs := make([]int64, 0, len(cryptos))
+	for _, c := range cryptos {
+		cryptoIDs = append(cryptoIDs, c.ID)
+	}
+	stockScores, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "holding", stockIDs)
+	cryptoScores, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "holding", cryptoIDs)
+
+	bottleneck := buildStockTagDonut(stocks, stockScores, "bottleneck_position",
+		stocksValue, currency, fx, "bottleneck")
+	phase := buildCryptoTagDonut(cryptos, cryptoScores, "cycle_phase",
+		cryptoValueUSD, currency, fx, "phase")
+
 	// ---- Response -----------------------------------------------------
 	resp := map[string]any{
 		"asOf":           time.Now().UTC().Format(time.RFC3339),
@@ -200,15 +218,25 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			"assetClass":     assetClassSVG,
 			"cryptoCoreAlt":  coreAltSVG,
 			"stocksBySector": stocksSectorSVG,
+			"bottleneck":     bottleneck["svg"],
+			"phase":          phase["svg"],
 		},
 		"legends": map[string]any{
 			"assetClass":     classLegend,
 			"cryptoCoreAlt":  coreAltLegend,
 			"stocksBySector": sectorLegend,
+			"bottleneck":     bottleneck["legend"],
+			"phase":          phase["legend"],
 		},
 		"counts": map[string]any{
-			"stocks": len(stocks),
-			"crypto": len(cryptos),
+			"stocks":           len(stocks),
+			"crypto":           len(cryptos),
+			"stocksTagged":     bottleneck["taggedCount"],
+			"cryptoTagged":     phase["taggedCount"],
+		},
+		"tagCoverage": map[string]any{
+			"bottleneck": bottleneck["coverage"], // 0..1 fraction
+			"phase":      phase["coverage"],
 		},
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -315,3 +343,160 @@ func withCommas2dp(v float64) string {
 
 // Suppress unused-import warnings if we trim during iteration.
 var _ = domain.AlertNeutral
+
+// ----- Spec 9b D7/D8: tag-based donuts ------------------------------------
+//
+// Two helpers (stock + crypto) because Go's generics + type assertions
+// would be uglier than just having both. Each:
+//   1. Walks holdings, looks up the latest framework_score per ID
+//   2. Pulls the requested tag key from scores.tags_json
+//   3. Groups portfolio value by tag value (untagged → "Untagged" bucket)
+//   4. Renders a donut + returns conditional-render coverage fraction
+//
+// The frontend uses `coverage >= 0.5` to decide whether to show the donut
+// or a "tag your holdings to enable this" placeholder per spec.
+
+type tagDonutOut map[string]any
+
+// tagFromScore pulls a string value out of scores.tags_json for a given key.
+// Returns "" if the score is nil, tags_json is missing, or the key is absent.
+func tagFromScore(fs *domain.FrameworkScore, key string) string {
+	if fs == nil || fs.TagsJSON == nil {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(*fs.TagsJSON), &m); err != nil {
+		return ""
+	}
+	if v, ok := m[key]; ok {
+		switch t := v.(type) {
+		case string:
+			return t
+		case float64:
+			// cycle_phase comes through as number
+			return fmt.Sprintf("%d", int(t))
+		}
+	}
+	return ""
+}
+
+// stockValueUSD returns the per-row position value in USD (qty × current
+// price; falls back to investedUsd). Used by donut sizing.
+func stockValueForDonut(h *domain.StockHolding) float64 {
+	if h.AvgOpenPrice != nil && *h.AvgOpenPrice > 0 && h.CurrentPrice != nil && *h.CurrentPrice > 0 {
+		qty := h.InvestedUSD / *h.AvgOpenPrice
+		v := qty * *h.CurrentPrice
+		if v > 0 {
+			return v
+		}
+	}
+	return h.InvestedUSD
+}
+
+func cryptoValueForDonut(h *domain.CryptoHolding) float64 {
+	if h.CurrentValueUSD != nil {
+		return *h.CurrentValueUSD
+	}
+	if h.CostBasisUSD != nil {
+		return *h.CostBasisUSD
+	}
+	return 0
+}
+
+func buildStockTagDonut(holdings []*domain.StockHolding, scores map[int64]*domain.FrameworkScore, tagKey string, totalValue float64, currency string, fx float64, label string) tagDonutOut {
+	tally := map[string]float64{}
+	tagged := 0
+	for _, h := range holdings {
+		v := stockValueForDonut(h)
+		tag := tagFromScore(scores[h.ID], tagKey)
+		if tag == "" {
+			tally["Untagged"] += v
+		} else {
+			tally[tag] += v
+			tagged++
+		}
+	}
+	coverage := 0.0
+	if len(holdings) > 0 {
+		coverage = float64(tagged) / float64(len(holdings))
+	}
+	return renderTagDonut(tally, totalValue, currency, fx, label, tagged, coverage)
+}
+
+func buildCryptoTagDonut(holdings []*domain.CryptoHolding, scores map[int64]*domain.FrameworkScore, tagKey string, totalValue float64, currency string, fx float64, label string) tagDonutOut {
+	tally := map[string]float64{}
+	tagged := 0
+	for _, h := range holdings {
+		v := cryptoValueForDonut(h)
+		tag := tagFromScore(scores[h.ID], tagKey)
+		if tag == "" {
+			tally["Untagged"] += v
+		} else {
+			// Phase tag stored as "1".."4" — render with the human cycle name.
+			if tagKey == "cycle_phase" {
+				switch tag {
+				case "1":
+					tag = "Accumulation"
+				case "2":
+					tag = "Early Bull"
+				case "3":
+					tag = "Late Bull"
+				case "4":
+					tag = "Euphoria"
+				}
+			}
+			tally[tag] += v
+			tagged++
+		}
+	}
+	coverage := 0.0
+	if len(holdings) > 0 {
+		coverage = float64(tagged) / float64(len(holdings))
+	}
+	return renderTagDonut(tally, totalValue, currency, fx, label, tagged, coverage)
+}
+
+// renderTagDonut converts the tally map to sorted donut slices, renders the
+// SVG, and returns {svg, legend, coverage, taggedCount}.
+func renderTagDonut(tally map[string]float64, totalValue float64, currency string, fx float64, label string, tagged int, coverage float64) tagDonutOut {
+	type row struct {
+		Name  string
+		Value float64
+	}
+	rows := make([]row, 0, len(tally))
+	for k, v := range tally {
+		if v > 0 {
+			rows = append(rows, row{k, v})
+		}
+	}
+	// "Untagged" always sorts last regardless of size.
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Name == "Untagged" {
+			return false
+		}
+		if rows[j].Name == "Untagged" {
+			return true
+		}
+		return rows[i].Value > rows[j].Value
+	})
+	pal := donut.Palette(len(rows))
+	slices := make([]donut.Slice, 0, len(rows))
+	for i, r := range rows {
+		col := pal[i]
+		if r.Name == "Untagged" {
+			col = "#3a4252" // dim grey for untagged slice
+		}
+		slices = append(slices, donut.Slice{Label: r.Name, Value: r.Value, Color: col})
+	}
+	svg := donut.Render(slices, donut.Options{
+		Width: 200, Height: 200,
+		CenterText: fmtMoney(totalValue, currency, fx),
+		CenterSub:  label,
+	})
+	return tagDonutOut{
+		"svg":         svg,
+		"legend":      buildLegend(slices, currency, fx),
+		"coverage":    coverage,
+		"taggedCount": tagged,
+	}
+}
