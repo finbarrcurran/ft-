@@ -131,6 +131,20 @@ function scoreCell(score) {
   return `<span class="${cls.join(' ')}" title="Scored ${score.scoredAt.slice(0,10)} · framework: ${escapeHTML(score.frameworkId)}">${score.totalScore}/${score.maxScore}${tickMark}${staleMark}</span>`;
 }
 
+// marketCell — Spec 5 D3. Per-row market column from {open, onBreak, nextChange, nextChangeKind, name, tzName}.
+// Crypto rows pass `null` and get an em-dash since crypto trades 24/7.
+function marketCell(m) {
+  if (!m) return '<span class="dim">—</span>';
+  const dot = m.open ? '🟢' : m.onBreak ? '🟡' : '🔴';
+  const status = m.open ? 'Open' : m.onBreak ? 'Break' : 'Closed';
+  const verb = m.nextChangeKind === 'close' ? 'closes' :
+               m.nextChangeKind === 'break_start' ? 'breaks' :
+               m.nextChangeKind === 'break_end' ? 'resumes' : 'opens';
+  const when = formatLocalTimeShort(m.nextChange);
+  const cls = m.open ? 'market-open' : m.onBreak ? 'market-break' : 'market-closed';
+  return `<span class="${cls}" title="${escapeHTML(m.name)} (${escapeHTML(m.tzName || '')})">${dot} ${status} · ${escapeHTML(verb)} ${escapeHTML(when)}</span>`;
+}
+
 function exDivCell(iso) {
   const d = daysUntilISO(iso);
   if (d == null) return '<span class="dim">—</span>';
@@ -224,7 +238,8 @@ function renderDashboard(user) {
     <div class="shell">
       <div class="topbar">
         <div class="brand">FT</div>
-        <div class="market-pill" id="market-pill" title="US markets (Spec 5 extends to multi-market)">—</div>
+        <div class="market-pill" id="market-pill" title="Markets — click for all 7" tabindex="0">—</div>
+        <div class="markets-dropdown" id="markets-dropdown" aria-hidden="true"></div>
         <div class="right">
           <span class="dim" id="refresh-status">—</span>
           <button class="btn-ghost" id="refresh">refresh</button>
@@ -259,8 +274,11 @@ function renderDashboard(user) {
   startMarketPill();
 }
 
-// ---------- market status pill (top bar) -------------------------------
+// ---------- market status pill (top bar) — Spec 5 D4 -------------------
 
+// marketState carries the multi-exchange snapshot: {asOf, summary, exchanges[]}.
+// summary picks the headline market (earliest closing if any open, else
+// earliest opening). Refreshed every 5 min; 1s ticker re-renders countdown.
 let marketState = null;
 let marketTicker = null;
 
@@ -269,25 +287,106 @@ async function startMarketPill() {
   setInterval(refreshMarketStatus, 5 * 60 * 1000);
   if (marketTicker) clearInterval(marketTicker);
   marketTicker = setInterval(updateMarketPillText, 1000);
+  // Click pill → toggle dropdown
+  const pill = $('#market-pill');
+  if (pill) {
+    pill.addEventListener('click', toggleMarketsDropdown);
+    pill.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggleMarketsDropdown(); }
+      if (ev.key === 'Escape') closeMarketsDropdown();
+    });
+  }
+  // Click outside → close
+  document.addEventListener('click', (ev) => {
+    const dd = $('#markets-dropdown');
+    const p  = $('#market-pill');
+    if (dd && !dd.contains(ev.target) && p && !p.contains(ev.target)) closeMarketsDropdown();
+  });
 }
 
 async function refreshMarketStatus() {
   try {
-    marketState = await api('/api/marketstatus');
+    marketState = await api('/api/marketstatus/all');
     updateMarketPillText();
+    // If the dropdown's open, re-render its body too so values stay live.
+    const dd = $('#markets-dropdown');
+    if (dd && dd.classList.contains('open')) renderMarketsDropdown();
   } catch (_) { /* leave pill at last known state */ }
 }
 
 function updateMarketPillText() {
   const el = $('#market-pill');
-  if (!el || !marketState) return;
-  const us = marketState.us;
-  const dot = us.open ? '🟢' : '🔴';
-  const label = us.open ? 'US open' : 'US closed';
-  const remaining = formatCountdown(us.nextChange);
-  const verb = us.nextChangeKind === 'close' ? 'closes' : 'opens';
+  if (!el || !marketState || !marketState.summary) return;
+  const s = marketState.summary;
+  if (!s.primaryExchange) {
+    el.innerHTML = '<span class="dim">—</span>';
+    return;
+  }
+  const dot   = s.primaryOpen ? '🟢' : '🔴';
+  const label = s.primaryOpen ? s.primaryLabel : `${s.primaryLabel} closed`;
+  const verb  = s.primaryNextChangeKind === 'close' ? 'closes' :
+                s.primaryNextChangeKind === 'break_start' ? 'breaks' :
+                s.primaryNextChangeKind === 'break_end' ? 'resumes' : 'opens';
+  const remaining = formatCountdown(s.primaryNextChange);
   el.innerHTML = `${dot} <span class="mp-label">${escapeHTML(label)}</span> · ${escapeHTML(verb)} in <span class="num mp-eta">${escapeHTML(remaining)}</span>`;
-  el.classList.toggle('market-pill--open', us.open);
+  el.classList.toggle('market-pill--open', !!s.primaryOpen);
+}
+
+function toggleMarketsDropdown() {
+  const dd = $('#markets-dropdown');
+  if (!dd) return;
+  if (dd.classList.contains('open')) closeMarketsDropdown();
+  else openMarketsDropdown();
+}
+function openMarketsDropdown() {
+  const dd = $('#markets-dropdown');
+  if (!dd) return;
+  renderMarketsDropdown();
+  dd.classList.add('open');
+  dd.setAttribute('aria-hidden', 'false');
+}
+function closeMarketsDropdown() {
+  const dd = $('#markets-dropdown');
+  if (!dd) return;
+  dd.classList.remove('open');
+  dd.setAttribute('aria-hidden', 'true');
+}
+
+function renderMarketsDropdown() {
+  const dd = $('#markets-dropdown');
+  if (!dd || !marketState || !Array.isArray(marketState.exchanges)) return;
+  const rows = marketState.exchanges.map((e) => {
+    const dot = e.open ? '🟢' : e.onBreak ? '🟡' : '🔴';
+    const label = e.open ? 'Open' : e.onBreak ? 'Break' : 'Closed';
+    const verb  = e.nextChangeKind === 'close' ? 'closes' :
+                  e.nextChangeKind === 'break_start' ? 'breaks' :
+                  e.nextChangeKind === 'break_end' ? 'resumes' : 'opens';
+    const when = formatLocalTimeShort(e.nextChange);
+    const dur  = formatCountdown(e.nextChange);
+    return `
+      <div class="md-row${e.open ? ' open' : e.onBreak ? ' break' : ''}">
+        <span class="md-dot">${dot}</span>
+        <span class="md-name">${escapeHTML(e.name)}</span>
+        <span class="md-status">${escapeHTML(label)}</span>
+        <span class="md-when dim">${escapeHTML(verb)} ${escapeHTML(when)} <span class="num">(${escapeHTML(dur)})</span></span>
+      </div>
+    `;
+  }).join('');
+  dd.innerHTML = `<div class="md-head">Markets</div>${rows}`;
+}
+
+// Render the next-change moment as the user's local time. ISO → "Mon 14:30".
+function formatLocalTimeShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const todayKey  = new Date().toDateString();
+  const targetKey = d.toDateString();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (targetKey === todayKey) return time;
+  const tmp = new Date(); tmp.setDate(tmp.getDate() + 1);
+  if (targetKey === tmp.toDateString()) return `Tue ${time}`.replace('Tue', d.toLocaleDateString([], { weekday: 'short' }));
+  return `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
 }
 
 function formatCountdown(iso) {
@@ -1112,6 +1211,7 @@ function renderStocks() {
         <td>${exDivCell(r.exDividendDate)}</td>
         <td class="sparkline-cell">${sparkSvg}</td>
         <td>${scoreCell(r.score)}</td>
+        <td class="market-cell">${marketCell(r.market)}</td>
         ${noteCell}
         <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="stock" title="Edit">✎</button></td>
       </tr>
@@ -1145,6 +1245,7 @@ function renderStocks() {
             <th title="Next ex-dividend">Ex-Div</th>
             <th>30-day</th>
             <th title="Latest framework score">Score</th>
+            <th title="Exchange hours for this ticker">Market</th>
             <th>Note</th>
             <th></th>
           </tr>
@@ -1236,6 +1337,7 @@ function renderCrypto() {
         <td class="num suggested" title="Suggested TP for ${escapeHTML(r.volTier || 'medium')}-vol">${fmtNum1.format(r.suggestedTpPct)}%</td>
         <td class="sparkline-cell">${sparkSvg}</td>
         <td>${scoreCell(r.score)}</td>
+        <td class="market-cell"><span class="dim" title="Crypto trades 24/7">—</span></td>
         ${noteCell}
         <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="crypto" title="Edit">✎</button></td>
       </tr>
@@ -1267,6 +1369,7 @@ function renderCrypto() {
             <th class="num" title="Suggested take-profit % per vol tier">Sug TP</th>
             <th>30-day</th>
             <th title="Latest framework score">Score</th>
+            <th title="Crypto trades 24/7">Market</th>
             <th>Note</th>
             <th></th>
           </tr>

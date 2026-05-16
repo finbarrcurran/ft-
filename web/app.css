@@ -439,7 +439,10 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   border: 1px solid rgb(var(--color-border));
   border-radius: 9999px;
   color: rgb(var(--color-text-muted));
+  cursor: pointer;
+  user-select: none;
 }
+.market-pill:hover { border-color: rgb(var(--color-border-strong)); }
 .market-pill .mp-label {
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -452,6 +455,55 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   color: rgb(var(--color-text));
 }
 .market-pill--open .mp-label { color: rgb(var(--color-gain)); }
+
+/* Spec 5 D4 — multi-exchange dropdown anchored under the pill. */
+.markets-dropdown {
+  position: absolute;
+  top: 56px;
+  left: 130px; /* roughly under the pill; refine if topbar shifts */
+  min-width: 380px;
+  background: rgb(var(--color-surface-raised));
+  border: 1px solid rgb(var(--color-border-strong));
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+  padding: 0.5rem 0;
+  z-index: 100;
+  display: none;
+}
+.markets-dropdown.open { display: block; }
+.markets-dropdown .md-head {
+  padding: 0.3rem 0.9rem 0.5rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-muted));
+  border-bottom: 1px solid rgb(var(--color-border));
+  margin-bottom: 0.3rem;
+}
+.markets-dropdown .md-row {
+  display: grid;
+  grid-template-columns: 1.4rem 9rem 5rem 1fr;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.32rem 0.9rem;
+  font-size: 0.85rem;
+}
+.markets-dropdown .md-row.open { background: rgb(var(--color-gain) / 0.05); }
+.markets-dropdown .md-row.break { background: rgb(var(--color-amber) / 0.06); }
+.markets-dropdown .md-name { font-weight: 500; }
+.markets-dropdown .md-status { font-family: var(--font-mono); font-size: 0.78rem; }
+.markets-dropdown .md-when { font-size: 0.78rem; }
+.markets-dropdown .md-row.open .md-status { color: rgb(var(--color-gain-strong)); }
+.markets-dropdown .md-row.break .md-status { color: rgb(var(--color-amber)); }
+
+/* Spec 5 D3 — per-row Market column on holdings tables. */
+.market-cell {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+.market-open   { color: rgb(var(--color-gain-strong)); font-family: var(--font-mono); }
+.market-break  { color: rgb(var(--color-amber));        font-family: var(--font-mono); }
+.market-closed { color: rgb(var(--color-text-muted));   font-family: var(--font-mono); }
 
 /* ----- USD / EUR toggle (Summary tab) ------------------------------ */
 
