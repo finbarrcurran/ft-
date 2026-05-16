@@ -118,6 +118,9 @@ func (s *Server) routes() {
 	// Spec 9b D9: screener — S&P sample with live overlay + filters.
 	s.mux.HandleFunc("GET /api/screener", s.requireUser(s.handleScreener))
 
+	// Spec 9b D11: macro economics calendar (embedded JSON).
+	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
+
 	// Spec 6: per-user preferences (key/value).
 	s.mux.HandleFunc("GET /api/preferences", s.requireUser(s.handleListPreferences))
 	s.mux.HandleFunc("GET /api/preferences/{key}", s.requireUser(s.handleGetPreference))

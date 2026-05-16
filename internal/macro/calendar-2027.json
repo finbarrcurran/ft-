@@ -1,0 +1,14 @@
+{
+  "year": 2027,
+  "events": [
+    {"date": "2027-01-08", "label": "US NFP (December)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2027-01-14", "label": "US CPI (December)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2027-01-27", "label": "FOMC Decision", "kind": "fomc", "url": "https://www.federalreserve.gov/monetarypolicy/openmarket.htm"},
+    {"date": "2027-01-28", "label": "US Advance GDP (Q4 2026)", "kind": "gdp", "url": "https://www.bea.gov/data/gdp/gross-domestic-product"},
+    {"date": "2027-02-05", "label": "US NFP (January)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2027-02-10", "label": "US CPI (January)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2027-03-05", "label": "US NFP (February)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2027-03-10", "label": "US CPI (February)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2027-03-17", "label": "FOMC Decision", "kind": "fomc", "url": "https://www.federalreserve.gov/monetarypolicy/openmarket.htm"}
+  ]
+}

@@ -1496,17 +1496,46 @@ async function renderHeatmap() {
 async function renderNews(scope) {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading news…</div>';
+
+  // Spec 9b D10 — filter mode persisted in user_preferences.news_filter_mode.
+  if (state.newsFilterMode == null) {
+    try {
+      const r = await api('/api/preferences/news_filter_mode');
+      state.newsFilterMode = r.value === 'mine' ? 'mine' : 'all';
+    } catch (_) { state.newsFilterMode = 'all'; }
+  }
+  const filterQS = state.newsFilterMode === 'mine' ? '?filter=mine' : '';
+
   try {
-    const feed = await api(scope === 'market' ? '/api/news/market' : '/api/news/crypto');
-    renderFeed(feed, scope);
+    const [feed, macroData] = await Promise.all([
+      api((scope === 'market' ? '/api/news/market' : '/api/news/crypto') + filterQS),
+      // Macro cards only on the market tab (D11 spec scope).
+      scope === 'market' ? api('/api/macro').catch(() => ({ upcoming: [], recent: [] })) : Promise.resolve(null),
+    ]);
+    renderFeed(feed, scope, macroData);
   } catch (err) {
     content.innerHTML = `<div class="empty"><div class="loss">news failed: ${escapeHTML(err.message)}</div></div>`;
   }
 }
 
-function renderFeed(feed, scope) {
+function renderFeed(feed, scope, macroData) {
   const content = $('#content');
   const articles = feed.articles || [];
+
+  // Spec 9b D10 — toggle at the top.
+  const filterMode = state.newsFilterMode || 'all';
+  const filterToggle = `
+    <div class="news-filter-toggle" role="tablist" aria-label="News filter">
+      <button class="nf-btn ${filterMode === 'all' ? 'active' : ''}" data-filter="all" role="tab">All news</button>
+      <button class="nf-btn ${filterMode === 'mine' ? 'active' : ''}" data-filter="mine" role="tab">My holdings + watchlist</button>
+    </div>
+  `;
+
+  // Spec 9b D11 — macro cards (market tab only).
+  let macroHTML = '';
+  if (scope === 'market' && macroData) {
+    macroHTML = renderMacroCards(macroData);
+  }
 
   let banner = '';
   if (feed.source === 'unconfigured') {
@@ -1521,7 +1550,10 @@ function renderFeed(feed, scope) {
   const fgChip = scope === 'crypto' ? `<div id="fg-chip" class="fg-chip">fear &amp; greed: loading…</div>` : '';
 
   if (articles.length === 0) {
-    content.innerHTML = banner + fgChip + `<div class="empty">No articles to show.</div>`;
+    content.innerHTML = filterToggle + macroHTML + banner + fgChip +
+      `<div class="empty">${filterMode === 'mine' ? 'No matching articles for your holdings + watchlist.' : 'No articles to show.'}</div>`;
+    wireNewsToggle(scope);
+    return;
   } else {
     const list = articles.map((a) => {
       const sentClass = a.sentiment === 'positive' ? 'gain' : a.sentiment === 'negative' ? 'loss' : 'dim';
@@ -1538,10 +1570,88 @@ function renderFeed(feed, scope) {
         </article>
       `;
     }).join('');
-    content.innerHTML = banner + fgChip + `<div class="news-list">${list}</div>`;
+    content.innerHTML = filterToggle + macroHTML + banner + fgChip + `<div class="news-list">${list}</div>`;
   }
 
+  wireNewsToggle(scope);
   if (scope === 'crypto') loadFearGreed();
+}
+
+function wireNewsToggle(scope) {
+  for (const btn of document.querySelectorAll('.nf-btn')) {
+    btn.addEventListener('click', async () => {
+      const v = btn.dataset.filter === 'mine' ? 'mine' : 'all';
+      state.newsFilterMode = v;
+      try {
+        await api('/api/preferences/news_filter_mode', {
+          method: 'PUT',
+          body: JSON.stringify({ value: v }),
+        });
+      } catch (e) {
+        console.warn('news_filter_mode persist failed', e.message);
+      }
+      renderNews(scope);
+    });
+  }
+}
+
+// Spec 9b D11 — Macro Economics cards.
+function renderMacroCards(d) {
+  const upcoming = d.upcoming || [];
+  const recent = d.recent || [];
+  if (upcoming.length === 0 && recent.length === 0) return '';
+
+  const kindEmoji = (k) => ({
+    cpi:  '📈',
+    fomc: '🏛️',
+    nfp:  '👷',
+    pce:  '💵',
+    gdp:  '📊',
+  })[k] || '📅';
+
+  const daysToCard = (ev) => {
+    const t = new Date(ev.date + 'T12:00:00Z').getTime();
+    const days = Math.round((t - Date.now()) / (1000 * 60 * 60 * 24));
+    let label;
+    if (days === 0) label = 'today';
+    else if (days === 1) label = 'tomorrow';
+    else if (days > 0) label = `in ${days}d`;
+    else label = `${-days}d ago`;
+    const tone = days <= 1 ? 'macro-soon' : days <= 7 ? 'macro-near' : 'macro-far';
+    return `
+      <a class="macro-card ${tone}" href="${escapeHTML(ev.url)}" target="_blank" rel="noopener noreferrer">
+        <span class="macro-emoji">${kindEmoji(ev.kind)}</span>
+        <span class="macro-body">
+          <span class="macro-label">${escapeHTML(ev.label)}</span>
+          <span class="macro-when">${escapeHTML(label)} · ${escapeHTML(ev.date)}</span>
+        </span>
+      </a>
+    `;
+  };
+
+  const upcomingHTML = upcoming.length ? `
+    <div class="macro-section">
+      <div class="macro-section-head">Upcoming · next 14 days</div>
+      <div class="macro-cards">${upcoming.map(daysToCard).join('')}</div>
+    </div>
+  ` : '';
+
+  const recentHTML = recent.length ? `
+    <div class="macro-section">
+      <div class="macro-section-head">Recent · last 7 days</div>
+      <div class="macro-cards">${recent.map(ev => `
+        <a class="macro-card macro-past" href="${escapeHTML(ev.url)}" target="_blank" rel="noopener noreferrer">
+          <span class="macro-emoji">${kindEmoji(ev.kind)}</span>
+          <span class="macro-body">
+            <span class="macro-label">${escapeHTML(ev.label)}</span>
+            <span class="macro-when dim">Released ${escapeHTML(ev.date)}</span>
+          </span>
+        </a>
+      `).join('')}</div>
+    </div>
+  ` : '';
+
+  return `<div class="macro-block">${upcomingHTML}${recentHTML}</div>`;
 }
 
 async function loadFearGreed() {

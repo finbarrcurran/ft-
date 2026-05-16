@@ -1,0 +1,29 @@
+{
+  "year": 2026,
+  "events": [
+    {"date": "2026-05-13", "label": "US CPI (April)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2026-05-29", "label": "US PCE (April)", "kind": "pce", "url": "https://www.bea.gov/data/personal-consumption-expenditures-price-index"},
+    {"date": "2026-06-05", "label": "US NFP (May)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2026-06-11", "label": "US CPI (May)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2026-06-17", "label": "FOMC Decision", "kind": "fomc", "url": "https://www.federalreserve.gov/monetarypolicy/openmarket.htm"},
+    {"date": "2026-06-26", "label": "US PCE (May)", "kind": "pce", "url": "https://www.bea.gov/data/personal-consumption-expenditures-price-index"},
+    {"date": "2026-07-03", "label": "US NFP (June)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2026-07-15", "label": "US CPI (June)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2026-07-29", "label": "FOMC Decision", "kind": "fomc", "url": "https://www.federalreserve.gov/monetarypolicy/openmarket.htm"},
+    {"date": "2026-07-30", "label": "US Advance GDP (Q2)", "kind": "gdp", "url": "https://www.bea.gov/data/gdp/gross-domestic-product"},
+    {"date": "2026-07-31", "label": "US PCE (June)", "kind": "pce", "url": "https://www.bea.gov/data/personal-consumption-expenditures-price-index"},
+    {"date": "2026-08-07", "label": "US NFP (July)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2026-08-12", "label": "US CPI (July)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2026-09-04", "label": "US NFP (August)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2026-09-10", "label": "US CPI (August)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2026-09-16", "label": "FOMC Decision", "kind": "fomc", "url": "https://www.federalreserve.gov/monetarypolicy/openmarket.htm"},
+    {"date": "2026-10-02", "label": "US NFP (September)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2026-10-14", "label": "US CPI (September)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2026-10-28", "label": "FOMC Decision", "kind": "fomc", "url": "https://www.federalreserve.gov/monetarypolicy/openmarket.htm"},
+    {"date": "2026-11-06", "label": "US NFP (October)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2026-11-12", "label": "US CPI (October)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2026-12-04", "label": "US NFP (November)", "kind": "nfp", "url": "https://www.bls.gov/ces/"},
+    {"date": "2026-12-10", "label": "US CPI (November)", "kind": "cpi", "url": "https://www.bls.gov/cpi/"},
+    {"date": "2026-12-16", "label": "FOMC Decision", "kind": "fomc", "url": "https://www.federalreserve.gov/monetarypolicy/openmarket.htm"}
+  ]
+}

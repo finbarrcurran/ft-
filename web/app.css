@@ -609,6 +609,68 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   gap: 0.4rem;
   cursor: pointer;
 }
+/* Spec 9b D10 — News filter toggle */
+.news-filter-toggle {
+  display: inline-flex;
+  background: rgb(var(--color-surface-sunken));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 9999px;
+  padding: 2px;
+  margin-bottom: 1rem;
+}
+.news-filter-toggle .nf-btn {
+  background: transparent;
+  border: 0;
+  color: rgb(var(--color-text-muted));
+  padding: 0.3rem 0.8rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+.news-filter-toggle .nf-btn.active {
+  background: rgb(var(--color-surface-raised));
+  color: rgb(var(--color-text));
+}
+
+/* Spec 9b D11 — Macro economics cards */
+.macro-block { margin-bottom: 1rem; }
+.macro-section { margin-bottom: 0.6rem; }
+.macro-section-head {
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-muted));
+  margin-bottom: 0.35rem;
+}
+.macro-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.macro-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: rgb(var(--color-text));
+  font-size: 0.82rem;
+  min-width: 200px;
+}
+.macro-card:hover { border-color: rgb(var(--color-border-strong)); }
+.macro-emoji { font-size: 1.1rem; }
+.macro-body { display: flex; flex-direction: column; gap: 1px; }
+.macro-label { font-weight: 500; }
+.macro-when { font-size: 0.72rem; color: rgb(var(--color-text-muted)); font-family: var(--font-mono); }
+.macro-soon { border-left: 3px solid rgb(var(--color-loss)); }
+.macro-near { border-left: 3px solid rgb(var(--color-amber)); }
+.macro-far  { border-left: 3px solid rgb(var(--color-border-strong)); }
+.macro-past { opacity: 0.7; }
+
 /* Spec 9b D9 — screener tab */
 .screener-filters {
   display: flex;

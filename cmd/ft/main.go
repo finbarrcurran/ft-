@@ -17,6 +17,7 @@ import (
 	"ft/internal/auth"
 	"ft/internal/config"
 	"ft/internal/frameworks"
+	"ft/internal/macro"
 	"ft/internal/marketdata"
 	"ft/internal/refresh"
 	"ft/internal/server"
@@ -153,6 +154,9 @@ func runServe() {
 	// files log a warning and are skipped; we never crash for missing data
 	// (worst-case the affected exchange treats every day as a trading day).
 	must("holidays", marketdata.LoadHolidays())
+
+	// Spec 9b D11: macro economic calendar (hand-curated, embedded JSON).
+	must("macro", macro.Load())
 
 	srv := server.New(cfg, st)
 
