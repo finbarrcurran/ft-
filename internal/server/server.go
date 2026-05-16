@@ -115,6 +115,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/regime/cowen/auto", s.requireUser(s.handleSetCowenAuto))
 	s.mux.HandleFunc("GET /api/regime/history", s.requireUser(s.handleListRegimeHistory))
 
+	// Spec 9b D9: screener — S&P sample with live overlay + filters.
+	s.mux.HandleFunc("GET /api/screener", s.requireUser(s.handleScreener))
+
 	// Spec 6: per-user preferences (key/value).
 	s.mux.HandleFunc("GET /api/preferences", s.requireUser(s.handleListPreferences))
 	s.mux.HandleFunc("GET /api/preferences/{key}", s.requireUser(s.handleGetPreference))

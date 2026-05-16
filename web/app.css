@@ -609,6 +609,63 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   gap: 0.4rem;
   cursor: pointer;
 }
+/* Spec 9b D9 — screener tab */
+.screener-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+.screener-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+.screener-filter-row strong {
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-muted));
+  margin-right: 0.2rem;
+}
+.screener-filter-row input[type="number"] {
+  width: 88px;
+}
+.screener-sectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.screener-sector-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  user-select: none;
+}
+.screener-sector-chip:hover { border-color: rgb(var(--color-border-strong)); }
+.screener-sector-chip input { margin: 0; }
+.screener-summary { font-size: 0.78rem; }
+.screener th { cursor: pointer; user-select: none; }
+.screener th:hover { color: rgb(var(--color-text)); }
+.screener-tag {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  border-radius: 8px;
+}
+.screener-tag.held { background: rgb(var(--color-amber) / 0.15); color: rgb(var(--color-amber)); }
+.screener-tag.wl   { background: rgb(var(--color-gain) / 0.15);  color: rgb(var(--color-gain-strong)); }
+
 /* Spec 9b D7/D8: donut placeholder when tag coverage < 50%. */
 .donut-card.placeholder .donut-placeholder {
   padding: 1.5rem 0.8rem;

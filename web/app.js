@@ -254,6 +254,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'summary' ? 'active' : ''}" data-tab="summary">Summary</button>
         <button class="tab ${state.tab === 'stocks' ? 'active' : ''}" data-tab="stocks">Stocks &amp; ETFs</button>
         <button class="tab ${state.tab === 'crypto' ? 'active' : ''}" data-tab="crypto">Crypto</button>
+        <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
         <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
         <button class="tab ${state.tab === 'news' ? 'active' : ''}" data-tab="news">News</button>
@@ -1132,6 +1133,8 @@ async function loadActiveTab() {
         state.crypto = res.holdings || [];
       }
       renderCrypto();
+    } else if (state.tab === 'screener') {
+      await renderScreener();
     } else if (state.tab === 'watchlist') {
       await renderWatchlist();
     } else if (state.tab === 'heatmap') {
@@ -2389,6 +2392,180 @@ function distanceToEntry(currentPrice, low, high, suppressed) {
     : { label: 'In range', cls: 'dist-in' };
 }
 
+// ---------- Screener tab (Spec 9b D9) -----------------------------------
+//
+// Pulls the existing S&P 500 sample dataset (with live overlay) from
+// /api/screener and renders a filterable, sortable grid. "Add to watchlist"
+// pre-fills the watchlist add modal.
+
+const SCREENER_DEFAULT_SORT = { col: 'changePct', dir: 'desc' };
+
+if (!state.screenerFilters) {
+  state.screenerFilters = { sectors: [], mcapMin: '', mcapMax: '', changeMin: '', changeMax: '', held: '' };
+  state.screenerSort = { ...SCREENER_DEFAULT_SORT };
+  state.screenerRows = null;
+}
+
+async function renderScreener() {
+  // Refetch when filters change; cache in state.screenerRows.
+  const f = state.screenerFilters;
+  const params = new URLSearchParams();
+  if (f.sectors.length) params.set('sectors', f.sectors.join(','));
+  if (f.mcapMin)        params.set('mcap_min',   f.mcapMin);
+  if (f.mcapMax)        params.set('mcap_max',   f.mcapMax);
+  if (f.changeMin)      params.set('change_min', f.changeMin);
+  if (f.changeMax)      params.set('change_max', f.changeMax);
+  if (f.held)           params.set('held',       f.held);
+
+  let data;
+  try {
+    data = await api('/api/screener?' + params.toString());
+  } catch (e) {
+    $('#content').innerHTML = `<div class="empty"><div class="loss">screener failed: ${escapeHTML(e.message)}</div></div>`;
+    return;
+  }
+  state.screenerRows = data.rows || [];
+
+  // Sort client-side so re-sorting doesn't roundtrip.
+  const { col, dir } = state.screenerSort;
+  state.screenerRows.sort((a, b) => {
+    const av = a[col]; const bv = b[col];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'string') return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    return dir === 'asc' ? av - bv : bv - av;
+  });
+
+  const sectorOpts = SECTORS.map(s => {
+    const checked = f.sectors.includes(s) ? 'checked' : '';
+    return `<label class="screener-sector-chip"><input type="checkbox" data-sector="${escapeHTML(s)}" ${checked}/> ${escapeHTML(s)}</label>`;
+  }).join('');
+
+  const heldOpts = [['','any'],['hide','hide held'],['only','only held']]
+    .map(([v,l]) => `<option value="${v}" ${f.held===v?'selected':''}>${l}</option>`).join('');
+
+  const rows = state.screenerRows.map(r => {
+    const changeCls = r.changePct > 0 ? 'gain' : r.changePct < 0 ? 'loss' : '';
+    const tagPills = [
+      r.held ? '<span class="screener-tag held">HELD</span>' : '',
+      r.onWatchlist ? '<span class="screener-tag wl">✓ WL</span>' : '',
+    ].join('');
+    return `
+      <tr data-ticker="${escapeHTML(r.ticker)}">
+        <td><strong>${escapeHTML(r.ticker)}</strong> ${tagPills}</td>
+        <td>${escapeHTML(r.name)}</td>
+        <td class="dim">${escapeHTML(r.sector)}</td>
+        <td class="num">${r.price ? fmtNum2.format(r.price) : '<span class="dim">—</span>'}</td>
+        <td class="num ${changeCls}">${r.changePct >= 0 ? '+' : ''}${fmtNum2.format(r.changePct)}%</td>
+        <td class="num">${fmtNum2.format(r.marketCapB)}B</td>
+        <td>${r.onWatchlist
+          ? '<span class="dim">on watchlist</span>'
+          : '<button class="btn-ghost" data-add="' + escapeHTML(r.ticker) + '">+ watchlist</button>'}</td>
+      </tr>
+    `;
+  }).join('') || `<tr><td colspan="7" class="dim" style="text-align:center; padding:1rem">No matches.</td></tr>`;
+
+  const sortIcon = (c) => state.screenerSort.col === c
+    ? (state.screenerSort.dir === 'asc' ? ' ↑' : ' ↓') : '';
+
+  $('#content').innerHTML = `
+    <div class="screener-filters">
+      <div class="screener-filter-row">
+        <strong>Sectors</strong>
+        <div class="screener-sectors">${sectorOpts}</div>
+      </div>
+      <div class="screener-filter-row">
+        <strong>Market cap (B)</strong>
+        <input type="number" id="sc-mcap-min" placeholder="min" value="${escapeHTML(f.mcapMin)}" />
+        <input type="number" id="sc-mcap-max" placeholder="max" value="${escapeHTML(f.mcapMax)}" />
+        <strong>Daily % range</strong>
+        <input type="number" id="sc-chg-min" placeholder="min" step="0.1" value="${escapeHTML(f.changeMin)}" />
+        <input type="number" id="sc-chg-max" placeholder="max" step="0.1" value="${escapeHTML(f.changeMax)}" />
+        <strong>Held</strong>
+        <select id="sc-held">${heldOpts}</select>
+        <button class="btn-ghost" id="sc-reset">Reset</button>
+      </div>
+      <div class="screener-summary dim">${data.matched} of ${data.total} S&amp;P sample tickers</div>
+    </div>
+    <div class="tablewrap">
+      <table class="holdings screener">
+        <thead><tr>
+          <th data-sort="ticker">Ticker${sortIcon('ticker')}</th>
+          <th data-sort="name">Company${sortIcon('name')}</th>
+          <th data-sort="sector">Sector${sortIcon('sector')}</th>
+          <th class="num" data-sort="price">Price${sortIcon('price')}</th>
+          <th class="num" data-sort="changePct">Today %${sortIcon('changePct')}</th>
+          <th class="num" data-sort="marketCapB">Mkt Cap${sortIcon('marketCapB')}</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+
+  // Wire filter inputs (debounced on number fields).
+  let debounce;
+  const reload = () => { clearTimeout(debounce); debounce = setTimeout(renderScreener, 220); };
+  document.querySelectorAll('.screener-sector-chip input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const sec = inp.dataset.sector;
+      const idx = state.screenerFilters.sectors.indexOf(sec);
+      if (inp.checked && idx < 0) state.screenerFilters.sectors.push(sec);
+      if (!inp.checked && idx >= 0) state.screenerFilters.sectors.splice(idx, 1);
+      reload();
+    });
+  });
+  ['sc-mcap-min','sc-mcap-max','sc-chg-min','sc-chg-max'].forEach(id => {
+    const el = $('#' + id);
+    if (el) el.addEventListener('input', () => {
+      state.screenerFilters.mcapMin = $('#sc-mcap-min').value;
+      state.screenerFilters.mcapMax = $('#sc-mcap-max').value;
+      state.screenerFilters.changeMin = $('#sc-chg-min').value;
+      state.screenerFilters.changeMax = $('#sc-chg-max').value;
+      reload();
+    });
+  });
+  $('#sc-held').addEventListener('change', (ev) => {
+    state.screenerFilters.held = ev.target.value;
+    renderScreener();
+  });
+  $('#sc-reset').addEventListener('click', () => {
+    state.screenerFilters = { sectors: [], mcapMin: '', mcapMax: '', changeMin: '', changeMax: '', held: '' };
+    state.screenerSort = { ...SCREENER_DEFAULT_SORT };
+    renderScreener();
+  });
+
+  // Header click → sort.
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const c = th.dataset.sort;
+      if (state.screenerSort.col === c) {
+        state.screenerSort.dir = state.screenerSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.screenerSort.col = c;
+        state.screenerSort.dir = c === 'changePct' ? 'desc' : 'asc';
+      }
+      renderScreener();
+    });
+  });
+
+  // "+ watchlist" buttons → open prefilled add modal.
+  document.querySelectorAll('button[data-add]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ticker = btn.dataset.add;
+      const row = state.screenerRows.find(r => r.ticker === ticker);
+      if (!row) return;
+      openWatchlistModal({
+        kind: 'stock',
+        mode: 'add',
+        entry: undefined,
+        prefill: { ticker: row.ticker, companyName: row.name, sector: row.sector, currentPrice: row.price },
+      });
+    });
+  });
+}
+
 // ---------- watchlist tab -----------------------------------------------
 
 async function renderWatchlist() {
@@ -2518,10 +2695,15 @@ async function onWatchlistAction(act, wid) {
 
 // ---------- add / edit watchlist modal ---------------------------------
 
-function openWatchlistModal({ kind, mode, entry }) {
+function openWatchlistModal({ kind, mode, entry, prefill }) {
   const isEdit = mode === 'edit';
-  const t = (k) => isEdit ? (entry[k] ?? '') : '';
-  const safeTicker = isEdit ? escapeHTML(entry.ticker) : '';
+  // Field-value source: edit mode → existing entry; add mode → prefill (if any).
+  const t = (k) => {
+    if (isEdit) return entry[k] ?? '';
+    if (prefill) return prefill[k] ?? '';
+    return '';
+  };
+  const safeTicker = isEdit ? escapeHTML(entry.ticker) : (prefill ? escapeHTML(prefill.ticker || '') : '');
   const html = `
     <div class="modal-overlay" id="modal-overlay">
       <div class="modal" role="dialog" aria-modal="true">
@@ -2537,7 +2719,7 @@ function openWatchlistModal({ kind, mode, entry }) {
             ${isEdit ? '' : `
               <div class="form-row">
                 <label for="wl-ticker">Ticker *</label>
-                <input id="wl-ticker" name="ticker" type="text" required />
+                <input id="wl-ticker" name="ticker" type="text" required value="${escapeHTML(prefill && prefill.ticker ? String(prefill.ticker) : '')}" />
               </div>`}
             <div class="form-row">
               <label for="wl-company">Company name</label>

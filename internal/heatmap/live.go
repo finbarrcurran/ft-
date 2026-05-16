@@ -60,3 +60,9 @@ func AllTickers() []string {
 	}
 	return out
 }
+
+// AllTilesWithLive returns the entire heatmap dataset (S&P 500 sample) with
+// live-quote overlay applied. Used by Spec 9b D9 screener.
+func AllTilesWithLive() []MarketTile {
+	return applyLive()
+}
