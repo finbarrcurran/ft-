@@ -163,6 +163,17 @@ type CryptoHolding struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// RegimeRecord is one row of the regime_history table (Spec 9b).
+type RegimeRecord struct {
+	ID          int64     `json:"id"`
+	Timestamp   time.Time `json:"ts"`
+	FrameworkID string    `json:"frameworkId"` // "jordi" | "cowen"
+	Regime      string    `json:"regime"`      // "stable" | "shifting" | "defensive" | "unclassified"
+	Source      string    `json:"source"`      // "manual" | "auto_cowen_form"
+	InputsJSON  *string   `json:"inputsJson,omitempty"`
+	Note        *string   `json:"note,omitempty"`
+}
+
 // HoldingsAudit is one row of the audit log table.
 type HoldingsAudit struct {
 	ID          int64     `json:"id"`

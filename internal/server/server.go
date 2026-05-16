@@ -107,6 +107,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/feargreed", s.requireUser(s.handleFearGreed))
 	s.mux.HandleFunc("GET /api/feargreed/stocks", s.requireUser(s.handleFearGreedStocks))
 
+	// Spec 9b: regime overlay. Cookie OR token auth so the bot's /regime
+	// command can read state without holding a session.
+	s.mux.HandleFunc("GET /api/regime", s.requireUserOrToken(s.handleGetRegime))
+	s.mux.HandleFunc("POST /api/regime/jordi", s.requireUser(s.handleSetJordiRegime))
+	s.mux.HandleFunc("POST /api/regime/cowen/manual", s.requireUser(s.handleSetCowenManual))
+	s.mux.HandleFunc("POST /api/regime/cowen/auto", s.requireUser(s.handleSetCowenAuto))
+	s.mux.HandleFunc("GET /api/regime/history", s.requireUser(s.handleListRegimeHistory))
+
 	// Spec 6: per-user preferences (key/value).
 	s.mux.HandleFunc("GET /api/preferences", s.requireUser(s.handleListPreferences))
 	s.mux.HandleFunc("GET /api/preferences/{key}", s.requireUser(s.handleGetPreference))
