@@ -164,8 +164,13 @@ func (s *Store) ReplaceSRCandidates(ctx context.Context, ticker, kind string, ro
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sr_candidates WHERE ticker = ? AND kind = ?`, ticker, kind); err != nil {
 		return err
 	}
+	// INSERT OR IGNORE: the (ticker, kind, level_type, price) PK can collide
+	// when the 52w-high/low structural levels happen to land on an existing
+	// cluster centroid. First-write wins (clusters land first, structural
+	// after — clusters generally have more signal so this is the right
+	// preference).
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO sr_candidates (ticker, kind, level_type, price, touches, last_touch_at, score, computed_at)
+		INSERT OR IGNORE INTO sr_candidates (ticker, kind, level_type, price, touches, last_touch_at, score, computed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))`)
 	if err != nil {
 		return err
