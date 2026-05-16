@@ -1,0 +1,77 @@
+{
+  "id": "jordi",
+  "name": "Jordi Visser — Stock Selection",
+  "applies_to": "stock",
+  "version": "1.0",
+  "source": "22V AI Macro Nexus — synthesized May 2026",
+  "questions": [
+    {
+      "id": "bottleneck",
+      "label": "Bottleneck",
+      "prompt": "At a binding physical constraint of the AI buildout?",
+      "guidance": "Look for power, cooling, fiber, HBM, advanced packaging, specialty chemicals.",
+      "weight": 2
+    },
+    {
+      "id": "narrative",
+      "label": "Narrative",
+      "prompt": "Mispriced in the wrong bucket (picks-and-shovels mistaken for disrupted SaaS)?",
+      "guidance": "EDA, design tools, infrastructure software are common misreads.",
+      "weight": 2
+    },
+    {
+      "id": "moat",
+      "label": "Moat",
+      "prompt": "Concentrated structure, oligopoly, hard-to-replicate IP?",
+      "guidance": "",
+      "weight": 1
+    },
+    {
+      "id": "intensity",
+      "label": "Intensity",
+      "prompt": "Material/component intensity per GPU/rack/GW rising?",
+      "guidance": "Quantify if possible: 3-5x, 10-30x.",
+      "weight": 1
+    },
+    {
+      "id": "visibility",
+      "label": "Visibility",
+      "prompt": "Take-or-pay or contracted hyperscaler revenue?",
+      "guidance": "",
+      "weight": 1
+    },
+    {
+      "id": "sovereignty",
+      "label": "Sovereignty",
+      "prompt": "Domestic / Made in USA supply-chain premium?",
+      "guidance": "",
+      "weight": 1
+    },
+    {
+      "id": "catalyst",
+      "label": "Catalyst",
+      "prompt": "Near-term event forcing re-rating (earnings, M&A, keynote)?",
+      "guidance": "",
+      "weight": 1
+    },
+    {
+      "id": "technicals",
+      "label": "Technicals & Risk",
+      "prompt": "Clean chart, Exhaustion/Turbulence signals quiet?",
+      "guidance": "",
+      "weight": 1
+    }
+  ],
+  "scoring": {
+    "scale": "0_1_2",
+    "max_total": 16,
+    "pass_threshold": 12,
+    "strong_signals": ["bottleneck", "narrative"]
+  },
+  "tags": {
+    "bottleneck_position": [
+      "GPU", "Optical", "HBM", "CPU", "Power", "Cooling",
+      "Chemicals", "Battery", "Edge", "Embodiment"
+    ]
+  }
+}

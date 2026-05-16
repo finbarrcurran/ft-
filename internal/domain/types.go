@@ -181,3 +181,39 @@ type AlertResult struct {
 	Status   AlertKind `json:"status"`
 	Triggers []string  `json:"triggers"`
 }
+
+// WatchlistEntry is a row in the `watchlist` table (Spec 4 D1).
+type WatchlistEntry struct {
+	ID                 int64      `json:"id"`
+	UserID             int64      `json:"-"`
+	Ticker             string     `json:"ticker"`
+	Kind               string     `json:"kind"` // "stock" | "crypto"
+	CompanyName        *string    `json:"companyName"`
+	Sector             *string    `json:"sector"`
+	CurrentPrice       *float64   `json:"currentPrice"`
+	TargetEntryLow     *float64   `json:"targetEntryLow"`
+	TargetEntryHigh    *float64   `json:"targetEntryHigh"`
+	ThesisLink         *string    `json:"thesisLink"`
+	Note               *string    `json:"note"`
+	AddedAt            time.Time  `json:"addedAt"`
+	PromotedHoldingID  *int64     `json:"promotedHoldingId"`
+	DeletedAt          *time.Time `json:"deletedAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
+}
+
+// FrameworkScore is a row in the `framework_scores` table. Append-only — every
+// re-score creates a new row. Latest = MAX(scored_at) per (target_kind, target_id).
+type FrameworkScore struct {
+	ID            int64     `json:"id"`
+	UserID        int64     `json:"-"`
+	TargetKind    string    `json:"targetKind"` // "holding" | "watchlist"
+	TargetID      int64     `json:"targetId"`
+	FrameworkID   string    `json:"frameworkId"`
+	ScoredAt      time.Time `json:"scoredAt"`
+	TotalScore    int       `json:"totalScore"`
+	MaxScore      int       `json:"maxScore"`
+	Passes        bool      `json:"passes"`
+	ScoresJSON    string    `json:"scoresJson"`         // raw JSON: {qid: {score, note}}
+	TagsJSON      *string   `json:"tagsJson,omitempty"` // raw JSON: {tagKey: value}
+	ReviewerNote  *string   `json:"reviewerNote,omitempty"`
+}

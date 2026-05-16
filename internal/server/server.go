@@ -105,6 +105,17 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/feargreed", s.requireUser(s.handleFearGreed))
 	s.mux.HandleFunc("GET /api/feargreed/stocks", s.requireUser(s.handleFearGreedStocks))
 
+	// Spec 4: Watchlist + Framework Scoring — all require cookie auth.
+	s.mux.HandleFunc("GET /api/watchlist", s.requireUser(s.handleListWatchlist))
+	s.mux.HandleFunc("POST /api/watchlist", s.requireUser(s.handleCreateWatchlist))
+	s.mux.HandleFunc("PUT /api/watchlist/{id}", s.requireUser(s.handleUpdateWatchlist))
+	s.mux.HandleFunc("DELETE /api/watchlist/{id}", s.requireUser(s.handleSoftDeleteWatchlist))
+	s.mux.HandleFunc("POST /api/watchlist/{id}/promote", s.requireUser(s.handlePromoteWatchlist))
+	s.mux.HandleFunc("GET /api/frameworks", s.requireUser(s.handleListFrameworks))
+	s.mux.HandleFunc("GET /api/frameworks/{id}", s.requireUser(s.handleGetFramework))
+	s.mux.HandleFunc("GET /api/scores", s.requireUser(s.handleGetScores))
+	s.mux.HandleFunc("POST /api/scores", s.requireUser(s.handleCreateScore))
+
 	// Bot-facing endpoints — cookie OR bearer token. Designed for the OpenClaw
 	// skill but curl-friendly for humans too.
 	s.mux.HandleFunc("GET /api/bot/alerts", s.requireUserOrToken(s.handleBotAlerts))

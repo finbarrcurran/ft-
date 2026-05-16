@@ -81,7 +81,23 @@ func (s *Store) GetStockHolding(ctx context.Context, userID, id int64) (*domain.
 }
 
 func (s *Store) InsertStockHolding(ctx context.Context, h *domain.StockHolding) (int64, error) {
-	res, err := s.DB.ExecContext(ctx,
+	return execInsertStock(ctx, s.DB, h)
+}
+
+// InsertStockHoldingTx is the tx-aware variant used by the promote-to-holdings
+// flow in Spec 4 D6.
+func (s *Store) InsertStockHoldingTx(ctx context.Context, tx *sql.Tx, h *domain.StockHolding) (int64, error) {
+	return execInsertStock(ctx, tx, h)
+}
+
+// execInsertStock takes anything that implements ExecContext so the same SQL
+// can be used from either *sql.DB or *sql.Tx.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func execInsertStock(ctx context.Context, e execer, h *domain.StockHolding) (int64, error) {
+	res, err := e.ExecContext(ctx,
 		`INSERT INTO stock_holdings (
 		    user_id, name, ticker, category, sector,
 		    invested_usd, avg_open_price, current_price,
@@ -229,6 +245,16 @@ func (s *Store) GetCryptoHolding(ctx context.Context, userID, id int64) (*domain
 }
 
 func (s *Store) InsertCryptoHolding(ctx context.Context, h *domain.CryptoHolding) (int64, error) {
+	return execInsertCrypto(ctx, s.DB, h)
+}
+
+// InsertCryptoHoldingTx is the tx-aware variant used by the promote-to-holdings
+// flow in Spec 4 D6.
+func (s *Store) InsertCryptoHoldingTx(ctx context.Context, tx *sql.Tx, h *domain.CryptoHolding) (int64, error) {
+	return execInsertCrypto(ctx, tx, h)
+}
+
+func execInsertCrypto(ctx context.Context, e execer, h *domain.CryptoHolding) (int64, error) {
 	isCore := 0
 	if h.IsCore || h.Classification == "core" {
 		isCore = 1
@@ -237,7 +263,7 @@ func (s *Store) InsertCryptoHolding(ctx context.Context, h *domain.CryptoHolding
 	if tier == "" {
 		tier = "medium"
 	}
-	res, err := s.DB.ExecContext(ctx,
+	res, err := e.ExecContext(ctx,
 		`INSERT INTO crypto_holdings (
 		    user_id, name, symbol, classification, is_core, category, wallet,
 		    quantity_held, quantity_staked,

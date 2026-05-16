@@ -1,0 +1,74 @@
+{
+  "id": "cowen",
+  "name": "Benjamin Cowen — Crypto Selection",
+  "applies_to": "crypto",
+  "version": "1.0",
+  "source": "Into The Cryptoverse — synthesized May 2026",
+  "questions": [
+    {
+      "id": "phase",
+      "label": "Phase",
+      "prompt": "In Accumulation or Early Bull on macro cycle?",
+      "guidance": "Look at logarithmic regression band + risk metric. Avoid Late Bull / Euphoria entries.",
+      "weight": 2
+    },
+    {
+      "id": "macro",
+      "label": "Macro",
+      "prompt": "Macro liquidity environment supportive (Fed pivots, DXY weakness)?",
+      "guidance": "Global M2 growth, DXY < 100 trending down, real yields softening.",
+      "weight": 2
+    },
+    {
+      "id": "risk_band",
+      "label": "Risk Band",
+      "prompt": "Cowen risk metric < 0.5 for accumulation, or trending down from peak?",
+      "guidance": "0.0-0.25 strong accumulate. 0.75+ distribute zone.",
+      "weight": 1
+    },
+    {
+      "id": "dominance",
+      "label": "Dominance",
+      "prompt": "BTC dominance behaviour aligned with thesis (rising → BTC, falling → alts)?",
+      "guidance": "",
+      "weight": 1
+    },
+    {
+      "id": "eth_btc",
+      "label": "ETH/BTC",
+      "prompt": "ETH/BTC trend supportive of the bet (rising favours alts/ETH; falling favours BTC)?",
+      "guidance": "",
+      "weight": 1
+    },
+    {
+      "id": "rel_strength",
+      "label": "Relative Strength",
+      "prompt": "Outperforming BTC over trailing 30 / 90 days?",
+      "guidance": "",
+      "weight": 1
+    },
+    {
+      "id": "on_chain",
+      "label": "On-Chain",
+      "prompt": "Healthy on-chain signals (active addresses, TVL, fees) trending up?",
+      "guidance": "",
+      "weight": 1
+    },
+    {
+      "id": "behavioural",
+      "label": "Behavioural",
+      "prompt": "Sentiment positioning supportive (extreme fear in accumulation, not euphoria)?",
+      "guidance": "Crypto Fear & Greed < 30 for accumulation. > 80 in distribution.",
+      "weight": 1
+    }
+  ],
+  "scoring": {
+    "scale": "0_1_2",
+    "max_total": 16,
+    "pass_threshold": 12,
+    "strong_signals": ["phase", "macro"]
+  },
+  "tags": {
+    "cycle_phase": ["Accumulation", "Early Bull", "Late Bull", "Euphoria"]
+  }
+}

@@ -15,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"ft/internal/config"
+	"ft/internal/frameworks"
 	"ft/internal/refresh"
 	"ft/internal/server"
 	"ft/internal/store"
@@ -137,6 +138,10 @@ func runServe() {
 	must("open store", err)
 	defer st.Close()
 	must("migrate", st.Migrate())
+
+	// Spec 4: load Jordi/Cowen framework definitions. Malformed JSON disables
+	// that framework with a warning but doesn't crash the server.
+	must("frameworks", frameworks.Load())
 
 	srv := server.New(cfg, st)
 
