@@ -6,7 +6,19 @@ import (
 	"ft/internal/metrics"
 	"ft/internal/sparkline"
 	"net/http"
+	"time"
 )
+
+// scoreSummary is the shape attached to each holding/watchlist row so the
+// frontend can render a Score column without a second round-trip. (Spec 4 D7.)
+type scoreSummary struct {
+	TotalScore  int    `json:"totalScore"`
+	MaxScore    int    `json:"maxScore"`
+	Passes      bool   `json:"passes"`
+	FrameworkID string `json:"frameworkId"`
+	ScoredAt    string `json:"scoredAt"` // ISO; client computes "120d ago" etc.
+	StaleDays   int    `json:"staleDays"`
+}
 
 // stockResp is the API shape returned by /api/holdings/stocks. The holding
 // itself is embedded so the JSON has every StockHolding field at the top
@@ -20,6 +32,7 @@ type stockResp struct {
 	Sparkline30dPct float64            `json:"sparkline30dPct"` // for hover popover label
 	SuggestedSLPct float64             `json:"suggestedSlPct"` // negative; from risk_rules.go
 	SuggestedTPPct float64             `json:"suggestedTpPct"` // positive; from risk_rules.go
+	Score         *scoreSummary        `json:"score,omitempty"` // Spec 4 D7
 }
 
 type cryptoResp struct {
@@ -30,6 +43,7 @@ type cryptoResp struct {
 	Sparkline30dPct float64             `json:"sparkline30dPct"`
 	SuggestedSLPct float64              `json:"suggestedSlPct"`
 	SuggestedTPPct float64              `json:"suggestedTpPct"`
+	Score         *scoreSummary         `json:"score,omitempty"` // Spec 4 D7
 }
 
 // GET /api/holdings/stocks
@@ -42,12 +56,15 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 
 	// Batch-fetch sparkline closes for all tickers in one query.
 	tickers := make([]string, 0, len(holdings))
+	ids := make([]int64, 0, len(holdings))
 	for _, h := range holdings {
+		ids = append(ids, h.ID)
 		if h.Ticker != nil && *h.Ticker != "" {
 			tickers = append(tickers, *h.Ticker)
 		}
 	}
 	closes, _ := s.store.GetAllSparklineCloses(r.Context(), "stock", tickers, 30)
+	scoreByID, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "holding", ids)
 
 	out := make([]stockResp, 0, len(holdings))
 	for _, h := range holdings {
@@ -66,6 +83,7 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 			Sparkline30dPct: sparkline.ChangePct(series),
 			SuggestedSLPct:  slPct,
 			SuggestedTPPct:  tpPct,
+			Score:           toScoreSummary(scoreByID[h.ID]),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"holdings": out})
@@ -80,10 +98,13 @@ func (s *Server) handleListCrypto(w http.ResponseWriter, r *http.Request) {
 	}
 
 	symbols := make([]string, 0, len(holdings))
+	ids := make([]int64, 0, len(holdings))
 	for _, h := range holdings {
 		symbols = append(symbols, h.Symbol)
+		ids = append(ids, h.ID)
 	}
 	closes, _ := s.store.GetAllSparklineCloses(r.Context(), "crypto", symbols, 30)
+	scoreByID, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "holding", ids)
 
 	out := make([]cryptoResp, 0, len(holdings))
 	for _, h := range holdings {
@@ -97,7 +118,25 @@ func (s *Server) handleListCrypto(w http.ResponseWriter, r *http.Request) {
 			Sparkline30dPct: sparkline.ChangePct(series),
 			SuggestedSLPct:  slPct,
 			SuggestedTPPct:  tpPct,
+			Score:           toScoreSummary(scoreByID[h.ID]),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"holdings": out})
+}
+
+// toScoreSummary maps a domain.FrameworkScore → the compact response shape.
+// nil-in nil-out so the JSON cleanly omits "score" when never scored.
+func toScoreSummary(fs *domain.FrameworkScore) *scoreSummary {
+	if fs == nil {
+		return nil
+	}
+	stale := int(time.Since(fs.ScoredAt).Hours() / 24)
+	return &scoreSummary{
+		TotalScore:  fs.TotalScore,
+		MaxScore:    fs.MaxScore,
+		Passes:      fs.Passes,
+		FrameworkID: fs.FrameworkID,
+		ScoredAt:    fs.ScoredAt.Format(time.RFC3339),
+		StaleDays:   stale,
+	}
 }

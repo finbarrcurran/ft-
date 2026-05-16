@@ -1067,6 +1067,184 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   font-family: var(--font-mono);
 }
 
+/* ----- Spec 4 D8: stale-score nudge banner ----------------------------- */
+.stale-banner {
+  background: rgb(var(--color-amber) / 0.12);
+  border: 1px solid rgb(var(--color-amber) / 0.35);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.9rem;
+  color: rgb(var(--color-text));
+}
+
+/* ----- Spec 4: watchlist + framework scoring --------------------------- */
+.watchlist .wl-actions {
+  white-space: nowrap;
+}
+.row-mini {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  color: rgb(var(--color-text-muted));
+  border-radius: var(--radius2);
+  width: 24px;
+  height: 24px;
+  font-size: 0.9rem;
+  margin-right: 2px;
+  cursor: pointer;
+}
+.row-mini:hover { background: rgb(var(--color-surface-raised)); color: rgb(var(--color-text)); }
+.row-mini.danger { color: rgb(var(--color-loss)); }
+.row-mini.danger:hover { background: rgb(var(--color-loss) / 0.15); }
+
+.dist-in {
+  background: rgb(var(--color-gain) / 0.15);
+  color: rgb(var(--color-gain-strong));
+  border: 1px solid rgb(var(--color-gain) / 0.3);
+  border-radius: var(--radius2);
+  padding: 0.1rem 0.4rem;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+}
+.dist-above {
+  color: rgb(var(--color-text-muted));
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+.dist-below {
+  background: rgb(var(--color-amber) / 0.18);
+  color: rgb(var(--color-amber));
+  border: 1px solid rgb(var(--color-amber) / 0.3);
+  border-radius: var(--radius2);
+  padding: 0.1rem 0.4rem;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+}
+
+.score-badge {
+  display: inline-block;
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius2);
+  padding: 0.1rem 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+.score-badge.pass {
+  background: rgb(var(--color-gain) / 0.15);
+  color: rgb(var(--color-gain-strong));
+  border-color: rgb(var(--color-gain) / 0.4);
+}
+.score-badge.fail {
+  background: rgb(var(--color-surface));
+  color: rgb(var(--color-amber));
+  border-color: rgb(var(--color-amber) / 0.3);
+}
+.score-badge.stale {
+  border-style: dashed;
+}
+
+.tag-pill {
+  background: rgb(var(--color-accent) / 0.15);
+  color: rgb(var(--color-accent-strong));
+  border: 1px solid rgb(var(--color-accent) / 0.3);
+  border-radius: var(--radius2);
+  padding: 0.1rem 0.4rem;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+}
+
+/* Score screen */
+.modal.score-modal {
+  max-width: 720px;
+  width: 100%;
+}
+.score-summary {
+  display: inline-block;
+  background: rgb(var(--color-surface-raised));
+  border: 1px solid rgb(var(--color-border-strong));
+  border-radius: var(--radius);
+  padding: 0.5rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: rgb(var(--color-text));
+}
+.score-summary.pass {
+  background: rgb(var(--color-gain) / 0.18);
+  border-color: rgb(var(--color-gain) / 0.5);
+  color: rgb(var(--color-gain-strong));
+}
+.score-summary.fail {
+  background: rgb(var(--color-surface-raised));
+  color: rgb(var(--color-amber));
+}
+
+.score-q {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 0.7rem;
+}
+.score-q.strong {
+  border-left: 3px solid rgb(var(--color-accent));
+  background: rgb(var(--color-surface-raised));
+}
+.score-q-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin-bottom: 0.3rem;
+}
+.score-q-label {
+  font-weight: 600;
+}
+.strong-pill {
+  background: rgb(var(--color-accent) / 0.2);
+  color: rgb(var(--color-accent-strong));
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 8px;
+  margin-left: 0.4rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+.score-q-prompt {
+  color: rgb(var(--color-text-muted));
+  font-size: 0.88rem;
+}
+.score-q-guidance {
+  color: rgb(var(--color-text-dim));
+  font-size: 0.78rem;
+  margin-bottom: 0.45rem;
+  font-style: italic;
+}
+.score-q-radios {
+  display: flex;
+  gap: 0.85rem;
+  margin: 0.4rem 0 0.5rem 0;
+}
+.score-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.score-q-note {
+  width: 100%;
+  font-size: 0.82rem;
+}
+.score-tags {
+  margin-top: 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgb(var(--color-border));
+}
+
 /* ----- Spec 3 D9: ticker hover popover --------------------------------- */
 .ticker-hover {
   cursor: help;

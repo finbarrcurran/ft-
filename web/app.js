@@ -115,6 +115,22 @@ function earningsCell(iso) {
   else if (d <= 30) cls = 'earn-mid';
   return `<span class="${cls}" title="${escapeHTML(iso)}">in ${d}d</span>`;
 }
+// scoreCell — Spec 4 D7. Renders the latest-score badge for a holdings row.
+//   never scored → "—"
+//   pass + fresh  → "12/16 ✓" green
+//   below thresh  → "9/16" amber
+//   >90d stale    → "12/16 ⚠ 120d" dashed border
+function scoreCell(score) {
+  if (!score) return '<span class="dim">—</span>';
+  const stale = score.staleDays > 90;
+  const cls = ['score-badge'];
+  cls.push(score.passes ? 'pass' : 'fail');
+  if (stale) cls.push('stale');
+  const tickMark = score.passes ? ' ✓' : '';
+  const staleMark = stale ? ` ⚠ ${score.staleDays}d` : '';
+  return `<span class="${cls.join(' ')}" title="Scored ${score.scoredAt.slice(0,10)} · framework: ${escapeHTML(score.frameworkId)}">${score.totalScore}/${score.maxScore}${tickMark}${staleMark}</span>`;
+}
+
 function exDivCell(iso) {
   const d = daysUntilISO(iso);
   if (d == null) return '<span class="dim">—</span>';
@@ -222,6 +238,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'summary' ? 'active' : ''}" data-tab="summary">Summary</button>
         <button class="tab ${state.tab === 'stocks' ? 'active' : ''}" data-tab="stocks">Stocks &amp; ETFs</button>
         <button class="tab ${state.tab === 'crypto' ? 'active' : ''}" data-tab="crypto">Crypto</button>
+        <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
         <button class="tab ${state.tab === 'news' ? 'active' : ''}" data-tab="news">News</button>
         <button class="tab ${state.tab === 'crypto-news' ? 'active' : ''}" data-tab="crypto-news">Crypto News</button>
@@ -648,6 +665,8 @@ async function loadActiveTab() {
         state.crypto = res.holdings || [];
       }
       renderCrypto();
+    } else if (state.tab === 'watchlist') {
+      await renderWatchlist();
     } else if (state.tab === 'heatmap') {
       await renderHeatmap();
     } else if (state.tab === 'news') {
@@ -759,7 +778,12 @@ async function renderSummary() {
     </p>
   `;
 
-  content.innerHTML = toggle + kpiRow + donutRow + footer;
+  // Spec 4 D8: stale-score nudge — counts holdings with no score or score
+  // older than 90 days. Fetched lazily; if the user hasn't visited Stocks/
+  // Crypto yet, we pull fresh lists in the background.
+  const staleBanner = `<div id="stale-score-banner"></div>`;
+
+  content.innerHTML = staleBanner + toggle + kpiRow + donutRow + footer;
 
   // Wire toggle clicks
   for (const btn of document.querySelectorAll('.ct-btn')) {
@@ -772,6 +796,48 @@ async function renderSummary() {
 
   // Flash any KPI value that moved since the last render (Spec 2 D7).
   flashOnRender();
+
+  // Stale-score nudge — defer to keep this render snappy.
+  updateStaleScoreBanner();
+}
+
+async function updateStaleScoreBanner() {
+  const el = $('#stale-score-banner');
+  if (!el) return;
+  let stocks = state.stocks;
+  let crypto = state.crypto;
+  try {
+    if (stocks == null) {
+      const r = await api('/api/holdings/stocks');
+      stocks = state.stocks = r.holdings || [];
+    }
+    if (crypto == null) {
+      const r = await api('/api/holdings/crypto');
+      crypto = state.crypto = r.holdings || [];
+    }
+  } catch (_) {
+    return; // silent — banner is a nudge, not critical
+  }
+  let unscored = 0;
+  let stale = 0;
+  for (const h of [...(stocks || []), ...(crypto || [])]) {
+    if (!h.score) unscored++;
+    else if (h.score.staleDays > 90) stale++;
+  }
+  const total = unscored + stale;
+  if (total === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  const parts = [];
+  if (unscored) parts.push(`${unscored} unscored`);
+  if (stale) parts.push(`${stale} stale (>90d)`);
+  el.innerHTML = `
+    <div class="stale-banner">
+      ⚠ <strong>${total}</strong> holding${total === 1 ? '' : 's'} need${total === 1 ? 's' : ''} framework scoring — ${parts.join(', ')}.
+      <span class="dim">Open Stocks or Crypto tab and click the score badge to update.</span>
+    </div>
+  `;
 }
 
 // flashOnRender walks every [data-flash-id] element on the page, compares
@@ -1045,6 +1111,7 @@ function renderStocks() {
         <td>${earningsCell(r.earningsDate)}</td>
         <td>${exDivCell(r.exDividendDate)}</td>
         <td class="sparkline-cell">${sparkSvg}</td>
+        <td>${scoreCell(r.score)}</td>
         ${noteCell}
         <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="stock" title="Edit">✎</button></td>
       </tr>
@@ -1077,6 +1144,7 @@ function renderStocks() {
             <th title="Next earnings">Earn</th>
             <th title="Next ex-dividend">Ex-Div</th>
             <th>30-day</th>
+            <th title="Latest framework score">Score</th>
             <th>Note</th>
             <th></th>
           </tr>
@@ -1167,6 +1235,7 @@ function renderCrypto() {
         <td class="num suggested" title="Suggested SL for ${escapeHTML(r.volTier || 'medium')}-vol">${fmtNum1.format(r.suggestedSlPct)}%</td>
         <td class="num suggested" title="Suggested TP for ${escapeHTML(r.volTier || 'medium')}-vol">${fmtNum1.format(r.suggestedTpPct)}%</td>
         <td class="sparkline-cell">${sparkSvg}</td>
+        <td>${scoreCell(r.score)}</td>
         ${noteCell}
         <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="crypto" title="Edit">✎</button></td>
       </tr>
@@ -1197,6 +1266,7 @@ function renderCrypto() {
             <th class="num" title="Suggested stop-loss % per vol tier">Sug SL</th>
             <th class="num" title="Suggested take-profit % per vol tier">Sug TP</th>
             <th>30-day</th>
+            <th title="Latest framework score">Score</th>
             <th>Note</th>
             <th></th>
           </tr>
@@ -1691,6 +1761,518 @@ async function boot() {
         </div>
       </div>
     `);
+  }
+}
+
+// ============================================================================
+// Spec 4 — Watchlist + Framework Scoring
+// ============================================================================
+
+const FRAMEWORK_THRESHOLD = 12; // default; per-framework value is loaded on the score screen.
+
+// Distance-to-entry classification for the watchlist table.
+function distanceToEntry(currentPrice, low, high) {
+  if (currentPrice == null) return { label: '—', cls: 'dim' };
+  if (low == null && high == null) return { label: '—', cls: 'dim' };
+  if (low != null && currentPrice < low) {
+    const pct = ((low - currentPrice) / low) * 100;
+    return { label: `${pct.toFixed(1)}% below`, cls: 'dist-below' };
+  }
+  if (high != null && currentPrice > high) {
+    const pct = ((currentPrice - high) / high) * 100;
+    return { label: `${pct.toFixed(1)}% above`, cls: 'dist-above' };
+  }
+  return { label: 'In range', cls: 'dist-in' };
+}
+
+// ---------- watchlist tab -----------------------------------------------
+
+async function renderWatchlist() {
+  const res = await api('/api/watchlist');
+  state.watchlist = res.watchlist || [];
+
+  if (state.watchlist.length === 0) {
+    $('#content').innerHTML = `
+      <div class="table-toolbar">
+        <button class="btn-ghost" id="add-watchlist-stock">+ Add stock to watchlist</button>
+        <button class="btn-ghost" id="add-watchlist-crypto">+ Add crypto to watchlist</button>
+      </div>
+      <div class="empty">
+        <div>Watchlist is empty.</div>
+        <div class="hint">Add tickers you're considering. Score them against the framework, then promote to a holding when ready.</div>
+      </div>
+    `;
+    $('#add-watchlist-stock').addEventListener('click', () => openWatchlistModal({ kind: 'stock', mode: 'add' }));
+    $('#add-watchlist-crypto').addEventListener('click', () => openWatchlistModal({ kind: 'crypto', mode: 'add' }));
+    return;
+  }
+
+  const rows = state.watchlist.map((e) => {
+    const dist = distanceToEntry(e.currentPrice, e.targetEntryLow, e.targetEntryHigh);
+    const target = e.targetEntryLow != null && e.targetEntryHigh != null
+      ? `$${fmtNum2.format(e.targetEntryLow)}–$${fmtNum2.format(e.targetEntryHigh)}`
+      : e.targetEntryLow != null ? `≥ $${fmtNum2.format(e.targetEntryLow)}`
+      : e.targetEntryHigh != null ? `≤ $${fmtNum2.format(e.targetEntryHigh)}`
+      : '—';
+    const score = e.latestScore;
+    const passed = score && score.totalScore >= (score.maxScore - 4); // default 12/16
+    const scoreCell = score
+      ? `<span class="score-badge ${passed ? 'pass' : 'fail'}">${score.totalScore}/${score.maxScore}${passed ? ' ✓' : ''}</span>`
+      : `<span class="dim">unscored</span>`;
+    const tag = score && score.tagsJson ? parseFirstTag(score.tagsJson) : null;
+    const tagCell = tag ? `<span class="tag-pill">${escapeHTML(tag)}</span>` : `<span class="dim">—</span>`;
+    const added = relativeAge(e.addedAt);
+    const note = e.note
+      ? `<span class="note-cell" title="${escapeHTML(e.note)}">${escapeHTML(e.note.length > 30 ? e.note.slice(0, 28) + '…' : e.note)}</span>`
+      : '<span class="dim">—</span>';
+    return `
+      <tr data-wid="${e.id}">
+        <td><strong>${escapeHTML(e.ticker)}</strong></td>
+        <td>${escapeHTML(e.companyName || '—')}</td>
+        <td><span class="dim">${escapeHTML(e.sector || '—')}</span></td>
+        <td class="num">${dash(e.currentPrice, fmtNum2)}</td>
+        <td class="num">${target}</td>
+        <td><span class="${dist.cls}">${dist.label}</span></td>
+        <td>${scoreCell}</td>
+        <td>${tagCell}</td>
+        <td><span class="dim">${added}</span></td>
+        <td>${note}</td>
+        <td class="wl-actions">
+          <button class="row-mini" data-act="score" data-wid="${e.id}" title="Score">⚖</button>
+          <button class="row-mini" data-act="edit" data-wid="${e.id}" title="Edit">✎</button>
+          <button class="row-mini" data-act="promote" data-wid="${e.id}" title="Promote to Holdings">▲</button>
+          <button class="row-mini danger" data-act="delete" data-wid="${e.id}" title="Delete">×</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  $('#content').innerHTML = `
+    <div class="table-toolbar">
+      <button class="btn-ghost" id="add-watchlist-stock">+ Add stock</button>
+      <button class="btn-ghost" id="add-watchlist-crypto">+ Add crypto</button>
+    </div>
+    <div class="tablewrap">
+      <table class="holdings watchlist">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Company</th>
+            <th>Sector</th>
+            <th class="num">Price</th>
+            <th class="num">Target</th>
+            <th>Distance</th>
+            <th>Score</th>
+            <th>Tag</th>
+            <th>Added</th>
+            <th>Note</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+  $('#add-watchlist-stock').addEventListener('click', () => openWatchlistModal({ kind: 'stock', mode: 'add' }));
+  $('#add-watchlist-crypto').addEventListener('click', () => openWatchlistModal({ kind: 'crypto', mode: 'add' }));
+  for (const btn of document.querySelectorAll('.row-mini')) {
+    btn.addEventListener('click', () => onWatchlistAction(btn.dataset.act, parseInt(btn.dataset.wid, 10)));
+  }
+}
+
+function parseFirstTag(jsonStr) {
+  try {
+    const obj = JSON.parse(jsonStr);
+    for (const k of Object.keys(obj)) return obj[k];
+  } catch (_) { /* ignore */ }
+  return null;
+}
+function relativeAge(iso) {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  const days = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
+  if (days === 0) return 'today';
+  if (days === 1) return '1d ago';
+  if (days < 30) return `${days}d ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+async function onWatchlistAction(act, wid) {
+  const entry = (state.watchlist || []).find((e) => e.id === wid);
+  if (!entry) return;
+  if (act === 'edit') return openWatchlistModal({ kind: entry.kind, mode: 'edit', entry });
+  if (act === 'delete') {
+    if (!confirm(`Remove ${entry.ticker} from watchlist?`)) return;
+    try { await api(`/api/watchlist/${wid}`, { method: 'DELETE' }); state.watchlist = null; loadActiveTab(); }
+    catch (e) { alert('delete failed: ' + e.message); }
+    return;
+  }
+  if (act === 'score') return openScoreScreen(wid);
+  if (act === 'promote') return openPromoteModal(entry);
+}
+
+// ---------- add / edit watchlist modal ---------------------------------
+
+function openWatchlistModal({ kind, mode, entry }) {
+  const isEdit = mode === 'edit';
+  const t = (k) => isEdit ? (entry[k] ?? '') : '';
+  const safeTicker = isEdit ? escapeHTML(entry.ticker) : '';
+  const html = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">${isEdit ? 'Edit' : 'Add'} ${kind} watchlist entry</div>
+            ${isEdit ? `<div class="desc tabular">${safeTicker}</div>` : ''}
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="wl-form" class="holding-form">
+            ${isEdit ? '' : `
+              <div class="form-row">
+                <label for="wl-ticker">Ticker *</label>
+                <input id="wl-ticker" name="ticker" type="text" required />
+              </div>`}
+            <div class="form-row">
+              <label for="wl-company">Company name</label>
+              <input id="wl-company" name="companyName" type="text" value="${escapeHTML(String(t('companyName')))}" />
+            </div>
+            <div class="form-row">
+              <label for="wl-sector">Sector</label>
+              <input id="wl-sector" name="sector" type="text" value="${escapeHTML(String(t('sector')))}" />
+            </div>
+            <div class="form-row">
+              <label for="wl-price">Current price</label>
+              <input id="wl-price" name="currentPrice" type="number" step="0.01" value="${escapeHTML(String(t('currentPrice')))}" />
+            </div>
+            <div class="form-row">
+              <label for="wl-low">Target entry low</label>
+              <input id="wl-low" name="targetEntryLow" type="number" step="0.01" value="${escapeHTML(String(t('targetEntryLow')))}" />
+            </div>
+            <div class="form-row">
+              <label for="wl-high">Target entry high</label>
+              <input id="wl-high" name="targetEntryHigh" type="number" step="0.01" value="${escapeHTML(String(t('targetEntryHigh')))}" />
+            </div>
+            <div class="form-row">
+              <label for="wl-thesis">Thesis link</label>
+              <input id="wl-thesis" name="thesisLink" type="text" value="${escapeHTML(String(t('thesisLink')))}" />
+            </div>
+            <div class="form-row">
+              <label for="wl-note">Note</label>
+              <textarea id="wl-note" name="note" rows="2">${escapeHTML(String(t('note')))}</textarea>
+            </div>
+            <div class="error" id="wl-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="wl-cancel">Cancel</button>
+          <button class="btn-primary" id="wl-save">${isEdit ? 'Save' : 'Add'}</button>
+        </div>
+      </div>
+    </div>
+  `;
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = html;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#wl-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#wl-save').addEventListener('click', () => submitWatchlistForm({ kind, mode, entry }));
+}
+
+async function submitWatchlistForm({ kind, mode, entry }) {
+  const form = $('#wl-form');
+  const err = $('#wl-err');
+  err.textContent = '';
+  const num = (k) => { const v = form.querySelector(`[name=${k}]`).value.trim(); return v === '' ? null : parseFloat(v); };
+  const str = (k) => { const v = form.querySelector(`[name=${k}]`).value.trim(); return v === '' ? null : v; };
+  const body = {
+    kind,
+    companyName: str('companyName'),
+    sector: str('sector'),
+    currentPrice: num('currentPrice'),
+    targetEntryLow: num('targetEntryLow'),
+    targetEntryHigh: num('targetEntryHigh'),
+    thesisLink: str('thesisLink'),
+    note: str('note'),
+  };
+  if (body.targetEntryLow != null && body.targetEntryHigh != null && body.targetEntryLow > body.targetEntryHigh) {
+    err.textContent = 'target low must be ≤ target high';
+    return;
+  }
+  let url = '/api/watchlist';
+  let method = 'POST';
+  if (mode === 'edit') {
+    url = `/api/watchlist/${entry.id}`;
+    method = 'PUT';
+  } else {
+    body.ticker = form.querySelector('[name=ticker]').value.trim().toUpperCase();
+    if (!body.ticker) { err.textContent = 'ticker is required'; return; }
+  }
+  try {
+    await api(url, { method, body: JSON.stringify(body) });
+    closeImportModal();
+    state.watchlist = null;
+    loadActiveTab();
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+// ---------- 8-question scoring screen ----------------------------------
+
+async function openScoreScreen(wid) {
+  const entry = (state.watchlist || []).find((e) => e.id === wid);
+  if (!entry) return;
+  // Load the framework definition + any existing latest score in parallel.
+  const fwID = entry.kind === 'stock' ? 'jordi' : 'cowen';
+  let fw, prior;
+  try {
+    [fw, prior] = await Promise.all([
+      api(`/api/frameworks/${fwID}`),
+      api(`/api/scores?targetKind=watchlist&targetId=${entry.id}`),
+    ]);
+  } catch (e) {
+    alert('couldn\'t load framework: ' + e.message);
+    return;
+  }
+  const priorScores = (prior.score && prior.score.scoresJson) ? JSON.parse(prior.score.scoresJson) : {};
+  const priorTags = (prior.score && prior.score.tagsJson) ? JSON.parse(prior.score.tagsJson) : {};
+  const strongSet = new Set(fw.scoring.strong_signals || []);
+  const tagKeys = Object.keys(fw.tags || {});
+
+  const questionsHtml = fw.questions.map((q) => {
+    const cur = priorScores[q.id] ? priorScores[q.id].score : null;
+    const note = priorScores[q.id] ? priorScores[q.id].note : '';
+    const radios = [0, 1, 2].map((v) => `
+      <label class="score-radio">
+        <input type="radio" name="q-${q.id}" value="${v}" ${cur === v ? 'checked' : ''} />
+        <span>${v}${v === 0 ? ' — no' : v === 1 ? ' — partial' : ' — yes'}</span>
+      </label>
+    `).join('');
+    return `
+      <div class="score-q ${strongSet.has(q.id) ? 'strong' : ''}" data-qid="${q.id}">
+        <div class="score-q-head">
+          <span class="score-q-label">${escapeHTML(q.label)}${strongSet.has(q.id) ? ' <span class="strong-pill">strong</span>' : ''}</span>
+          <span class="score-q-prompt">${escapeHTML(q.prompt)}</span>
+        </div>
+        ${q.guidance ? `<div class="score-q-guidance">${escapeHTML(q.guidance)}</div>` : ''}
+        <div class="score-q-radios">${radios}</div>
+        <input class="score-q-note" name="qnote-${q.id}" type="text" placeholder="optional 1-line justification" value="${escapeHTML(note || '')}" />
+      </div>
+    `;
+  }).join('');
+
+  const tagSelectorsHtml = tagKeys.map((k) => {
+    const opts = (fw.tags[k] || []).map((v) =>
+      `<option value="${escapeHTML(v)}" ${priorTags[k] === v ? 'selected' : ''}>${escapeHTML(v)}</option>`
+    ).join('');
+    return `
+      <div class="form-row">
+        <label for="tag-${k}">${escapeHTML(humanizeKey(k))}</label>
+        <select id="tag-${k}" name="tag-${k}">
+          <option value="">—</option>${opts}
+        </select>
+      </div>
+    `;
+  }).join('');
+
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal score-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">${escapeHTML(fw.name)}</div>
+            <div class="desc tabular">${escapeHTML(entry.ticker)} · ${escapeHTML(entry.companyName || entry.kind)}</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="score-summary" id="score-summary">0/${fw.questions.length * 2}</div>
+          <form id="score-form">
+            ${questionsHtml}
+            <div class="score-tags">${tagSelectorsHtml}</div>
+            <div class="form-row">
+              <label for="score-reviewer-note">Reviewer note</label>
+              <textarea id="score-reviewer-note" name="reviewerNote" rows="2"></textarea>
+            </div>
+            <div class="error" id="score-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="score-cancel">Cancel</button>
+          <button class="btn-primary" id="score-save">Save score</button>
+        </div>
+      </div>
+    </div>
+  `;
+  closeImportModal();
+  document.body.appendChild(root);
+
+  const summaryEl = $('#score-summary');
+  const max = fw.questions.length * 2;
+  const threshold = fw.scoring.pass_threshold || FRAMEWORK_THRESHOLD;
+  const updateSummary = () => {
+    let total = 0;
+    for (const q of fw.questions) {
+      const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
+      if (checked) total += parseInt(checked.value, 10);
+    }
+    const passes = total >= threshold;
+    summaryEl.textContent = `${total}/${max} ${passes ? '✓ pass' : ''}`;
+    summaryEl.className = `score-summary ${passes ? 'pass' : total > 0 ? 'fail' : ''}`;
+  };
+  document.querySelectorAll('input[type=radio]').forEach((r) => r.addEventListener('change', updateSummary));
+  updateSummary();
+
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#score-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#score-save').addEventListener('click', () => submitScore(fw, entry, prior.score));
+}
+
+function humanizeKey(k) {
+  return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+async function submitScore(fw, entry, priorScore) {
+  const err = $('#score-err');
+  err.textContent = '';
+  const scores = {};
+  for (const q of fw.questions) {
+    const checked = document.querySelector(`input[name="q-${q.id}"]:checked`);
+    if (!checked) {
+      err.textContent = `Missing answer for "${q.label}"`;
+      return;
+    }
+    const note = document.querySelector(`input[name="qnote-${q.id}"]`).value.trim();
+    scores[q.id] = { score: parseInt(checked.value, 10), note: note || undefined };
+  }
+  const tags = {};
+  for (const k of Object.keys(fw.tags || {})) {
+    const v = document.querySelector(`[name="tag-${k}"]`).value;
+    if (v) tags[k] = v;
+  }
+  const reviewerNote = document.querySelector('[name="reviewerNote"]').value.trim();
+
+  try {
+    await api('/api/scores', {
+      method: 'POST',
+      body: JSON.stringify({
+        targetKind: 'watchlist',
+        targetId: entry.id,
+        frameworkId: fw.id,
+        scores,
+        tags: Object.keys(tags).length ? tags : undefined,
+        reviewerNote: reviewerNote || undefined,
+      }),
+    });
+    closeImportModal();
+    state.watchlist = null;
+    loadActiveTab();
+  } catch (e) {
+    err.textContent = e.message;
+  }
+}
+
+// ---------- promote-to-holdings modal -----------------------------------
+
+function openPromoteModal(entry) {
+  const isStock = entry.kind === 'stock';
+  const fields = isStock ? `
+    <div class="form-row"><label>Invested $ *</label><input name="investedUsd" type="number" step="0.01" required /></div>
+    <div class="form-row"><label>Avg open price</label><input name="avgOpenPrice" type="number" step="0.01" /></div>
+    <div class="form-row"><label>Stop loss</label><input name="stopLoss" type="number" step="0.01" /></div>
+    <div class="form-row"><label>Take profit</label><input name="takeProfit" type="number" step="0.01" /></div>
+    <div class="form-row"><label>Category</label><input name="category" type="text" /></div>
+  ` : `
+    <div class="form-row"><label>Quantity held *</label><input name="quantityHeld" type="number" step="any" required /></div>
+    <div class="form-row"><label>Quantity staked</label><input name="quantityStaked" type="number" step="any" /></div>
+    <div class="form-row"><label>Avg buy €</label><input name="avgBuyEur" type="number" step="0.0001" /></div>
+    <div class="form-row"><label>Cost basis €</label><input name="costBasisEur" type="number" step="0.01" /></div>
+    <div class="form-row"><label>Classification</label>
+      <select name="classification"><option value="alt">alt</option><option value="core">core</option></select>
+    </div>
+    <div class="form-row"><label>Volatility tier</label>
+      <select name="volTier">
+        <option value="low">low</option><option value="medium" selected>medium</option>
+        <option value="high">high</option><option value="extreme">extreme</option>
+      </select>
+    </div>
+  `;
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Promote to ${isStock ? 'holding' : 'crypto'}</div>
+            <div class="desc tabular">${escapeHTML(entry.ticker)} · ${escapeHTML(entry.companyName || entry.kind)}</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="promote-form" class="holding-form">${fields}
+            <div class="form-row"><label>Reason (audit)</label><input name="reason" type="text" /></div>
+            <div class="error" id="promote-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="promote-cancel">Cancel</button>
+          <button class="btn-primary" id="promote-save">Confirm promote</button>
+        </div>
+      </div>
+    </div>
+  `;
+  closeImportModal();
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#promote-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#promote-save').addEventListener('click', () => submitPromote(entry, isStock));
+}
+
+async function submitPromote(entry, isStock) {
+  const form = $('#promote-form');
+  const err = $('#promote-err');
+  err.textContent = '';
+  const num = (k) => { const el = form.querySelector(`[name=${k}]`); if (!el) return undefined; const v = el.value.trim(); return v === '' ? null : parseFloat(v); };
+  const str = (k) => { const el = form.querySelector(`[name=${k}]`); if (!el) return undefined; const v = el.value.trim(); return v === '' ? null : v; };
+  const body = isStock
+    ? {
+        investedUsd: num('investedUsd') || 0,
+        avgOpenPrice: num('avgOpenPrice'),
+        stopLoss: num('stopLoss'),
+        takeProfit: num('takeProfit'),
+        category: str('category'),
+        reason: str('reason'),
+      }
+    : {
+        quantityHeld: num('quantityHeld') || 0,
+        quantityStaked: num('quantityStaked') || 0,
+        avgBuyEur: num('avgBuyEur'),
+        costBasisEur: num('costBasisEur'),
+        classification: str('classification') || 'alt',
+        volTier: str('volTier') || 'medium',
+        reason: str('reason'),
+      };
+  if (isStock && !body.investedUsd) { err.textContent = 'invested $ required'; return; }
+  if (!isStock && !body.quantityHeld) { err.textContent = 'quantity held required'; return; }
+  try {
+    await api(`/api/watchlist/${entry.id}/promote`, { method: 'POST', body: JSON.stringify(body) });
+    closeImportModal();
+    state.watchlist = null;
+    if (isStock) state.stocks = null; else state.crypto = null;
+    loadActiveTab();
+  } catch (e) {
+    err.textContent = e.message;
   }
 }
 

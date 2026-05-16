@@ -51,6 +51,10 @@ type Scoring struct {
 
 // Validate enforces the contract the rest of the code relies on. Called once
 // per framework at load time.
+//
+// Scoring arithmetic: each question contributes a flat 0, 1, or 2 to the
+// total — `weight` is *metadata* (drives the "strong signal" badge in UI),
+// not a multiplier. So max_total is always 2 × len(questions).
 func (f Framework) Validate() error {
 	if f.ID == "" {
 		return fmt.Errorf("missing id")
@@ -62,7 +66,6 @@ func (f Framework) Validate() error {
 		return fmt.Errorf("no questions")
 	}
 	seen := map[string]bool{}
-	computedMax := 0
 	for _, q := range f.Questions {
 		if q.ID == "" {
 			return fmt.Errorf("question with no id")
@@ -74,14 +77,11 @@ func (f Framework) Validate() error {
 		if q.Weight < 0 {
 			return fmt.Errorf("question %s has negative weight", q.ID)
 		}
-		w := q.Weight
-		if w == 0 {
-			w = 1
-		}
-		computedMax += 2 * w // scale 0_1_2 → max contribution = 2*weight per question
 	}
+	computedMax := 2 * len(f.Questions)
 	if f.Scoring.MaxTotal != 0 && f.Scoring.MaxTotal != computedMax {
-		return fmt.Errorf("max_total mismatch: spec says %d, computed %d", f.Scoring.MaxTotal, computedMax)
+		return fmt.Errorf("max_total %d disagrees with 2 × %d questions = %d",
+			f.Scoring.MaxTotal, len(f.Questions), computedMax)
 	}
 	if f.Scoring.PassThreshold < 0 || f.Scoring.PassThreshold > computedMax {
 		return fmt.Errorf("pass_threshold %d out of [0, %d]", f.Scoring.PassThreshold, computedMax)
@@ -100,18 +100,11 @@ func (f Framework) QuestionByID(id string) (*Question, bool) {
 	return nil, false
 }
 
-// MaxScore returns the framework's max possible total. Derived from question
-// weights × 2 (the 0/1/2 scale).
+// MaxScore returns the framework's max possible total. Plain 2 × #questions —
+// `weight` is metadata only (drives the "strong signal" badge in UI), not a
+// score multiplier.
 func (f Framework) MaxScore() int {
-	max := 0
-	for _, q := range f.Questions {
-		w := q.Weight
-		if w == 0 {
-			w = 1
-		}
-		max += 2 * w
-	}
-	return max
+	return 2 * len(f.Questions)
 }
 
 // ----- registry ----------------------------------------------------------

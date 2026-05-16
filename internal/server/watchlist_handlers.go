@@ -376,10 +376,11 @@ func (s *Server) handleCreateScore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate every score is one of {0,1,2} and the q.ID exists.
+	// Arithmetic is unweighted: each question contributes 0/1/2 directly.
+	// `weight` on the framework is metadata only (strong-signal badges in UI).
 	total := 0
 	for qid, v := range req.Scores {
-		q, ok := fw.QuestionByID(qid)
-		if !ok {
+		if _, ok := fw.QuestionByID(qid); !ok {
 			writeError(w, http.StatusBadRequest, "unknown question id: "+qid)
 			return
 		}
@@ -387,11 +388,7 @@ func (s *Server) handleCreateScore(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "score must be 0/1/2 for "+qid)
 			return
 		}
-		weight := q.Weight
-		if weight == 0 {
-			weight = 1
-		}
-		total += v.Score * weight
+		total += v.Score
 	}
 
 	scoresJSON, err := json.Marshal(req.Scores)
