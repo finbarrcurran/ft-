@@ -149,6 +149,60 @@ func (s *Server) handleStaleNotes(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ----- resolve (D8) — ticker → candidate targets for bot /note ------
+
+// GET /api/notes/resolve?ticker=NVDA
+//
+// Returns candidates (stock holding, crypto holding, watchlist entries)
+// matching the ticker case-insensitively. Used by the FT bot's /note
+// TICKER flow.
+type resolvedTarget struct {
+	TargetKind  string `json:"targetKind"` // "holding" | "watchlist"
+	TargetID    int64  `json:"targetId"`
+	Ticker      string `json:"ticker"`
+	Name        string `json:"name"`
+	HoldingKind string `json:"holdingKind,omitempty"` // "stock" | "crypto"
+}
+
+func (s *Server) handleResolveNoteTarget(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFromContext(r.Context())
+	t := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("ticker")))
+	if t == "" {
+		writeError(w, http.StatusBadRequest, "ticker required")
+		return
+	}
+	out := []resolvedTarget{}
+	stocks, _ := s.store.ListStockHoldings(r.Context(), userID)
+	for _, h := range stocks {
+		if h.Ticker != nil && strings.ToUpper(*h.Ticker) == t {
+			out = append(out, resolvedTarget{
+				TargetKind: "holding", TargetID: h.ID, Ticker: t, Name: h.Name, HoldingKind: "stock",
+			})
+		}
+	}
+	cryptos, _ := s.store.ListCryptoHoldings(r.Context(), userID)
+	for _, h := range cryptos {
+		if strings.ToUpper(h.Symbol) == t {
+			out = append(out, resolvedTarget{
+				TargetKind: "holding", TargetID: h.ID, Ticker: t, Name: h.Name, HoldingKind: "crypto",
+			})
+		}
+	}
+	wl, _ := s.store.ListWatchlist(r.Context(), userID)
+	for _, e := range wl {
+		if strings.ToUpper(e.Ticker) == t {
+			name := ""
+			if e.CompanyName != nil {
+				name = *e.CompanyName
+			}
+			out = append(out, resolvedTarget{
+				TargetKind: "watchlist", TargetID: e.ID, Ticker: t, Name: name, HoldingKind: e.Kind,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"targets": out})
+}
+
 // ----- contradictions (D7) ------------------------------------------
 
 func (s *Server) handleNoteContradictions(w http.ResponseWriter, r *http.Request) {

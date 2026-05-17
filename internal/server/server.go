@@ -164,6 +164,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/notes/{id}", s.requireUserOrToken(s.handleDeleteNote))
 	s.mux.HandleFunc("GET /api/notes/stale", s.requireUserOrToken(s.handleStaleNotes))
 	s.mux.HandleFunc("GET /api/notes/contradictions", s.requireUserOrToken(s.handleNoteContradictions))
+	s.mux.HandleFunc("GET /api/notes/resolve", s.requireUserOrToken(s.handleResolveNoteTarget))
 
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
