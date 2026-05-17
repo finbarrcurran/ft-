@@ -247,6 +247,7 @@ function renderDashboard(user) {
           <button class="btn-ghost" id="refresh">refresh</button>
           <button class="btn-ghost" id="import">import…</button>
           <button class="btn-ghost" id="export">save master</button>
+          <button class="btn-ghost" id="cmd-k-btn" title="Command palette (Cmd/Ctrl+K)">⌘K</button>
           <span>${escapeHTML(user.displayName || user.email)}</span>
           <button class="btn-ghost" id="logout">sign out</button>
         </div>
@@ -270,6 +271,7 @@ function renderDashboard(user) {
   $('#refresh').addEventListener('click', onRefresh);
   $('#import').addEventListener('click', openImportModal);
   $('#export').addEventListener('click', onExport);
+  $('#cmd-k-btn').addEventListener('click', () => openCommandPalette());
   for (const el of document.querySelectorAll('.tab')) {
     el.addEventListener('click', () => switchTab(el.dataset.tab));
   }
@@ -5163,5 +5165,239 @@ async function openPerfCohortDrill(key) {
   $('#modal-close').addEventListener('click', closeImportModal);
   $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
 }
+
+// ============================================================================
+// Spec 11b — Command palette (Cmd/Ctrl+K)
+// ============================================================================
+//
+// One overlay, one search input, fuzzy-filtered list of jumpable items:
+//   - Tabs (Summary / Stocks / Crypto / …)
+//   - Active holdings by ticker (jump to detail page)
+//   - Watchlist entries
+//   - Actions: refresh, import CSV, add stock, add crypto, …
+//
+// Keys when open:
+//   Esc            close
+//   Up/Down        move highlight
+//   Enter          activate
+//   Cmd/Ctrl+K     also closes (toggle)
+//
+// Keys when closed (only when no input is focused):
+//   Cmd/Ctrl+K     open palette
+//   /              same (treat as quick-search)
+
+let _cmdPaletteEls = null; // { root, input, list }
+let _cmdPaletteItems = [];
+let _cmdPaletteFiltered = [];
+let _cmdPaletteCursor = 0;
+
+// Build candidate items each open — holdings/watchlist may have changed.
+async function buildCommandPaletteItems() {
+  const items = [];
+  // Tabs.
+  const tabs = [
+    { id: 'summary',     label: 'Summary' },
+    { id: 'stocks',      label: 'Stocks & ETFs' },
+    { id: 'crypto',      label: 'Crypto' },
+    { id: 'performance', label: 'Performance' },
+    { id: 'screener',    label: 'Screener' },
+    { id: 'watchlist',   label: 'Watchlist' },
+    { id: 'heatmap',     label: 'Heatmap' },
+    { id: 'news',        label: 'News' },
+    { id: 'crypto-news', label: 'Crypto News' },
+    { id: 'settings',    label: 'Settings' },
+  ];
+  for (const t of tabs) {
+    items.push({
+      kind: 'tab',
+      label: 'Go to ' + t.label,
+      hint: 'tab',
+      sort: 'a' + t.id,
+      action: () => switchTab(t.id),
+    });
+  }
+  // Actions.
+  items.push(
+    { kind: 'action', label: 'Refresh market data',  hint: 'action', sort: 'b1', action: () => onRefresh() },
+    { kind: 'action', label: 'Import xlsx master',   hint: 'action', sort: 'b2', action: () => openImportModal() },
+    { kind: 'action', label: 'Export master xlsx',   hint: 'action', sort: 'b3', action: () => onExport() },
+    { kind: 'action', label: 'Add stock',            hint: 'action', sort: 'b4', action: () => openHoldingModal({ kind: 'stock', mode: 'add' }) },
+    { kind: 'action', label: 'Add crypto',           hint: 'action', sort: 'b5', action: () => openHoldingModal({ kind: 'crypto', mode: 'add' }) },
+    { kind: 'action', label: 'Import historical transactions (CSV)', hint: 'action', sort: 'b6', action: () => openTxnImportModal() },
+  );
+  // Holdings — lazy-load if not in state.
+  try {
+    if (state.stocks == null) {
+      const r = await api('/api/holdings/stocks');
+      state.stocks = r.holdings || [];
+    }
+    if (state.crypto == null) {
+      const r = await api('/api/holdings/crypto');
+      state.crypto = r.holdings || [];
+    }
+  } catch (_) { /* tolerate */ }
+  for (const h of (state.stocks || [])) {
+    const tk = h.ticker || h.name;
+    items.push({
+      kind: 'holding',
+      label: `${tk} — ${h.name}`,
+      hint: 'stock',
+      sort: 'c' + tk,
+      action: () => openHoldingDetail('stock', h.id),
+    });
+  }
+  for (const h of (state.crypto || [])) {
+    items.push({
+      kind: 'holding',
+      label: `${h.symbol} — ${h.name}`,
+      hint: 'crypto',
+      sort: 'c' + h.symbol,
+      action: () => openHoldingDetail('crypto', h.id),
+    });
+  }
+  // Watchlist — lazy-load.
+  try {
+    if (state.watchlist == null) {
+      const r = await api('/api/watchlist');
+      state.watchlist = r.watchlist || [];
+    }
+  } catch (_) { /* tolerate */ }
+  for (const w of (state.watchlist || [])) {
+    items.push({
+      kind: 'watchlist',
+      label: `${w.ticker} — ${w.companyName || w.kind} (watchlist)`,
+      hint: 'watchlist',
+      sort: 'd' + w.ticker,
+      action: () => { switchTab('watchlist'); /* future: scroll to row */ },
+    });
+  }
+  items.sort((a, b) => a.sort.localeCompare(b.sort));
+  return items;
+}
+
+// Subsequence fuzzy match: returns true if every char of q appears in s in
+// order. Case-insensitive. Empty q → match everything.
+function fuzzyMatch(q, s) {
+  if (!q) return true;
+  q = q.toLowerCase();
+  s = s.toLowerCase();
+  let qi = 0;
+  for (let i = 0; i < s.length && qi < q.length; i++) {
+    if (s[i] === q[qi]) qi++;
+  }
+  return qi === q.length;
+}
+
+function renderCommandPaletteList() {
+  if (!_cmdPaletteEls) return;
+  const html = _cmdPaletteFiltered.slice(0, 50).map((it, i) => `
+    <li class="cp-item ${i === _cmdPaletteCursor ? 'active' : ''}" data-cp-idx="${i}">
+      <span class="cp-label">${escapeHTML(it.label)}</span>
+      <span class="cp-hint dim">${escapeHTML(it.hint)}</span>
+    </li>
+  `).join('') || `<li class="cp-empty dim">No matches</li>`;
+  _cmdPaletteEls.list.innerHTML = html;
+  // Click-to-activate.
+  _cmdPaletteEls.list.querySelectorAll('[data-cp-idx]').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = parseInt(el.dataset.cpIdx, 10);
+      activateCommandPaletteItem(idx);
+    });
+  });
+}
+
+function activateCommandPaletteItem(idx) {
+  const it = _cmdPaletteFiltered[idx];
+  if (!it) return;
+  closeCommandPalette();
+  try { it.action(); } catch (e) { console.warn('cmd palette action failed', e); }
+}
+
+async function openCommandPalette() {
+  if (_cmdPaletteEls) return; // already open
+  _cmdPaletteItems = await buildCommandPaletteItems();
+  _cmdPaletteFiltered = _cmdPaletteItems;
+  _cmdPaletteCursor = 0;
+  const root = document.createElement('div');
+  root.id = 'cmd-palette-root';
+  root.innerHTML = `
+    <div class="cp-overlay" id="cp-overlay">
+      <div class="cp" role="dialog" aria-label="Command palette">
+        <input id="cp-input" class="cp-input" type="text" placeholder="Search tabs, holdings, actions…  (Esc to close)" autocomplete="off" />
+        <ul class="cp-list" id="cp-list"></ul>
+        <div class="cp-foot dim">↑↓ navigate · Enter open · Esc close</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  _cmdPaletteEls = {
+    root,
+    input: root.querySelector('#cp-input'),
+    list:  root.querySelector('#cp-list'),
+  };
+  renderCommandPaletteList();
+  _cmdPaletteEls.input.focus();
+  _cmdPaletteEls.input.addEventListener('input', () => {
+    const q = _cmdPaletteEls.input.value.trim();
+    _cmdPaletteFiltered = _cmdPaletteItems.filter(it => fuzzyMatch(q, it.label));
+    _cmdPaletteCursor = 0;
+    renderCommandPaletteList();
+  });
+  _cmdPaletteEls.input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      if (_cmdPaletteCursor < _cmdPaletteFiltered.length - 1) {
+        _cmdPaletteCursor++;
+        renderCommandPaletteList();
+      }
+    } else if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (_cmdPaletteCursor > 0) {
+        _cmdPaletteCursor--;
+        renderCommandPaletteList();
+      }
+    } else if (ev.key === 'Enter') {
+      ev.preventDefault();
+      activateCommandPaletteItem(_cmdPaletteCursor);
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      closeCommandPalette();
+    }
+  });
+  root.querySelector('#cp-overlay').addEventListener('click', (ev) => {
+    if (ev.target.id === 'cp-overlay') closeCommandPalette();
+  });
+}
+
+function closeCommandPalette() {
+  if (!_cmdPaletteEls) return;
+  _cmdPaletteEls.root.remove();
+  _cmdPaletteEls = null;
+}
+
+// Global keyboard listener — installed once at boot.
+function installCommandPaletteShortcut() {
+  document.addEventListener('keydown', (ev) => {
+    // Cmd/Ctrl+K toggles.
+    if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'k' || ev.key === 'K')) {
+      ev.preventDefault();
+      if (_cmdPaletteEls) closeCommandPalette();
+      else openCommandPalette();
+      return;
+    }
+    // "/" opens too — but only when nothing else has focus.
+    if (ev.key === '/' && !_cmdPaletteEls) {
+      const active = document.activeElement;
+      const tag = active && active.tagName;
+      const editable = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+      if (!editable) {
+        ev.preventDefault();
+        openCommandPalette();
+      }
+    }
+  });
+}
+
+installCommandPaletteShortcut();
 
 boot();
