@@ -609,6 +609,56 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   gap: 0.4rem;
   cursor: pointer;
 }
+/* Spec 10 — per-holding detail page */
+.detail-header {
+  margin-bottom: 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid rgb(var(--color-border));
+}
+.detail-back { margin-bottom: 0.4rem; }
+.detail-name {
+  font-size: 1.4rem;
+  margin: 0.2rem 0 0.3rem;
+  letter-spacing: 0.02em;
+}
+.detail-meta {
+  font-size: 0.85rem;
+  color: rgb(var(--color-text-muted));
+  margin-bottom: 0.6rem;
+}
+.detail-meta span { margin-right: 0.4rem; }
+.detail-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.6rem;
+}
+.detail-kpi {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.5rem 0.7rem;
+}
+.detail-kpi .num.strong { font-size: 1.05rem; font-weight: 600; }
+.detail-section {
+  margin-top: 1.2rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid rgb(var(--color-border));
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.4rem 1rem;
+  font-size: 0.88rem;
+  font-family: var(--font-mono);
+}
+.detail-score-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.holding-name-cell { cursor: pointer; }
+.holding-name-cell:hover { background: rgb(var(--color-surface-raised)); }
+
 /* Spec 9d — Performance tab */
 .perf-toolbar {
   display: flex;

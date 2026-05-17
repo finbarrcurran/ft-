@@ -1111,9 +1111,18 @@ async function onRefresh() {
 
 function switchTab(tab) {
   state.tab = tab;
+  // Spec 10 — clicking any top-level tab leaves the per-holding detail
+  // page if one was open.
+  state.holdingDetail = null;
   for (const el of document.querySelectorAll('.tab')) {
     el.classList.toggle('active', el.dataset.tab === tab);
   }
+  loadActiveTab();
+}
+
+// Spec 10 — open the per-holding detail page.
+function openHoldingDetail(kind, id) {
+  state.holdingDetail = { kind, id };
   loadActiveTab();
 }
 
@@ -1121,6 +1130,13 @@ async function loadActiveTab() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading…</div>';
   try {
+    // Spec 10 — per-holding detail page takes over the content area when
+    // state.holdingDetail is set. Tab bar stays visible; clicking another
+    // tab clears holdingDetail.
+    if (state.holdingDetail) {
+      await renderHoldingDetail(state.holdingDetail);
+      return;
+    }
     if (state.tab === 'summary') {
       await renderSummary();
     } else if (state.tab === 'stocks') {
@@ -1770,7 +1786,7 @@ function renderStocks() {
     return `
       <tr data-row-id="${r.id}" data-row-kind="stock">
         <td>${badge}</td>
-        <td>
+        <td class="holding-name-cell" data-holding-detail="stock:${r.id}" title="Open detail page">
           <div>${escapeHTML(r.name)}</div>
           <div class="ticker">${tickerCell}${r.category ? ' · <span class="dim">' + escapeHTML(r.category) + '</span>' : ''}</div>
         </td>
@@ -1897,7 +1913,7 @@ function renderCrypto() {
     const symbolCell = `<span class="ticker-hover" data-row-id="${r.id}" data-row-kind="crypto" tabindex="0">${escapeHTML(r.symbol)}</span>`;
     return `
       <tr data-row-id="${r.id}" data-row-kind="crypto">
-        <td>
+        <td class="holding-name-cell" data-holding-detail="crypto:${r.id}" title="Open detail page">
           <div>${escapeHTML(r.name)} ${symbolCell}</div>
           <div class="ticker">${r.category ? escapeHTML(r.category) : '—'}${r.wallet ? ' · <span class="dim">' + escapeHTML(r.wallet) + '</span>' : ''}</div>
         </td>
@@ -2031,6 +2047,15 @@ function wireRowActions(kind) {
       const list = kind === 'stock' ? state.stocks : state.crypto;
       const holding = (list || []).find((h) => h.id === id);
       if (holding) openHoldingModal({ kind, mode: 'edit', holding });
+    });
+  }
+  // Spec 10 — click name cell → open detail page.
+  for (const cell of document.querySelectorAll('.holding-name-cell[data-holding-detail]')) {
+    cell.addEventListener('click', (ev) => {
+      // Don't trigger when clicking inside the cell (e.g. ticker hover).
+      if (ev.target.closest('.row-edit')) return;
+      const [k, idStr] = cell.dataset.holdingDetail.split(':');
+      openHoldingDetail(k, parseInt(idStr, 10));
     });
   }
 }
@@ -2596,6 +2621,35 @@ function renderPortfolioRiskSection(r) {
   `;
 }
 
+// Spec 10 D9 — aggregated Tax Lots section.
+function renderTaxLotsSection(lots) {
+  if (lots.length === 0) return '';
+  const rows = lots.map((l) => {
+    const longTerm = l.holdingDays >= 365;
+    return `
+      <tr>
+        <td><strong>${escapeHTML(l.ticker)}</strong> <span class="dim">${escapeHTML(l.kind)}</span></td>
+        <td class="dim">${escapeHTML(new Date(l.openedAt).toLocaleDateString())}</td>
+        <td class="num">${l.holdingDays}d ${longTerm ? '<span class="gain" style="font-size:0.7rem">LT</span>' : ''}</td>
+        <td class="num">${fmtNum6.format(l.quantityOpen)}</td>
+        <td class="num">$${fmtNum2.format(l.pricePerUnit)}</td>
+        <td class="num">$${fmtNum2.format(l.currentPrice || 0)}</td>
+        <td class="num ${l.unrealizedPnlUsd > 0 ? 'gain' : l.unrealizedPnlUsd < 0 ? 'loss' : ''}">${l.unrealizedPnlUsd >= 0 ? '+' : '-'}$${fmtNum2.format(Math.abs(l.unrealizedPnlUsd || 0))}</td>
+      </tr>
+    `;
+  }).join('');
+  return `
+    <section class="settings-block">
+      <h3 class="settings-h3">Tax lots <span class="dim" style="font-size:0.78rem; font-weight:normal">(FIFO; ${lots.length} open; "LT" = held ≥365 days)</span></h3>
+      <div class="tablewrap"><table class="holdings"><thead><tr>
+        <th>Ticker</th><th>Opened</th><th class="num">Held</th>
+        <th class="num">Qty open</th><th class="num">Cost / unit</th>
+        <th class="num">Current</th><th class="num">Unrealized</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    </section>
+  `;
+}
+
 // Spec 9c.1 D7 — LLM Spend dashboard section. Renders monthly + daily
 // progress bars, per-feature + per-model breakdown, status pills, and
 // action buttons (Adjust budgets / Emergency override / Pause toggle /
@@ -2852,14 +2906,39 @@ async function renderSettings() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading…</div>';
 
-  const [delStocks, delCrypto, audit, regimeHist, risk, llmSpend] = await Promise.all([
+  const [delStocks, delCrypto, audit, regimeHist, risk, llmSpend, stocksForLots, cryptoForLots] = await Promise.all([
     api('/api/holdings/stocks/deleted').catch(() => ({ holdings: [] })),
     api('/api/holdings/crypto/deleted').catch(() => ({ holdings: [] })),
     api('/api/audit?limit=100').catch(() => ({ audit: [] })),
     api('/api/regime/history?limit=50').catch(() => ({ history: [] })),
     api('/api/risk/dashboard').catch(() => null),
     api('/api/llm/spend').catch(() => null),
+    api('/api/holdings/stocks').catch(() => ({ holdings: [] })),
+    api('/api/holdings/crypto').catch(() => ({ holdings: [] })),
   ]);
+
+  // Spec 10 D9 — gather all open tax lots across all holdings for the
+  // Tax Lots section. Sequential because we want them in one ordered
+  // list — could parallelise but list is small.
+  const allLots = [];
+  for (const h of (stocksForLots.holdings || [])) {
+    try {
+      const r = await api(`/api/holdings/stocks/${h.id}/taxlots`);
+      for (const lot of (r.position?.taxLots || [])) {
+        allLots.push({ ...lot, ticker: h.ticker || h.name, kind: 'stock', currentPrice: r.currentPrice });
+      }
+    } catch (_) { /* skip individual failures */ }
+  }
+  for (const h of (cryptoForLots.holdings || [])) {
+    try {
+      const r = await api(`/api/holdings/crypto/${h.id}/taxlots`);
+      for (const lot of (r.position?.taxLots || [])) {
+        allLots.push({ ...lot, ticker: h.symbol, kind: 'crypto', currentPrice: r.currentPrice });
+      }
+    } catch (_) { /* skip */ }
+  }
+  allLots.sort((a, b) => new Date(a.openedAt) - new Date(b.openedAt));
+  const taxLotsHTML = renderTaxLotsSection(allLots);
 
   // Spec 9c D16 — Portfolio Risk Dashboard. Renders first so it's the
   // most prominent thing on the Settings page (above regime history).
@@ -2952,6 +3031,7 @@ async function renderSettings() {
 
     ${portfolioRiskHTML}
     ${llmSpendHTML}
+    ${taxLotsHTML}
     ${regimeHistoryHTML}
 
     <section class="settings-block">
@@ -3767,6 +3847,458 @@ async function submitPromote(entry, isStock) {
   } catch (e) {
     err.textContent = e.message;
   }
+}
+
+// ============================================================================
+// Spec 10 — Per-holding detail page
+// ============================================================================
+//
+// Sections (top to bottom):
+//   1. Header — name, ticker, sector, exchange, current price, P&L summary
+//   2. Position & risk — stage, setup, ATR, vol tier, R captured, R at risk
+//   3. Framework scores — Jordi/Cowen/Percoco latest + click-through to history
+//   4. Transactions table — buys/sells/fees + Add Transaction button
+//   5. Tax lots — FIFO breakdown
+//   6. Dividends — table + Add Dividend button (stocks only)
+//   7. Thesis — link + (Spec 11) notes
+//   8. Audit trail — recent audit entries for this holding
+
+async function renderHoldingDetail({ kind, id }) {
+  const content = $('#content');
+  content.innerHTML = '<div class="empty">loading detail…</div>';
+
+  let holding, txns, taxlots, audit, divs;
+  try {
+    const path = kind === 'stock' ? 'stocks' : 'crypto';
+    const [hRes, txnRes, lotRes, auditRes, divRes] = await Promise.all([
+      api(`/api/holdings/${path}`),
+      api(`/api/transactions?holdingKind=${kind}&holdingId=${id}`),
+      api(`/api/holdings/${path}/${id}/taxlots`),
+      api(`/api/audit?limit=50`),
+      kind === 'stock' ? api(`/api/dividends?holdingId=${id}`) : Promise.resolve({ dividends: [] }),
+    ]);
+    holding = (hRes.holdings || []).find((h) => h.id === id);
+    txns = txnRes.transactions || [];
+    taxlots = lotRes.position || { taxLots: [] };
+    audit = (auditRes.audit || []).filter((a) => a.holdingKind === kind && a.holdingId === id).slice(0, 20);
+    divs = divRes.dividends || [];
+  } catch (err) {
+    content.innerHTML = `<div class="empty"><div class="loss">detail failed: ${escapeHTML(err.message)}</div></div>`;
+    return;
+  }
+  if (!holding) {
+    content.innerHTML = `<div class="empty">Holding not found.</div>`;
+    return;
+  }
+
+  const tickerOrSym = holding.ticker || holding.symbol || '—';
+  const currentPrice = kind === 'stock' ? holding.currentPrice : holding.currentPriceUsd;
+  const positionUSD = taxlots.taxLots.reduce((s, l) => s + (l.quantityOpen * (currentPrice || 0)), 0);
+  const unrealized = taxlots.taxLots.reduce((s, l) => s + (l.unrealizedPnlUsd || 0), 0);
+  const totalDivs = divs.reduce((s, d) => s + (d.totalReceivedUsd || 0), 0);
+
+  const header = `
+    <div class="detail-header">
+      <div class="detail-back"><button class="btn-ghost" id="dh-back">← Back to ${escapeHTML(kind === 'stock' ? 'Stocks' : 'Crypto')}</button></div>
+      <h2 class="detail-name">${escapeHTML(tickerOrSym)} <span class="dim">${escapeHTML(holding.name)}</span></h2>
+      <div class="detail-meta">
+        ${holding.sector ? `<span>Sector: ${escapeHTML(holding.sector)}</span>` : ''}
+        ${holding.market ? `<span>· Market: ${escapeHTML(holding.market.name || '')}</span>` : ''}
+        <span>· Stage: <strong>${escapeHTML(holding.stage || 'pre_tp1')}</strong></span>
+      </div>
+      <div class="detail-kpi-row">
+        <div class="detail-kpi">
+          <div class="dim">Current price</div>
+          <div class="num strong">$${currentPrice != null ? fmtNum2.format(currentPrice) : '—'}</div>
+        </div>
+        <div class="detail-kpi">
+          <div class="dim">Position</div>
+          <div class="num strong">${fmtNum6.format(taxlots.quantity || 0)} ${kind === 'stock' ? 'sh' : 'units'}</div>
+          <div class="dim">Avg cost $${fmtNum2.format(taxlots.costBasisAvgUsd || 0)}</div>
+        </div>
+        <div class="detail-kpi">
+          <div class="dim">Value</div>
+          <div class="num strong">$${fmtNum0.format(positionUSD)}</div>
+        </div>
+        <div class="detail-kpi">
+          <div class="dim">Unrealized P&L</div>
+          <div class="num strong ${unrealized > 0 ? 'gain' : unrealized < 0 ? 'loss' : ''}">${unrealized >= 0 ? '+' : '-'}$${fmtNum0.format(Math.abs(unrealized))}</div>
+        </div>
+        <div class="detail-kpi">
+          <div class="dim">Realized P&L</div>
+          <div class="num strong ${holding.realizedPnlUsd > 0 ? 'gain' : holding.realizedPnlUsd < 0 ? 'loss' : ''}">${holding.realizedPnlUsd >= 0 ? '+' : '-'}$${fmtNum0.format(Math.abs(holding.realizedPnlUsd || 0))}</div>
+        </div>
+        ${kind === 'stock' ? `
+        <div class="detail-kpi">
+          <div class="dim">Dividends received</div>
+          <div class="num strong">$${fmtNum0.format(totalDivs)}</div>
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+
+  // Position & risk section.
+  const r1 = holding.resistance1, r2 = holding.resistance2, s1 = holding.support1;
+  const positionRisk = `
+    <section class="detail-section">
+      <h3 class="rh-side">Position & risk</h3>
+      <div class="detail-grid">
+        <div><span class="dim">Setup type:</span> ${escapeHTML(holding.setupType || '—')}</div>
+        <div><span class="dim">Vol tier:</span> ${escapeHTML(holding.volTierAuto || holding.volTier || '—')}</div>
+        <div><span class="dim">ATR (14w):</span> ${holding.atrWeekly ? '$' + fmtNum2.format(holding.atrWeekly) : '—'}</div>
+        <div><span class="dim">Support 1:</span> ${s1 ? '$' + fmtNum2.format(s1) : '—'}</div>
+        <div><span class="dim">Resistance 1:</span> ${r1 ? '$' + fmtNum2.format(r1) : '—'}</div>
+        <div><span class="dim">Resistance 2:</span> ${r2 ? '$' + fmtNum2.format(r2) : '—'}</div>
+        <div><span class="dim">Stop loss:</span> ${holding.stopLoss ? '$' + fmtNum2.format(holding.stopLoss) : '—'}</div>
+        <div><span class="dim">Take profit:</span> ${holding.takeProfit ? '$' + fmtNum2.format(holding.takeProfit) : '—'}</div>
+        <div><span class="dim">TP1 hit:</span> ${holding.tp1HitAt ? escapeHTML(new Date(holding.tp1HitAt).toLocaleDateString()) : '—'}</div>
+        <div><span class="dim">TP2 hit:</span> ${holding.tp2HitAt ? escapeHTML(new Date(holding.tp2HitAt).toLocaleDateString()) : '—'}</div>
+      </div>
+    </section>
+  `;
+
+  // Framework scores (latest).
+  const scoreSection = `
+    <section class="detail-section">
+      <h3 class="rh-side">Framework scores</h3>
+      <div class="detail-score-row">
+        ${scoreCell(holding.score)} <span class="dim" style="font-size:0.85rem; margin-left:0.5rem">Latest score (click on Watchlist tab to re-score; see Spec 4)</span>
+      </div>
+    </section>
+  `;
+
+  // Transactions.
+  const txnRows = txns.map((t) => `
+    <tr>
+      <td class="dim">${escapeHTML(new Date(t.executedAt).toLocaleDateString())}</td>
+      <td>${escapeHTML(t.txnType)}</td>
+      <td class="num">${fmtNum6.format(t.quantity)}</td>
+      <td class="num">$${fmtNum2.format(t.priceUsd)}</td>
+      <td class="num">$${fmtNum2.format(t.feesUsd)}</td>
+      <td class="num">$${fmtNum2.format(t.totalUsd)}</td>
+      <td class="dim">${escapeHTML(t.venue || '')}</td>
+      <td>
+        <button class="row-mini danger" data-supersede="${t.id}" title="Supersede (don't UPDATE — append correction)">×</button>
+      </td>
+    </tr>
+  `).join('') || `<tr><td colspan="8" class="dim" style="text-align:center; padding:0.6rem">No transactions yet.</td></tr>`;
+
+  const txnSection = `
+    <section class="detail-section">
+      <h3 class="rh-side" style="display:flex; justify-content:space-between; align-items:center">
+        <span>Transactions <span class="dim" style="font-size:0.78rem; font-weight:normal">(append-only)</span></span>
+        <button class="btn-ghost" id="dh-add-txn">+ Add transaction</button>
+      </h3>
+      <div class="tablewrap"><table class="holdings"><thead><tr>
+        <th>Date</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th>
+        <th class="num">Fees</th><th class="num">Total</th><th>Venue</th><th></th>
+      </tr></thead><tbody>${txnRows}</tbody></table></div>
+    </section>
+  `;
+
+  // Tax lots (FIFO).
+  const lotRows = taxlots.taxLots.map((l) => `
+    <tr>
+      <td class="dim">${escapeHTML(new Date(l.openedAt).toLocaleDateString())}</td>
+      <td class="num">${fmtNum6.format(l.quantityOpen)}</td>
+      <td class="num">${fmtNum6.format(l.quantityOrig)}</td>
+      <td class="num">$${fmtNum2.format(l.pricePerUnit)}</td>
+      <td class="num">${l.holdingDays}d</td>
+      <td class="num ${l.unrealizedPnlUsd > 0 ? 'gain' : l.unrealizedPnlUsd < 0 ? 'loss' : ''}">${l.unrealizedPnlUsd >= 0 ? '+' : '-'}$${fmtNum2.format(Math.abs(l.unrealizedPnlUsd))}</td>
+    </tr>
+  `).join('') || `<tr><td colspan="6" class="dim" style="text-align:center">No open lots.</td></tr>`;
+
+  const lotsSection = `
+    <section class="detail-section">
+      <h3 class="rh-side">Tax lots <span class="dim" style="font-size:0.78rem; font-weight:normal">(FIFO)</span></h3>
+      <div class="tablewrap"><table class="holdings"><thead><tr>
+        <th>Opened</th><th class="num">Qty open</th><th class="num">Qty orig</th>
+        <th class="num">Price</th><th class="num">Held</th><th class="num">Unrealized</th>
+      </tr></thead><tbody>${lotRows}</tbody></table></div>
+    </section>
+  `;
+
+  // Dividends (stocks only).
+  let divSection = '';
+  if (kind === 'stock') {
+    const divRows = divs.map((d) => `
+      <tr>
+        <td class="dim">${escapeHTML(d.exDate)}</td>
+        <td class="num">$${fmtNum4.format(d.amountPerShareUsd)}</td>
+        <td class="num">${fmtNum2.format(d.sharesHeld)}</td>
+        <td class="num">$${fmtNum2.format(d.totalReceivedUsd)}</td>
+        <td class="dim">${escapeHTML(d.note || '')}</td>
+      </tr>
+    `).join('') || `<tr><td colspan="5" class="dim" style="text-align:center">No dividends recorded.</td></tr>`;
+    divSection = `
+      <section class="detail-section">
+        <h3 class="rh-side" style="display:flex; justify-content:space-between; align-items:center">
+          <span>Dividends</span>
+          <button class="btn-ghost" id="dh-add-div">+ Record dividend</button>
+        </h3>
+        <div class="tablewrap"><table class="holdings"><thead><tr>
+          <th>Ex-date</th><th class="num">Per share</th><th class="num">Shares</th>
+          <th class="num">Total received</th><th>Note</th>
+        </tr></thead><tbody>${divRows}</tbody></table></div>
+      </section>
+    `;
+  }
+
+  // Thesis section.
+  const thesisLink = holding.thesisLink || '';
+  const thesisSection = `
+    <section class="detail-section">
+      <h3 class="rh-side">Thesis</h3>
+      <div class="form-row" style="margin-bottom:0.4rem">
+        <label for="dh-thesis-link">Thesis link (URL)</label>
+        <input id="dh-thesis-link" type="text" value="${escapeHTML(thesisLink)}" placeholder="https://notion.so/.../your-thesis" />
+        <button class="btn-ghost" id="dh-thesis-save" style="margin-left:0.5rem">Save</button>
+        ${thesisLink ? `<a class="btn-ghost" href="${escapeHTML(thesisLink)}" target="_blank" rel="noopener noreferrer" style="margin-left:0.4rem">Open ↗</a>` : ''}
+      </div>
+      <p class="dim" style="font-size:0.85rem">Thesis notes (Spec 11 — observation log) will land here once that spec ships.</p>
+    </section>
+  `;
+
+  // Audit trail (last 20 for this holding).
+  const auditRows = audit.map((a) => {
+    let changes = '';
+    try {
+      const c = JSON.parse(a.changes || '{}');
+      if (a.action === 'update') {
+        changes = Object.keys(c).slice(0, 3).join(', ');
+      } else if (a.action === 'create') changes = 'opened';
+      else changes = a.action;
+    } catch (_) { changes = a.action; }
+    return `
+      <tr>
+        <td class="dim">${escapeHTML(new Date(a.ts).toLocaleString())}</td>
+        <td>${escapeHTML(a.action)}</td>
+        <td class="dim">${escapeHTML(changes)}</td>
+        <td class="dim">${escapeHTML(a.reason || '')}</td>
+      </tr>
+    `;
+  }).join('') || `<tr><td colspan="4" class="dim" style="text-align:center">No audit entries.</td></tr>`;
+
+  const auditSection = `
+    <section class="detail-section">
+      <h3 class="rh-side">Audit trail <span class="dim" style="font-size:0.78rem; font-weight:normal">(last 20)</span></h3>
+      <div class="tablewrap"><table class="holdings"><thead><tr>
+        <th>When</th><th>Action</th><th>Changed</th><th>Reason</th>
+      </tr></thead><tbody>${auditRows}</tbody></table></div>
+    </section>
+  `;
+
+  content.innerHTML = header + positionRisk + scoreSection + txnSection + lotsSection + divSection + thesisSection + auditSection;
+
+  // Wire interactions.
+  $('#dh-back').addEventListener('click', () => {
+    state.holdingDetail = null;
+    loadActiveTab();
+  });
+  $('#dh-add-txn').addEventListener('click', () => openAddTxnModal({ kind, id, ticker: tickerOrSym, currentPrice }));
+  $('#dh-thesis-save').addEventListener('click', async () => {
+    const newLink = $('#dh-thesis-link').value.trim();
+    try {
+      // Build a minimal update body — the existing edit-modal payload shape.
+      const body = kind === 'stock'
+        ? { name: holding.name, ticker: holding.ticker, category: holding.category, sector: holding.sector,
+            investedUsd: holding.investedUsd, avgOpenPrice: holding.avgOpenPrice, currentPrice: holding.currentPrice,
+            stopLoss: holding.stopLoss, takeProfit: holding.takeProfit,
+            strategyNote: holding.strategyNote || '', thesisLink: newLink }
+        : { name: holding.name, symbol: holding.symbol, classification: holding.classification, isCore: holding.isCore,
+            quantityHeld: holding.quantityHeld, quantityStaked: holding.quantityStaked,
+            avgBuyEur: holding.avgBuyEur, costBasisEur: holding.costBasisEur,
+            strategyNote: holding.strategyNote || '', volTier: holding.volTier, thesisLink: newLink };
+      const path = kind === 'stock' ? 'stocks' : 'crypto';
+      await api(`/api/holdings/${path}/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+      // Re-render to show the Open ↗ button.
+      if (kind === 'stock') state.stocks = null;
+      else state.crypto = null;
+      renderHoldingDetail({ kind, id });
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+    }
+  });
+  if (kind === 'stock') {
+    document.querySelector('#dh-add-div')?.addEventListener('click', () => openAddDividendModal({ id, ticker: tickerOrSym }));
+  }
+  // Supersede buttons.
+  document.querySelectorAll('[data-supersede]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Supersede this transaction? It will be excluded from derivation but kept in history.')) return;
+      try {
+        await api(`/api/transactions/${btn.dataset.supersede}/supersede`, { method: 'POST' });
+        if (kind === 'stock') state.stocks = null;
+        else state.crypto = null;
+        renderHoldingDetail({ kind, id });
+      } catch (e) {
+        alert('Supersede failed: ' + e.message);
+      }
+    });
+  });
+}
+
+// Spec 10 D5 — Add Transaction modal.
+function openAddTxnModal({ kind, id, ticker, currentPrice }) {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  const nowISO = new Date().toISOString().slice(0, 16); // "2026-05-17T10:30"
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Add transaction — ${escapeHTML(ticker)}</div>
+            <div class="desc">Buy / Sell / Fee. Recomputes position FIFO after save.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="at-form" class="holding-form">
+            <div class="form-row">
+              <label for="at-when">Executed at</label>
+              <input id="at-when" type="datetime-local" value="${nowISO}" required />
+            </div>
+            <div class="form-row">
+              <label for="at-type">Type</label>
+              <select id="at-type">
+                <option value="buy">Buy</option>
+                <option value="sell">Sell</option>
+                <option value="fee">Fee only</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="at-qty">Quantity</label>
+              <input id="at-qty" type="number" step="any" min="0" required />
+            </div>
+            <div class="form-row">
+              <label for="at-price">Price (USD per unit)</label>
+              <input id="at-price" type="number" step="0.0001" min="0" required value="${currentPrice ? fmtNum2.format(currentPrice) : ''}" />
+            </div>
+            <div class="form-row">
+              <label for="at-fees">Fees (USD)</label>
+              <input id="at-fees" type="number" step="0.01" min="0" value="0" />
+            </div>
+            <div class="form-row">
+              <label for="at-venue">Venue</label>
+              <input id="at-venue" type="text" placeholder="e.g. eToro, Binance, Tangem" />
+            </div>
+            <div class="form-row">
+              <label for="at-note">Note</label>
+              <input id="at-note" type="text" />
+            </div>
+            <div class="error" id="at-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="at-cancel">Cancel</button>
+          <button class="btn-primary" id="at-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#at-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#at-save').addEventListener('click', async () => {
+    const err = $('#at-err'); err.textContent = '';
+    const qty = parseFloat($('#at-qty').value);
+    const price = parseFloat($('#at-price').value);
+    if (!Number.isFinite(qty) || qty <= 0) { err.textContent = 'quantity required'; return; }
+    if (!Number.isFinite(price) || price < 0) { err.textContent = 'price required'; return; }
+    const body = {
+      holdingKind: kind,
+      holdingId: id,
+      txnType: $('#at-type').value,
+      executedAt: new Date($('#at-when').value).toISOString(),
+      quantity: qty,
+      priceUsd: price,
+      feesUsd: parseFloat($('#at-fees').value) || 0,
+      venue: $('#at-venue').value.trim(),
+      note: $('#at-note').value.trim(),
+    };
+    try {
+      await api('/api/transactions', { method: 'POST', body: JSON.stringify(body) });
+      closeImportModal();
+      if (kind === 'stock') state.stocks = null;
+      else state.crypto = null;
+      renderHoldingDetail({ kind, id });
+    } catch (e) { err.textContent = e.message; }
+  });
+}
+
+// Spec 10 D5 — Add Dividend modal (stocks only).
+function openAddDividendModal({ id, ticker }) {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Record dividend — ${escapeHTML(ticker)}</div>
+            <div class="desc">Cash dividend received.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="ad-form" class="holding-form">
+            <div class="form-row">
+              <label for="ad-ex">Ex-date</label>
+              <input id="ad-ex" type="date" required />
+            </div>
+            <div class="form-row">
+              <label for="ad-pay">Pay date</label>
+              <input id="ad-pay" type="date" />
+            </div>
+            <div class="form-row">
+              <label for="ad-aps">Amount per share (USD)</label>
+              <input id="ad-aps" type="number" step="0.0001" min="0" required />
+            </div>
+            <div class="form-row">
+              <label for="ad-shares">Shares held</label>
+              <input id="ad-shares" type="number" step="any" min="0" required />
+            </div>
+            <div class="form-row">
+              <label for="ad-note">Note</label>
+              <input id="ad-note" type="text" />
+            </div>
+            <div class="error" id="ad-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="ad-cancel">Cancel</button>
+          <button class="btn-primary" id="ad-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#ad-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#ad-save').addEventListener('click', async () => {
+    const err = $('#ad-err'); err.textContent = '';
+    const body = {
+      holdingId: id,
+      exDate: $('#ad-ex').value,
+      payDate: $('#ad-pay').value || null,
+      amountPerShareUsd: parseFloat($('#ad-aps').value),
+      sharesHeld: parseFloat($('#ad-shares').value),
+      note: $('#ad-note').value.trim(),
+    };
+    if (!body.exDate || !(body.amountPerShareUsd > 0) || !(body.sharesHeld > 0)) {
+      err.textContent = 'all required fields must be set'; return;
+    }
+    try {
+      await api('/api/dividends', { method: 'POST', body: JSON.stringify(body) });
+      closeImportModal();
+      renderHoldingDetail({ kind: 'stock', id });
+    } catch (e) { err.textContent = e.message; }
+  });
 }
 
 // ============================================================================
