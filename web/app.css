@@ -1958,3 +1958,93 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   font-size: 0.78rem;
   line-height: 1.45;
 }
+
+/* ----- Spec 11: thesis notes ------------------------------------------- */
+.notes-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.note-item {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.5rem;
+}
+.note-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+  flex-wrap: wrap;
+}
+.note-date {
+  font-family: var(--font-mono);
+  color: rgb(var(--color-text-muted));
+}
+.note-factor {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.08rem 0.4rem;
+  border-radius: var(--radius2);
+  border: 1px solid rgb(var(--color-border));
+}
+.note-factor.gain {
+  background: rgb(var(--color-gain) / 0.12);
+  border-color: rgb(var(--color-gain) / 0.4);
+  color: rgb(var(--color-gain));
+}
+.note-factor.loss {
+  background: rgb(var(--color-loss) / 0.12);
+  border-color: rgb(var(--color-loss) / 0.4);
+  color: rgb(var(--color-loss));
+}
+.note-factor.dim {
+  color: rgb(var(--color-text-muted));
+}
+.note-actions {
+  margin-left: auto;
+}
+.note-body {
+  font-size: 0.92rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.note-foot {
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+}
+.note-src {
+  color: rgb(var(--color-text-muted));
+  font-family: var(--font-mono);
+}
+.news-note-btn {
+  margin-left: auto;
+  font-size: 0.74rem !important;
+  padding: 0.15rem 0.45rem !important;
+}
+.stale-list {
+  margin: 0.4rem 0 0 1rem;
+  padding: 0;
+  font-size: 0.85rem;
+}
+.stale-list a {
+  color: rgb(var(--color-text));
+  font-family: var(--font-mono);
+}
+.stale-list a:hover { color: rgb(var(--color-accent)); }
+/* Factor-invalidation banner inside score question. */
+.score-q.contradicted {
+  border-left: 3px solid rgb(var(--color-loss));
+}
+.score-q-contra {
+  background: rgb(var(--color-loss) / 0.08);
+  border-left: 2px solid rgb(var(--color-loss));
+  padding: 0.45rem 0.6rem;
+  margin: 0.35rem 0 0.5rem 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  border-radius: var(--radius2);
+}

@@ -1276,8 +1276,11 @@ async function renderSummary() {
   // older than 90 days. Fetched lazily; if the user hasn't visited Stocks/
   // Crypto yet, we pull fresh lists in the background.
   const staleBanner = `<div id="stale-score-banner"></div>`;
+  // Spec 11 D6: stale-thesis nudge — holdings with no thesis notes in 90+
+  // days. Same lazy fetch pattern; silent if zero stale.
+  const staleThesisBanner = `<div id="stale-thesis-banner"></div>`;
 
-  content.innerHTML = staleBanner + toggle + kpiRow + donutRow + tagDonuts + footer;
+  content.innerHTML = staleBanner + staleThesisBanner + toggle + kpiRow + donutRow + tagDonuts + footer;
 
   // Wire toggle clicks
   for (const btn of document.querySelectorAll('.ct-btn')) {
@@ -1293,6 +1296,49 @@ async function renderSummary() {
 
   // Stale-score nudge — defer to keep this render snappy.
   updateStaleScoreBanner();
+  // Spec 11 D6 — stale-thesis nudge.
+  updateStaleThesisBanner();
+}
+
+// Spec 11 D6 — surface holdings with no thesis notes in 90+ days.
+async function updateStaleThesisBanner() {
+  const el = $('#stale-thesis-banner');
+  if (!el) return;
+  let stale;
+  try {
+    const r = await api('/api/notes/stale');
+    stale = r.stale || [];
+  } catch (_) {
+    return; // silent
+  }
+  if (stale.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  // Top 5 worst (or never-noted) — clickable into detail page.
+  const sorted = stale.slice().sort((a, b) => {
+    // Never-noted (DaysSince=-1) bubble up first; then biggest gap.
+    if (a.daysSince === -1 && b.daysSince !== -1) return -1;
+    if (b.daysSince === -1 && a.daysSince !== -1) return 1;
+    return b.daysSince - a.daysSince;
+  }).slice(0, 5);
+  const rows = sorted.map(s => {
+    const when = s.daysSince === -1 ? 'no notes yet' : `last note ${escapeHTML(s.lastObservation)} (${s.daysSince}d ago)`;
+    return `<li><a href="#" data-stale-kind="${escapeHTML(s.holdingKind)}" data-stale-id="${s.holdingId}">${escapeHTML(s.ticker)}</a> <span class="dim">— ${when}</span></li>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="stale-banner">
+      ⚠ <strong>${stale.length}</strong> holding${stale.length === 1 ? '' : 's'} ha${stale.length === 1 ? 's' : 've'} no thesis updates in 90+ days.
+      <ul class="stale-list">${rows}</ul>
+    </div>
+  `;
+  // Wire ticker clicks → open holding detail.
+  el.querySelectorAll('[data-stale-kind]').forEach(a => {
+    a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      openHoldingDetail(a.dataset.staleKind, parseInt(a.dataset.staleId, 10));
+    });
+  });
 }
 
 // Spec 9b D7+D8 — Bottleneck (stocks) + Phase (crypto) donuts on Summary.
@@ -1575,15 +1621,16 @@ function renderFeed(feed, scope, macroData) {
     wireNewsToggle(scope);
     return;
   } else {
-    const list = articles.map((a) => {
+    const list = articles.map((a, idx) => {
       const sentClass = a.sentiment === 'positive' ? 'gain' : a.sentiment === 'negative' ? 'loss' : 'dim';
       const time = a.publishedAt ? new Date(a.publishedAt).toLocaleString() : '';
       return `
-        <article class="news-item">
+        <article class="news-item" data-news-idx="${idx}">
           <div class="news-meta">
             <span class="news-source">${escapeHTML(a.source || 'unknown')}</span>
             <span class="news-time">${escapeHTML(time)}</span>
             ${a.sentiment ? `<span class="news-sent ${sentClass}">${a.sentiment}</span>` : ''}
+            <button class="btn-ghost news-note-btn" data-news-note="${idx}" title="Add thesis note from this article">📝 Note this</button>
           </div>
           <a class="news-title" href="${escapeHTML(a.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(a.title)}</a>
           ${a.summary ? `<p class="news-summary">${escapeHTML(a.summary)}</p>` : ''}
@@ -1591,10 +1638,104 @@ function renderFeed(feed, scope, macroData) {
       `;
     }).join('');
     content.innerHTML = filterToggle + macroHTML + banner + fgChip + `<div class="news-list">${list}</div>`;
+    // Spec 11 D5 — wire Note-this buttons.
+    document.querySelectorAll('[data-news-note]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const a = articles[parseInt(btn.dataset.newsNote, 10)];
+        if (!a) return;
+        openNoteFromNewsItem(a, scope);
+      });
+    });
   }
 
   wireNewsToggle(scope);
   if (scope === 'crypto') loadFearGreed();
+}
+
+// Spec 11 D5 — open Add Note modal from a news article. The user picks a
+// target holding (or watchlist) via the second-stage chooser. If we can
+// auto-match a ticker from the article text, default-select it.
+async function openNoteFromNewsItem(article, scope) {
+  // Build candidate list from current holdings + watchlist.
+  let stocks = state.stocks, crypto = state.crypto, watchlist = state.watchlist;
+  try {
+    if (stocks == null) { const r = await api('/api/holdings/stocks'); stocks = state.stocks = r.holdings || []; }
+    if (crypto == null) { const r = await api('/api/holdings/crypto'); crypto = state.crypto = r.holdings || []; }
+    if (watchlist == null) { const r = await api('/api/watchlist'); watchlist = state.watchlist = r.watchlist || []; }
+  } catch (_) { /* tolerate partial */ }
+  // Candidate items: { label, targetKind, targetId, ticker, holdingKind }
+  const candidates = [];
+  for (const h of (stocks || [])) {
+    if (h.ticker || h.name) candidates.push({ label: `${h.ticker || h.name} — ${h.name}`, targetKind: 'holding', targetId: h.id, ticker: (h.ticker || h.name), holdingKind: 'stock' });
+  }
+  for (const h of (crypto || [])) {
+    candidates.push({ label: `${h.symbol} — ${h.name} (crypto)`, targetKind: 'holding', targetId: h.id, ticker: h.symbol, holdingKind: 'crypto' });
+  }
+  for (const w of (watchlist || [])) {
+    candidates.push({ label: `${w.ticker} — ${w.companyName || w.kind} (watchlist)`, targetKind: 'watchlist', targetId: w.id, ticker: w.ticker, holdingKind: w.kind });
+  }
+  // Try to auto-match ticker by scanning title+summary.
+  const hay = ((article.title || '') + ' ' + (article.summary || '')).toUpperCase();
+  let preselect = null;
+  for (const c of candidates) {
+    const needle = c.ticker.toUpperCase();
+    if (needle && hay.includes(needle)) { preselect = c; break; }
+  }
+  // If exactly one auto-match, jump straight to the modal.
+  if (preselect) {
+    openAddNoteModal({
+      targetKind: preselect.targetKind,
+      targetId: preselect.targetId,
+      ticker: preselect.ticker,
+      holdingKind: preselect.holdingKind,
+      prefill: { observationText: article.title || '', sourceUrl: article.url || '', sourceKind: 'news' },
+      onSaved: () => { /* no detail-page refresh; news tab unchanged */ },
+    });
+    return;
+  }
+  // Otherwise, open a small target-picker modal.
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  const opts = candidates.map((c, i) => `<option value="${i}">${escapeHTML(c.label)}</option>`).join('');
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Add note — pick target</div>
+            <div class="desc">${escapeHTML((article.title || '').slice(0, 120))}</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <label for="np-pick">Holding / watchlist entry</label>
+            <select id="np-pick">${opts}</select>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="np-cancel">Cancel</button>
+          <button class="btn-primary" id="np-next">Next →</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#np-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#np-next').addEventListener('click', () => {
+    const c = candidates[parseInt($('#np-pick').value, 10)];
+    if (!c) return;
+    openAddNoteModal({
+      targetKind: c.targetKind,
+      targetId: c.targetId,
+      ticker: c.ticker,
+      holdingKind: c.holdingKind,
+      prefill: { observationText: article.title || '', sourceUrl: article.url || '', sourceKind: 'news' },
+    });
+  });
 }
 
 function wireNewsToggle(scope) {
@@ -3676,11 +3817,13 @@ async function openScoreScreen(wid) {
   if (!entry) return;
   // Load the framework definition + any existing latest score in parallel.
   const fwID = entry.kind === 'stock' ? 'jordi' : 'cowen';
-  let fw, prior;
+  let fw, prior, contradictions;
   try {
-    [fw, prior] = await Promise.all([
+    [fw, prior, contradictions] = await Promise.all([
       api(`/api/frameworks/${fwID}`),
       api(`/api/scores?targetKind=watchlist&targetId=${entry.id}`),
+      // Spec 11 D7 — factor-invalidation flag from notes.
+      api(`/api/notes/contradictions?targetKind=watchlist&targetId=${entry.id}`).catch(() => ({ contradictions: [] })),
     ]);
   } catch (e) {
     alert('couldn\'t load framework: ' + e.message);
@@ -3690,6 +3833,11 @@ async function openScoreScreen(wid) {
   const priorTags = (prior.score && prior.score.tagsJson) ? JSON.parse(prior.score.tagsJson) : {};
   const strongSet = new Set(fw.scoring.strong_signals || []);
   const tagKeys = Object.keys(fw.tags || {});
+  // Map factorId → latest contradicting note (only for this framework).
+  const contraByFactor = {};
+  for (const n of ((contradictions && contradictions.contradictions) || [])) {
+    if (n.frameworkId === fw.id && n.factorId) contraByFactor[n.factorId] = n;
+  }
 
   const questionsHtml = fw.questions.map((q) => {
     const cur = priorScores[q.id] ? priorScores[q.id].score : null;
@@ -3700,13 +3848,23 @@ async function openScoreScreen(wid) {
         <span>${v}${v === 0 ? ' — no' : v === 1 ? ' — partial' : ' — yes'}</span>
       </label>
     `).join('');
+    // Spec 11 D7 — contradicting-note banner.
+    const contra = contraByFactor[q.id];
+    const contraBlock = contra ? `
+      <div class="score-q-contra">
+        ⚠ <strong>Recent thesis note contradicts:</strong>
+        <span>"${escapeHTML((contra.observationText || '').slice(0, 240))}"</span>
+        <span class="dim">(${escapeHTML(contra.observationAt)})</span>
+      </div>
+    ` : '';
     return `
-      <div class="score-q ${strongSet.has(q.id) ? 'strong' : ''}" data-qid="${q.id}">
+      <div class="score-q ${strongSet.has(q.id) ? 'strong' : ''} ${contra ? 'contradicted' : ''}" data-qid="${q.id}">
         <div class="score-q-head">
           <span class="score-q-label">${escapeHTML(q.label)}${strongSet.has(q.id) ? ' <span class="strong-pill">strong</span>' : ''}</span>
           <span class="score-q-prompt">${escapeHTML(q.prompt)}</span>
         </div>
         ${q.guidance ? `<div class="score-q-guidance">${escapeHTML(q.guidance)}</div>` : ''}
+        ${contraBlock}
         <div class="score-q-radios">${radios}</div>
         <input class="score-q-note" name="qnote-${q.id}" type="text" placeholder="optional 1-line justification" value="${escapeHTML(note || '')}" />
       </div>
@@ -3940,21 +4098,24 @@ async function renderHoldingDetail({ kind, id }) {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading detail…</div>';
 
-  let holding, txns, taxlots, audit, divs;
+  let holding, txns, taxlots, audit, divs, notes;
   try {
     const path = kind === 'stock' ? 'stocks' : 'crypto';
-    const [hRes, txnRes, lotRes, auditRes, divRes] = await Promise.all([
+    const [hRes, txnRes, lotRes, auditRes, divRes, notesRes] = await Promise.all([
       api(`/api/holdings/${path}`),
       api(`/api/transactions?holdingKind=${kind}&holdingId=${id}`),
       api(`/api/holdings/${path}/${id}/taxlots`),
       api(`/api/audit?limit=50`),
       kind === 'stock' ? api(`/api/dividends?holdingId=${id}`) : Promise.resolve({ dividends: [] }),
+      // Spec 11 D4 — thesis notes for this holding.
+      api(`/api/notes?targetKind=holding&targetId=${id}`),
     ]);
     holding = (hRes.holdings || []).find((h) => h.id === id);
     txns = txnRes.transactions || [];
     taxlots = lotRes.position || { taxLots: [] };
     audit = (auditRes.audit || []).filter((a) => a.holdingKind === kind && a.holdingId === id).slice(0, 20);
     divs = divRes.dividends || [];
+    notes = notesRes.notes || [];
   } catch (err) {
     content.innerHTML = `<div class="empty"><div class="loss">detail failed: ${escapeHTML(err.message)}</div></div>`;
     return;
@@ -4117,18 +4278,22 @@ async function renderHoldingDetail({ kind, id }) {
     `;
   }
 
-  // Thesis section.
+  // Thesis section — Spec 11 D4 notes list + Spec 10 link field.
   const thesisLink = holding.thesisLink || '';
+  const notesHTML = renderNotesList(notes);
   const thesisSection = `
     <section class="detail-section">
-      <h3 class="rh-side">Thesis</h3>
-      <div class="form-row" style="margin-bottom:0.4rem">
+      <h3 class="rh-side" style="display:flex; justify-content:space-between; align-items:center">
+        <span>Thesis <span class="dim" style="font-size:0.78rem; font-weight:normal">(${notes.length} note${notes.length === 1 ? '' : 's'})</span></span>
+        <button class="btn-ghost" id="dh-add-note">+ Add note</button>
+      </h3>
+      <div class="form-row" style="margin-bottom:0.6rem">
         <label for="dh-thesis-link">Thesis link (URL)</label>
         <input id="dh-thesis-link" type="text" value="${escapeHTML(thesisLink)}" placeholder="https://notion.so/.../your-thesis" />
         <button class="btn-ghost" id="dh-thesis-save" style="margin-left:0.5rem">Save</button>
         ${thesisLink ? `<a class="btn-ghost" href="${escapeHTML(thesisLink)}" target="_blank" rel="noopener noreferrer" style="margin-left:0.4rem">Open ↗</a>` : ''}
       </div>
-      <p class="dim" style="font-size:0.85rem">Thesis notes (Spec 11 — observation log) will land here once that spec ships.</p>
+      ${notesHTML}
     </section>
   `;
 
@@ -4195,6 +4360,32 @@ async function renderHoldingDetail({ kind, id }) {
   if (kind === 'stock') {
     document.querySelector('#dh-add-div')?.addEventListener('click', () => openAddDividendModal({ id, ticker: tickerOrSym }));
   }
+  // Spec 11 D3 — Add note button.
+  document.querySelector('#dh-add-note')?.addEventListener('click', () => openAddNoteModal({
+    targetKind: 'holding', targetId: id, ticker: tickerOrSym, holdingKind: kind,
+    onSaved: () => renderHoldingDetail({ kind, id }),
+  }));
+  // Spec 11 D4 — note row actions (edit / delete).
+  document.querySelectorAll('[data-note-edit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const n = notes.find(x => String(x.id) === btn.dataset.noteEdit);
+      if (!n) return;
+      openAddNoteModal({
+        targetKind: 'holding', targetId: id, ticker: tickerOrSym, holdingKind: kind,
+        existing: n,
+        onSaved: () => renderHoldingDetail({ kind, id }),
+      });
+    });
+  });
+  document.querySelectorAll('[data-note-del]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Soft-delete this note? It stays in history but won\'t show by default.')) return;
+      try {
+        await api(`/api/notes/${btn.dataset.noteDel}`, { method: 'DELETE' });
+        renderHoldingDetail({ kind, id });
+      } catch (e) { alert('Delete failed: ' + e.message); }
+    });
+  });
   // Supersede buttons.
   document.querySelectorAll('[data-supersede]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -4371,6 +4562,215 @@ function openAddDividendModal({ id, ticker }) {
       closeImportModal();
       renderHoldingDetail({ kind: 'stock', id });
     } catch (e) { err.textContent = e.message; }
+  });
+}
+
+// ============================================================================
+// Spec 11 — Thesis notes
+// ============================================================================
+
+// Direction → pill colour.
+function noteDirCls(dir) {
+  if (dir === 'confirms') return 'gain';
+  if (dir === 'contradicts') return 'loss';
+  if (dir === 'neutral') return 'dim';
+  return '';
+}
+
+function noteDirGlyph(dir) {
+  if (dir === 'confirms') return '✓';
+  if (dir === 'contradicts') return '⚠';
+  if (dir === 'neutral') return '·';
+  return '';
+}
+
+// renderNotesList — D4 thesis notes display, newest-first.
+function renderNotesList(notes) {
+  if (!notes || notes.length === 0) {
+    return `<p class="dim" style="font-size:0.85rem">No thesis notes yet. Click <strong>+ Add note</strong> to start capturing observations.</p>`;
+  }
+  const items = notes.map((n) => {
+    const dirGlyph = noteDirGlyph(n.factorDirection);
+    const dirCls = noteDirCls(n.factorDirection);
+    const factorPill = (n.frameworkId && n.factorId)
+      ? `<span class="note-factor ${dirCls}">${escapeHTML(n.frameworkId)}:${escapeHTML(n.factorId)} ${dirGlyph} ${escapeHTML(n.factorDirection || '')}</span>`
+      : '';
+    const srcKind = n.sourceKind ? `<span class="dim">· ${escapeHTML(n.sourceKind)}</span>` : '';
+    const srcLink = n.sourceUrl
+      ? `<a class="note-src" href="${escapeHTML(n.sourceUrl)}" target="_blank" rel="noopener noreferrer">source ↗</a>`
+      : '';
+    return `
+      <li class="note-item">
+        <div class="note-head">
+          <span class="note-date">${escapeHTML(n.observationAt)}</span>
+          ${factorPill}
+          ${srcKind}
+          <span class="note-actions">
+            <button class="row-mini" data-note-edit="${n.id}" title="Edit">✎</button>
+            <button class="row-mini danger" data-note-del="${n.id}" title="Soft-delete">×</button>
+          </span>
+        </div>
+        <div class="note-body">${escapeHTML(n.observationText)}</div>
+        ${srcLink ? `<div class="note-foot">${srcLink}</div>` : ''}
+      </li>
+    `;
+  }).join('');
+  return `<ul class="notes-list">${items}</ul>`;
+}
+
+// Cache of loaded frameworks for the cascading dropdown.
+const _frameworksCache = { stock: null, crypto: null, all: null };
+async function loadFrameworksFor(kind) {
+  if (_frameworksCache.all) return _frameworksCache.all;
+  try {
+    const r = await api('/api/frameworks');
+    _frameworksCache.all = r.frameworks || [];
+    return _frameworksCache.all;
+  } catch (_) {
+    return [];
+  }
+}
+
+// openAddNoteModal — D3. Triggered from detail page, news items, settings.
+// args: { targetKind, targetId, ticker, holdingKind?, existing?, prefill?, onSaved? }
+//   existing: full note object → edit mode
+//   prefill: { observationText, sourceUrl, sourceKind } → new with seed
+async function openAddNoteModal({ targetKind, targetId, ticker, holdingKind, existing, prefill, onSaved }) {
+  closeImportModal();
+  const today = new Date().toISOString().slice(0, 10);
+  const e = existing || {};
+  const p = prefill || {};
+  // Load frameworks so we can render the cascading dropdown.
+  const frameworks = await loadFrameworksFor(holdingKind);
+
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  const fwOptions = frameworks.map((f) =>
+    `<option value="${escapeHTML(f.id)}" ${e.frameworkId === f.id ? 'selected' : ''}>${escapeHTML(f.name || f.id)}</option>`
+  ).join('');
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">${existing ? 'Edit' : 'Add'} thesis note — ${escapeHTML(ticker)}</div>
+            <div class="desc">Observation + optional factor tagging. Confirms/contradicts feeds the next re-score.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="nt-form">
+            <div class="form-row">
+              <label for="nt-when">Observation date</label>
+              <input id="nt-when" type="date" value="${escapeHTML(e.observationAt || today)}" required />
+            </div>
+            <div class="form-row">
+              <label for="nt-text">Observation</label>
+              <textarea id="nt-text" rows="4" maxlength="4000" required placeholder="What did you observe? Be specific.">${escapeHTML(e.observationText || p.observationText || '')}</textarea>
+            </div>
+            <div class="form-row">
+              <label for="nt-fw">Framework (optional)</label>
+              <select id="nt-fw">
+                <option value="">—</option>
+                ${fwOptions}
+              </select>
+            </div>
+            <div class="form-row" id="nt-factor-row" style="display:${e.frameworkId ? 'flex' : 'none'}">
+              <label for="nt-factor">Factor</label>
+              <select id="nt-factor">
+                <option value="">—</option>
+              </select>
+            </div>
+            <div class="form-row" id="nt-dir-row" style="display:${e.factorId ? 'flex' : 'none'}">
+              <label for="nt-dir">Direction</label>
+              <select id="nt-dir">
+                <option value="">—</option>
+                <option value="confirms" ${e.factorDirection === 'confirms' ? 'selected' : ''}>Confirms ✓</option>
+                <option value="contradicts" ${e.factorDirection === 'contradicts' ? 'selected' : ''}>Contradicts ⚠</option>
+                <option value="neutral" ${e.factorDirection === 'neutral' ? 'selected' : ''}>Neutral</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="nt-src-url">Source URL (optional)</label>
+              <input id="nt-src-url" type="text" value="${escapeHTML(e.sourceUrl || p.sourceUrl || '')}" placeholder="https://..." />
+            </div>
+            <div class="form-row">
+              <label for="nt-src-kind">Source kind</label>
+              <select id="nt-src-kind">
+                <option value="">—</option>
+                ${['news','earnings','youtube','twitter','manual','cowen_weekly','other'].map(k =>
+                  `<option value="${k}" ${(e.sourceKind || p.sourceKind) === k ? 'selected' : ''}>${k}</option>`
+                ).join('')}
+              </select>
+            </div>
+            <div class="error" id="nt-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="nt-cancel">Cancel</button>
+          <button class="btn-primary" id="nt-save">${existing ? 'Save changes' : 'Add note'}</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#nt-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+
+  // Cascading: when framework changes, repopulate factor select.
+  const factorRow = $('#nt-factor-row');
+  const factorSelect = $('#nt-factor');
+  const dirRow = $('#nt-dir-row');
+  const dirSelect = $('#nt-dir');
+  const refreshFactors = (fwId) => {
+    const fw = frameworks.find(f => f.id === fwId);
+    if (!fw) {
+      factorRow.style.display = 'none';
+      dirRow.style.display = 'none';
+      factorSelect.innerHTML = '<option value="">—</option>';
+      return;
+    }
+    factorRow.style.display = 'flex';
+    factorSelect.innerHTML = '<option value="">—</option>' + (fw.questions || []).map(q =>
+      `<option value="${escapeHTML(q.id)}" ${e.factorId === q.id ? 'selected' : ''}>${escapeHTML(q.label || q.id)}</option>`
+    ).join('');
+    dirRow.style.display = e.factorId ? 'flex' : 'none';
+  };
+  $('#nt-fw').addEventListener('change', () => refreshFactors($('#nt-fw').value));
+  factorSelect.addEventListener('change', () => {
+    dirRow.style.display = factorSelect.value ? 'flex' : 'none';
+  });
+  // Seed initial state.
+  if (e.frameworkId) refreshFactors(e.frameworkId);
+
+  $('#nt-save').addEventListener('click', async () => {
+    const errEl = $('#nt-err'); errEl.textContent = '';
+    const body = {
+      targetKind,
+      targetId,
+      ticker,
+      observationAt: $('#nt-when').value,
+      observationText: $('#nt-text').value.trim(),
+      frameworkId: $('#nt-fw').value || undefined,
+      factorId: factorSelect.value || undefined,
+      factorDirection: dirSelect.value || undefined,
+      sourceUrl: $('#nt-src-url').value.trim() || undefined,
+      sourceKind: $('#nt-src-kind').value || undefined,
+    };
+    if (!body.observationText) { errEl.textContent = 'observation text required'; return; }
+    if (body.factorId && !body.frameworkId) { errEl.textContent = 'framework required when factor is set'; return; }
+    try {
+      if (existing) {
+        await api(`/api/notes/${existing.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      } else {
+        await api('/api/notes', { method: 'POST', body: JSON.stringify(body) });
+      }
+      closeImportModal();
+      if (typeof onSaved === 'function') onSaved();
+    } catch (ex) {
+      errEl.textContent = ex.message;
+    }
   });
 }
 
