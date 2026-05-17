@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"ft/internal/config"
 	"ft/internal/domain"
+	"ft/internal/llm"
 	"ft/internal/refresh"
 	"ft/internal/store"
 	"ft/internal/web"
@@ -27,14 +28,16 @@ type Server struct {
 	cfg     *config.Config
 	store   *store.Store
 	refresh *refresh.Service
+	llm     *llm.Service // Spec 9c.1; nil-safe — handlers guard
 	mux     *http.ServeMux
 }
 
-func New(cfg *config.Config, st *store.Store) *Server {
+func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 	s := &Server{
 		cfg:     cfg,
 		store:   st,
 		refresh: refresh.New(st),
+		llm:     llmSvc,
 		mux:     http.NewServeMux(),
 	}
 	s.routes()
@@ -128,6 +131,14 @@ func (s *Server) routes() {
 	// Spec 9c D12/D13/D16: portfolio risk dashboard + daily snapshot.
 	s.mux.HandleFunc("GET /api/risk/dashboard", s.requireUserOrToken(s.handleRiskDashboard))
 	s.mux.HandleFunc("POST /api/risk/snapshot", s.requireUserOrToken(s.handleRiskSnapshot))
+
+	// Spec 9c.1: LLM cost-discipline endpoints. Token-or-cookie so the bot's
+	// /llm command can read state and (optionally) toggle pause from the phone.
+	s.mux.HandleFunc("GET /api/llm/spend", s.requireUserOrToken(s.handleLLMSpend))
+	s.mux.HandleFunc("GET /api/llm/log", s.requireUserOrToken(s.handleLLMLog))
+	s.mux.HandleFunc("POST /api/llm/pause", s.requireUserOrToken(s.handleLLMPause))
+	s.mux.HandleFunc("POST /api/llm/override", s.requireUserOrToken(s.handleLLMOverride))
+	s.mux.HandleFunc("POST /api/llm/override/clear", s.requireUserOrToken(s.handleLLMOverrideClear))
 
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))

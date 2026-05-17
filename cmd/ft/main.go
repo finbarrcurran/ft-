@@ -17,6 +17,7 @@ import (
 	"ft/internal/auth"
 	"ft/internal/config"
 	"ft/internal/frameworks"
+	"ft/internal/llm"
 	"ft/internal/macro"
 	"ft/internal/market"
 	"ft/internal/marketdata"
@@ -163,7 +164,12 @@ func runServe() {
 	// Spec 9b D11: macro economic calendar (hand-curated, embedded JSON).
 	must("macro", macro.Load())
 
-	srv := server.New(cfg, st)
+	// Spec 9c.1: LLM cost-discipline service. API key from FT_ANTHROPIC_API_KEY
+	// in /etc/ft/env; the budget gate and usage log work without it (every
+	// call rejects with ErrAPIKeyMissing). Add the key when the first
+	// LLM-flavored feature ships.
+	llmSvc := llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY"))
+	srv := server.New(cfg, st, llmSvc)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,

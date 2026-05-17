@@ -87,5 +87,14 @@ func validPreferenceValue(key, value string) bool {
 		// ISO week format like "2026-W20" or "skip" — short and bounded.
 		return len(value) <= 24
 	}
+	// Spec 9c.1 — llm_* keys are bounded TEXT/bool/number values; accept
+	// anything that survives the generic length check above.
+	if strings.HasPrefix(key, "llm_") {
+		return true
+	}
+	// Spec 9c risk-cap keys.
+	if strings.HasPrefix(key, "risk_") {
+		return true
+	}
 	return true
 }
