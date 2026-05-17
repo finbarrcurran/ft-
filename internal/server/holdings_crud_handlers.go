@@ -41,7 +41,10 @@ type stockMutationReq struct {
 	Stage       *string  `json:"stage"`
 	// Spec 10 — thesis URL (external doc).
 	ThesisLink *string `json:"thesisLink"`
-	Reason     *string `json:"reason,omitempty"` // for update audit row
+	// Spec 5 polish — override the suffix-based exchange-detection rule.
+	// Empty string clears any prior override.
+	ExchangeOverride *string `json:"exchangeOverride"`
+	Reason           *string `json:"reason,omitempty"` // for update audit row
 }
 
 type cryptoMutationReq struct {
@@ -199,6 +202,12 @@ func (s *Server) handleUpdateStock(w http.ResponseWriter, r *http.Request) {
 		h.ThesisLink = old.ThesisLink
 	} else {
 		h.ThesisLink = trimStrPtr(req.ThesisLink)
+	}
+	// Spec 5 polish — same preservation rule for exchange_override.
+	if req.ExchangeOverride == nil {
+		h.ExchangeOverride = old.ExchangeOverride
+	} else {
+		h.ExchangeOverride = trimStrPtr(req.ExchangeOverride)
 	}
 	// realized_pnl_usd is owned by the transactions pipeline.
 	h.RealizedPnLUSD = old.RealizedPnLUSD
@@ -544,6 +553,8 @@ func stockFromReq(req stockMutationReq) *domain.StockHolding {
 		Stage:       stage,
 		// Spec 10
 		ThesisLink: trimStrPtr(req.ThesisLink),
+		// Spec 5 polish — exchange override.
+		ExchangeOverride: trimStrPtr(req.ExchangeOverride),
 	}
 }
 

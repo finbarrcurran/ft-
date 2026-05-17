@@ -121,15 +121,30 @@ function earningsCell(iso) {
 //   pass + fresh  → "12/16 ✓" green
 //   below thresh  → "9/16" amber
 //   >90d stale    → "12/16 ⚠ 120d" dashed border
-function scoreCell(score) {
-  if (!score) return '<span class="dim">—</span>';
+//
+// Backlog polish 2026-05-17: when `clickable` is true we wrap the cell as a
+// `[data-rescore-kind][data-rescore-id]` button so clicking on the score in
+// the Stocks/Crypto tables opens the 8-question modal for that holding.
+function scoreCell(score, clickable, kind, id) {
+  const hint = clickable ? ' · click to rescore' : '';
+  if (!score) {
+    if (clickable) {
+      return `<span class="score-badge unscored" data-rescore-kind="${escapeHTML(kind)}" data-rescore-id="${id}" title="Click to score${hint}">— score</span>`;
+    }
+    return '<span class="dim">—</span>';
+  }
   const stale = score.staleDays > 90;
   const cls = ['score-badge'];
   cls.push(score.passes ? 'pass' : 'fail');
   if (stale) cls.push('stale');
+  if (clickable) cls.push('clickable');
   const tickMark = score.passes ? ' ✓' : '';
   const staleMark = stale ? ` ⚠ ${score.staleDays}d` : '';
-  return `<span class="${cls.join(' ')}" title="Scored ${score.scoredAt.slice(0,10)} · framework: ${escapeHTML(score.frameworkId)}">${score.totalScore}/${score.maxScore}${tickMark}${staleMark}</span>`;
+  const tooltip = `Scored ${score.scoredAt.slice(0,10)} · framework: ${escapeHTML(score.frameworkId)}${hint}`;
+  const attrs = clickable
+    ? `data-rescore-kind="${escapeHTML(kind)}" data-rescore-id="${id}"`
+    : '';
+  return `<span class="${cls.join(' ')}" ${attrs} title="${tooltip}">${score.totalScore}/${score.maxScore}${tickMark}${staleMark}</span>`;
 }
 
 // marketCell — Spec 5 D3. Per-row market column from {open, onBreak, nextChange, nextChangeKind, name, tzName}.
@@ -1412,26 +1427,57 @@ async function updateStaleScoreBanner() {
   } catch (_) {
     return; // silent — banner is a nudge, not critical
   }
-  let unscored = 0;
-  let stale = 0;
-  for (const h of [...(stocks || []), ...(crypto || [])]) {
-    if (!h.score) unscored++;
-    else if (h.score.staleDays > 90) stale++;
+  const flagged = []; // { kind, id, ticker, name, status, days }
+  for (const h of (stocks || [])) {
+    if (!h.score) flagged.push({ kind: 'stock', id: h.id, ticker: h.ticker || h.name, name: h.name, status: 'unscored', days: null });
+    else if (h.score.staleDays > 90) flagged.push({ kind: 'stock', id: h.id, ticker: h.ticker || h.name, name: h.name, status: 'stale', days: h.score.staleDays });
   }
-  const total = unscored + stale;
-  if (total === 0) {
+  for (const h of (crypto || [])) {
+    if (!h.score) flagged.push({ kind: 'crypto', id: h.id, ticker: h.symbol, name: h.name, status: 'unscored', days: null });
+    else if (h.score.staleDays > 90) flagged.push({ kind: 'crypto', id: h.id, ticker: h.symbol, name: h.name, status: 'stale', days: h.score.staleDays });
+  }
+  if (flagged.length === 0) {
     el.innerHTML = '';
     return;
   }
+  flagged.sort((a, b) => {
+    // unscored before stale; among stale, oldest first.
+    if (a.status !== b.status) return a.status === 'unscored' ? -1 : 1;
+    return (b.days || 0) - (a.days || 0);
+  });
+  const unscored = flagged.filter(f => f.status === 'unscored').length;
+  const stale    = flagged.filter(f => f.status === 'stale').length;
+  const total = flagged.length;
   const parts = [];
   if (unscored) parts.push(`${unscored} unscored`);
   if (stale) parts.push(`${stale} stale (>90d)`);
+
+  // Backlog polish — banner now click-to-expand with per-row jump links.
+  const items = flagged.slice(0, 10).map(f => {
+    const tag = f.status === 'unscored'
+      ? '<span class="dim">unscored</span>'
+      : `<span class="amber-text">${f.days}d stale</span>`;
+    return `<li><a href="#" data-stale-score-kind="${escapeHTML(f.kind)}" data-stale-score-id="${f.id}">${escapeHTML(f.ticker)}</a> <span class="dim">— ${escapeHTML(f.name)}</span> · ${tag}</li>`;
+  }).join('');
+
   el.innerHTML = `
-    <div class="stale-banner">
-      ⚠ <strong>${total}</strong> holding${total === 1 ? '' : 's'} need${total === 1 ? 's' : ''} framework scoring — ${parts.join(', ')}.
-      <span class="dim">Open Stocks or Crypto tab and click the score badge to update.</span>
-    </div>
+    <details class="stale-banner stale-banner-collapsible">
+      <summary>
+        ⚠ <strong>${total}</strong> holding${total === 1 ? '' : 's'} need${total === 1 ? 's' : ''} framework scoring — ${parts.join(', ')}.
+        <span class="dim">Click to expand.</span>
+      </summary>
+      <ul class="stale-list">${items}</ul>
+      ${total > 10 ? `<p class="dim">+ ${total - 10} more…</p>` : ''}
+    </details>
   `;
+  // Wire ticker links → open holding detail page directly (which has the
+  // rescore button now via click-to-rescore polish item).
+  el.querySelectorAll('[data-stale-score-kind]').forEach(a => {
+    a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      openHoldingDetail(a.dataset.staleScoreKind, parseInt(a.dataset.staleScoreId, 10));
+    });
+  });
 }
 
 // flashOnRender walks every [data-flash-id] element on the page, compares
@@ -1481,7 +1527,8 @@ async function renderHeatmap() {
   if (state.heatmapMode == null) {
     try {
       const r = await api('/api/preferences/heatmap_mode');
-      state.heatmapMode = r.value === 'my_holdings' ? 'my_holdings' : 'market_cap';
+      const v = r.value;
+      state.heatmapMode = (v === 'my_holdings' || v === 'pnl') ? v : 'market_cap';
     } catch (_) { state.heatmapMode = 'market_cap'; }
   }
   const mode = state.heatmapMode;
@@ -1494,12 +1541,15 @@ async function renderHeatmap() {
 
   const modeOptions = [
     { v: 'market_cap', l: 'Market cap (S&P 500)' },
-    { v: 'my_holdings', l: 'My holdings' },
+    { v: 'my_holdings', l: 'My holdings (position value)' },
+    // Backlog polish 2026-05-17 — third mode: size by |P&L|.
+    { v: 'pnl',         l: 'My holdings (P&L size)' },
   ].map(o => `<option value="${o.v}" ${o.v === mode ? 'selected' : ''}>${o.l}</option>`).join('');
 
-  const caption = mode === 'my_holdings'
-    ? 'Your portfolio · sized by position value · colored by daily change'
-    : 'S&P 500 · sized by market cap · colored by daily change';
+  const caption =
+      mode === 'pnl'         ? 'Your portfolio · sized by |P&L| · biggest winners/losers loudest'
+    : mode === 'my_holdings' ? 'Your portfolio · sized by position value · colored by daily change'
+    :                          'S&P 500 · sized by market cap · colored by daily change';
 
   const legendHTML = `
     <div class="heatmap-legend">
@@ -1523,18 +1573,19 @@ async function renderHeatmap() {
 
   content.innerHTML = legendHTML + `<div class="heatmap-wrap" id="heatmap-svg">loading…</div>
     <div class="heatmap-note">
-      ${mode === 'my_holdings'
-        ? 'Only your active stock holdings are shown. Empty sectors hidden.'
-        : 'Live prices populated on each refresh; tiles update silently when the background scheduler runs.'}
+      ${ mode === 'pnl'         ? 'Tile area = |P&L| dollars. A position up $5k draws the same as one down $5k. Color still encodes today\\'s daily change.'
+       : mode === 'my_holdings' ? 'Only your active stock holdings are shown. Empty sectors hidden.'
+       :                          'Live prices populated on each refresh; tiles update silently when the background scheduler runs.'}
     </div>`;
 
   $('#heatmap-mode').addEventListener('change', async (ev) => {
-    const v = ev.target.value === 'my_holdings' ? 'my_holdings' : 'market_cap';
-    state.heatmapMode = v;
+    const v = ev.target.value;
+    const safe = (v === 'my_holdings' || v === 'pnl') ? v : 'market_cap';
+    state.heatmapMode = safe;
     try {
       await api('/api/preferences/heatmap_mode', {
         method: 'PUT',
-        body: JSON.stringify({ value: v }),
+        body: JSON.stringify({ value: safe }),
       });
     } catch (e) {
       console.warn('heatmap_mode persist failed', e.message);
@@ -1946,7 +1997,7 @@ function renderStocks() {
         <td>${earningsCell(r.earningsDate)}</td>
         <td>${exDivCell(r.exDividendDate)}</td>
         <td class="sparkline-cell">${sparkSvg}</td>
-        <td>${scoreCell(r.score)}</td>
+        <td>${scoreCell(r.score, true, 'stock', r.id)}</td>
         <td class="market-cell">${marketCell(r.market)}</td>
         ${noteCell}
         <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="stock" title="Edit">✎</button></td>
@@ -2072,7 +2123,7 @@ function renderCrypto() {
         <td class="num suggested" title="Suggested SL for ${escapeHTML(r.volTier || 'medium')}-vol">${fmtNum1.format(r.suggestedSlPct)}%</td>
         <td class="num suggested" title="Suggested TP for ${escapeHTML(r.volTier || 'medium')}-vol">${fmtNum1.format(r.suggestedTpPct)}%</td>
         <td class="sparkline-cell">${sparkSvg}</td>
-        <td>${scoreCell(r.score)}</td>
+        <td>${scoreCell(r.score, true, 'crypto', r.id)}</td>
         <td class="market-cell"><span class="dim" title="Crypto trades 24/7">—</span></td>
         ${noteCell}
         <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="crypto" title="Edit">✎</button></td>
@@ -2199,6 +2250,23 @@ function wireRowActions(kind) {
       if (ev.target.closest('.row-edit')) return;
       const [k, idStr] = cell.dataset.holdingDetail.split(':');
       openHoldingDetail(k, parseInt(idStr, 10));
+    });
+  }
+  // Backlog polish 2026-05-17 — click-to-rescore from holdings table.
+  for (const cell of document.querySelectorAll(`[data-rescore-kind="${kind}"]`)) {
+    cell.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const id = parseInt(cell.dataset.rescoreId, 10);
+      const list = kind === 'stock' ? state.stocks : state.crypto;
+      const h = (list || []).find((x) => x.id === id);
+      if (!h) return;
+      openScoreScreen({
+        targetKind: 'holding',
+        kind,
+        id,
+        ticker: h.ticker || h.symbol || h.name,
+        name: h.name,
+      });
     });
   }
 }
@@ -2341,6 +2409,19 @@ const stockFields = [
   { name: 'resistance2',  label: 'Resistance 2 (TP2 ref)', type: 'number', step: '0.01', section: 'levels' },
   { name: 'setupType',    label: 'Setup type',     type: 'select-kv', options: SETUP_TYPES, section: 'levels' },
   { name: 'stage',        label: 'Stage',          type: 'select-kv', options: STAGES, section: 'levels' },
+  // Spec 5 polish — manual override when ticker-suffix detection picks wrong.
+  // Empty value = use suffix rule (default).
+  { name: 'exchangeOverride', label: 'Exchange override', type: 'select-kv',
+    options: [
+      { value: '',         label: '— (auto from suffix)' },
+      { value: 'US',       label: 'US (NYSE/NASDAQ)' },
+      { value: 'LSE',      label: 'LSE (London)' },
+      { value: 'EURONEXT', label: 'Euronext (Paris/Amsterdam/Brussels/Milan/Lisbon)' },
+      { value: 'XETRA',    label: 'XETRA (Frankfurt)' },
+      { value: 'TSE',      label: 'TSE (Tokyo)' },
+      { value: 'HKEX',     label: 'HKEX (Hong Kong)' },
+      { value: 'B3',       label: 'B3 (São Paulo)' },
+    ] },
   { name: 'strategyNote', label: 'Strategy note',  type: 'textarea' },
   { name: 'note',         label: 'Note',           type: 'textarea' },
 ];
@@ -2628,7 +2709,12 @@ async function submitHoldingForm({ kind, mode, holding }) {
     } else if (f.type === 'text' || f.type === 'textarea' || f.type === 'select') {
       v = v.trim();
       if (v === '' && f.name !== 'name' && f.name !== 'symbol' && f.name !== 'classification' && f.name !== 'volTier') {
-        v = null;
+        // exchangeOverride: empty string = "clear the override" (user-intent
+        // signal); keep it so the server can blank the field. Null would
+        // mean "preserve" instead.
+        if (f.name !== 'exchangeOverride') {
+          v = null;
+        }
       }
     }
     body[f.name] = v;
@@ -3708,6 +3794,9 @@ async function renderScreener() {
 
 // ---------- watchlist tab -----------------------------------------------
 
+// Backlog polish 2026-05-17 — watchlist column sort state.
+if (state.watchlistSort == null) state.watchlistSort = { key: 'addedAt', dir: 'desc' };
+
 async function renderWatchlist() {
   const res = await api('/api/watchlist');
   state.watchlist = res.watchlist || [];
@@ -3728,7 +3817,15 @@ async function renderWatchlist() {
     return;
   }
 
-  const rows = state.watchlist.map((e) => {
+  // Backlog polish — sort rows per state.watchlistSort.
+  const sortKey = state.watchlistSort.key;
+  const sortDir = state.watchlistSort.dir;
+  const sorted = state.watchlist.slice().sort((a, b) => {
+    const cmp = compareWatchlistRows(a, b, sortKey);
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const rows = sorted.map((e) => {
     const dist = distanceToEntry(e.currentPrice, e.targetEntryLow, e.targetEntryHigh, !!e.alertSuppressed);
     const target = e.targetEntryLow != null && e.targetEntryHigh != null
       ? `$${fmtNum2.format(e.targetEntryLow)}–$${fmtNum2.format(e.targetEntryHigh)}`
@@ -3768,6 +3865,16 @@ async function renderWatchlist() {
     `;
   }).join('');
 
+  // Sortable column header helper.
+  const sortHeader = (key, label, extraClass) => {
+    const active = sortKey === key;
+    const arrow = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    const cls = ['wl-sortable'];
+    if (active) cls.push('active');
+    if (extraClass) cls.push(extraClass);
+    return `<th class="${cls.join(' ')}" data-sort-key="${key}" title="Click to sort">${label}${arrow}</th>`;
+  };
+
   $('#content').innerHTML = `
     <div class="table-toolbar">
       <button class="btn-ghost" id="add-watchlist-stock">+ Add stock</button>
@@ -3777,15 +3884,15 @@ async function renderWatchlist() {
       <table class="holdings watchlist">
         <thead>
           <tr>
-            <th>Ticker</th>
-            <th>Company</th>
-            <th>Sector</th>
-            <th class="num">Price</th>
-            <th class="num">Target</th>
-            <th>Distance</th>
-            <th>Score</th>
+            ${sortHeader('ticker',      'Ticker')}
+            ${sortHeader('companyName', 'Company')}
+            ${sortHeader('sector',      'Sector')}
+            ${sortHeader('currentPrice','Price', 'num')}
+            ${sortHeader('target',      'Target', 'num')}
+            ${sortHeader('distance',    'Distance')}
+            ${sortHeader('score',       'Score')}
             <th>Tag</th>
-            <th>Added</th>
+            ${sortHeader('addedAt',     'Added')}
             <th>Note</th>
             <th></th>
           </tr>
@@ -3798,6 +3905,53 @@ async function renderWatchlist() {
   $('#add-watchlist-crypto').addEventListener('click', () => openWatchlistModal({ kind: 'crypto', mode: 'add' }));
   for (const btn of document.querySelectorAll('.row-mini')) {
     btn.addEventListener('click', () => onWatchlistAction(btn.dataset.act, parseInt(btn.dataset.wid, 10)));
+  }
+  // Wire column-header clicks.
+  for (const th of document.querySelectorAll('.wl-sortable')) {
+    th.addEventListener('click', () => {
+      const k = th.dataset.sortKey;
+      if (state.watchlistSort.key === k) {
+        state.watchlistSort.dir = state.watchlistSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.watchlistSort = { key: k, dir: 'asc' };
+      }
+      renderWatchlist();
+    });
+  }
+}
+
+// compareWatchlistRows — typed comparator per column key.
+function compareWatchlistRows(a, b, key) {
+  const num = (v) => (v == null ? -Infinity : v);
+  const str = (v) => (v == null ? '' : String(v).toLowerCase());
+  switch (key) {
+    case 'ticker':       return str(a.ticker).localeCompare(str(b.ticker));
+    case 'companyName':  return str(a.companyName).localeCompare(str(b.companyName));
+    case 'sector':       return str(a.sector).localeCompare(str(b.sector));
+    case 'currentPrice': return num(a.currentPrice) - num(b.currentPrice);
+    case 'target': {
+      const av = a.targetEntryLow ?? a.targetEntryHigh ?? -Infinity;
+      const bv = b.targetEntryLow ?? b.targetEntryHigh ?? -Infinity;
+      return av - bv;
+    }
+    case 'distance': {
+      // Distance = |currentPrice - midTarget| / midTarget. Smaller = closer.
+      const distance = (e) => {
+        if (e.currentPrice == null) return Infinity;
+        const lo = e.targetEntryLow, hi = e.targetEntryHigh;
+        if (lo == null && hi == null) return Infinity;
+        const mid = (lo != null && hi != null) ? (lo + hi) / 2 : (lo ?? hi);
+        return Math.abs(e.currentPrice - mid) / mid;
+      };
+      return distance(a) - distance(b);
+    }
+    case 'score': {
+      const s = (e) => (e.latestScore ? e.latestScore.totalScore : -1);
+      return s(a) - s(b);
+    }
+    case 'addedAt':
+    default:
+      return new Date(a.addedAt || 0) - new Date(b.addedAt || 0);
   }
 }
 
@@ -3950,19 +4104,40 @@ async function submitWatchlistForm({ kind, mode, entry }) {
 }
 
 // ---------- 8-question scoring screen ----------------------------------
-
-async function openScoreScreen(wid) {
-  const entry = (state.watchlist || []).find((e) => e.id === wid);
-  if (!entry) return;
+//
+// openScoreScreen accepts either:
+//   - a number (legacy) → treated as a watchlist id; entry pulled from
+//     state.watchlist
+//   - { targetKind: 'holding', kind: 'stock'|'crypto', id, ticker, name } →
+//     used for in-place rescoring of held positions (backlog polish 2026-05-17)
+async function openScoreScreen(arg) {
+  let targetKind, targetId, entry;
+  if (typeof arg === 'object' && arg && arg.targetKind === 'holding') {
+    targetKind = 'holding';
+    targetId = arg.id;
+    entry = {
+      id: arg.id,
+      kind: arg.kind, // 'stock' | 'crypto'
+      ticker: arg.ticker,
+      companyName: arg.name,
+    };
+  } else {
+    // Legacy path: numeric watchlist id.
+    const wid = typeof arg === 'object' ? arg.id : arg;
+    entry = (state.watchlist || []).find((e) => e.id === wid);
+    if (!entry) return;
+    targetKind = 'watchlist';
+    targetId = entry.id;
+  }
   // Load the framework definition + any existing latest score in parallel.
   const fwID = entry.kind === 'stock' ? 'jordi' : 'cowen';
   let fw, prior, contradictions;
   try {
     [fw, prior, contradictions] = await Promise.all([
       api(`/api/frameworks/${fwID}`),
-      api(`/api/scores?targetKind=watchlist&targetId=${entry.id}`),
+      api(`/api/scores?targetKind=${targetKind}&targetId=${targetId}`),
       // Spec 11 D7 — factor-invalidation flag from notes.
-      api(`/api/notes/contradictions?targetKind=watchlist&targetId=${entry.id}`).catch(() => ({ contradictions: [] })),
+      api(`/api/notes/contradictions?targetKind=${targetKind}&targetId=${targetId}`).catch(() => ({ contradictions: [] })),
     ]);
   } catch (e) {
     alert('couldn\'t load framework: ' + e.message);
@@ -4077,14 +4252,14 @@ async function openScoreScreen(wid) {
   $('#modal-close').addEventListener('click', closeImportModal);
   $('#score-cancel').addEventListener('click', closeImportModal);
   $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
-  $('#score-save').addEventListener('click', () => submitScore(fw, entry, prior.score));
+  $('#score-save').addEventListener('click', () => submitScore(fw, entry, prior.score, targetKind));
 }
 
 function humanizeKey(k) {
   return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-async function submitScore(fw, entry, priorScore) {
+async function submitScore(fw, entry, priorScore, targetKind) {
   const err = $('#score-err');
   err.textContent = '';
   const scores = {};
@@ -4108,7 +4283,7 @@ async function submitScore(fw, entry, priorScore) {
     await api('/api/scores', {
       method: 'POST',
       body: JSON.stringify({
-        targetKind: 'watchlist',
+        targetKind: targetKind || 'watchlist',
         targetId: entry.id,
         frameworkId: fw.id,
         scores,
@@ -4117,7 +4292,11 @@ async function submitScore(fw, entry, priorScore) {
       }),
     });
     closeImportModal();
+    // Invalidate caches so the score badge reflects the new value.
     state.watchlist = null;
+    state.stocks = null;
+    state.crypto = null;
+    state.summary = null;
     loadActiveTab();
   } catch (e) {
     err.textContent = e.message;

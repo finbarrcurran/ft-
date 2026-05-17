@@ -80,12 +80,16 @@ func validPreferenceValue(key, value string) bool {
 	}
 	switch key {
 	case "heatmap_mode":
-		return value == "market_cap" || value == "my_holdings"
+		// Backlog polish — "pnl" surfaces tile-sized-by-P&L mode.
+		return value == "market_cap" || value == "my_holdings" || value == "pnl"
 	case "news_filter_mode":
 		return value == "all" || value == "mine"
 	case "regime_skip_week":
 		// ISO week format like "2026-W20" or "skip" — short and bounded.
 		return len(value) <= 24
+	case "alerts_snooze_until":
+		// Backlog polish — unix-seconds timestamp as a string. "0" clears.
+		return len(value) > 0 && len(value) <= 16
 	}
 	// Spec 9c.1 — llm_* keys are bounded TEXT/bool/number values; accept
 	// anything that survives the generic length check above.

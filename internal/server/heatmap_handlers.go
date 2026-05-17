@@ -13,7 +13,7 @@ import (
 //
 //	w     width in px   (default 1100, min 320, max 3000)
 //	h     height in px  (default 600,  min 300, max 1800)
-//	mode  "market_cap" (default) | "my_holdings"  (Spec 6)
+//	mode  "market_cap" (default) | "my_holdings" | "pnl"
 //	sector  optional GICS sector filter
 //
 // Mode behaviour:
@@ -23,6 +23,9 @@ import (
 //                   is position value USD (qty × current price; falls back
 //                   to invested$). Tile color is daily_change_pct. Sector
 //                   grouping preserved.
+//   * pnl         — same universe as my_holdings, tile size is |P&L|
+//                   (absolute realised+unrealised dollar move from cost).
+//                   Color is daily change. Surfaces winners/losers by size.
 //
 // Response is a complete <svg>...</svg> document.
 func (s *Server) handleHeatmap(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +41,7 @@ func (s *Server) handleHeatmap(w http.ResponseWriter, r *http.Request) {
 			mode = v
 		}
 	}
-	if mode != "my_holdings" {
+	if mode != "my_holdings" && mode != "pnl" {
 		mode = "market_cap"
 	}
 
@@ -61,6 +64,8 @@ func (s *Server) handleHeatmap(w http.ResponseWriter, r *http.Request) {
 
 	if mode == "my_holdings" {
 		opts.Source = tilesFromHoldings(holdings)
+	} else if mode == "pnl" {
+		opts.Source = tilesFromHoldingsByPnL(holdings)
 	}
 
 	svg := heatmap.Render(opts)
@@ -110,6 +115,55 @@ func tilesFromHoldings(holdings []*domain.StockHolding) []heatmap.MarketTile {
 			Name:       h.Name,
 			Sector:     sector,
 			MarketCapB: value, // sizing weight; units don't matter (relative)
+			Price:      price,
+			ChangePct:  change,
+			VolumeM:    0,
+			Held:       true,
+		})
+	}
+	return out
+}
+
+// tilesFromHoldingsByPnL builds tiles sized by absolute P&L (dollar move
+// from invested$). Bigger movers — wins or losses — get bigger tiles.
+// Backlog polish 2026-05-17.
+func tilesFromHoldingsByPnL(holdings []*domain.StockHolding) []heatmap.MarketTile {
+	out := make([]heatmap.MarketTile, 0, len(holdings))
+	for _, h := range holdings {
+		if h.Ticker == nil || *h.Ticker == "" {
+			continue
+		}
+		// P&L = (qty × currentPrice) - invested$
+		var pnl float64
+		if h.AvgOpenPrice != nil && *h.AvgOpenPrice > 0 && h.CurrentPrice != nil && *h.CurrentPrice > 0 {
+			qty := h.InvestedUSD / *h.AvgOpenPrice
+			pnl = qty*(*h.CurrentPrice) - h.InvestedUSD
+		}
+		size := pnl
+		if size < 0 {
+			size = -size
+		}
+		if size <= 0 {
+			// Give zero-movers a tiny stub so they still show.
+			size = 1
+		}
+		var price float64
+		if h.CurrentPrice != nil {
+			price = *h.CurrentPrice
+		}
+		var change float64
+		if h.DailyChangePct != nil {
+			change = *h.DailyChangePct
+		}
+		sector := "Other"
+		if h.Sector != nil && *h.Sector != "" {
+			sector = *h.Sector
+		}
+		out = append(out, heatmap.MarketTile{
+			Ticker:     *h.Ticker,
+			Name:       h.Name,
+			Sector:     sector,
+			MarketCapB: size,
 			Price:      price,
 			ChangePct:  change,
 			VolumeM:    0,

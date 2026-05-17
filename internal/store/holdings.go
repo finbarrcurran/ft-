@@ -149,6 +149,7 @@ func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) 
 		   support_1 = ?, support_2 = ?, resistance_1 = ?, resistance_2 = ?,
 		   setup_type = ?, stage = ?,
 		   thesis_link = ?,
+		   exchange_override = ?,
 		   updated_at = strftime('%s','now')
 		 WHERE user_id = ? AND id = ?`,
 		h.Name, strPtrToNull(h.Ticker), strPtrToNull(h.Category), strPtrToNull(h.Sector),
@@ -158,6 +159,7 @@ func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) 
 		fp(h.Support1), fp(h.Support2), fp(h.Resistance1), fp(h.Resistance2),
 		strPtrToNull(h.SetupType), h.Stage,
 		strPtrToNull(h.ThesisLink),
+		strPtrToNull(h.ExchangeOverride),
 		h.UserID, h.ID,
 	)
 	return err
