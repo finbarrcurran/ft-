@@ -87,10 +87,14 @@ func mean(xs []float64) float64 {
 
 // RMultipleHistogram bins trades by R-multiple for the histogram chart.
 // Default bins: <-3R, -3..-2R, -2..-1R, -1..0R, 0..+1R, +1..+2R, +2..+3R, ≥+3R.
+//
+// Min/Max are NOT serialised because the lowest/highest bins use
+// math.Inf, which encoding/json rejects (silently truncates the body
+// when the encoder errors mid-stream). UI only needs Label + Count.
 type Bin struct {
 	Label string  `json:"label"`
-	Min   float64 `json:"min"`
-	Max   float64 `json:"max"`
+	Min   float64 `json:"-"`
+	Max   float64 `json:"-"`
 	Count int     `json:"count"`
 }
 
