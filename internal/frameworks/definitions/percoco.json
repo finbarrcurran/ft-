@@ -1,0 +1,83 @@
+{
+  "id": "percoco",
+  "name": "Craig Percoco — Technical Execution",
+  "applies_to": "both",
+  "version": "1.0",
+  "source": "Synthesized from public Percoco content — May 2026",
+  "questions": [
+    {
+      "id": "trend_alignment",
+      "label": "Trend alignment",
+      "prompt": "Price above 50W and 200D MA, both trending up?",
+      "guidance": "Weekly close above both moving averages, slopes positive.",
+      "weight": 1,
+      "auto_scorable": true
+    },
+    {
+      "id": "higher_tf_context",
+      "label": "Higher-TF context",
+      "prompt": "Monthly trend in agreement with weekly setup?",
+      "guidance": "Counter-monthly weekly trades fail more often.",
+      "weight": 1,
+      "auto_scorable": true
+    },
+    {
+      "id": "clear_sr",
+      "label": "Clear S/R",
+      "prompt": "Entry, stop, TP1 levels visible without interpretation?",
+      "guidance": "If you have to 'interpret' the chart, the setup is unclear.",
+      "weight": 1,
+      "auto_scorable": true
+    },
+    {
+      "id": "risk_reward",
+      "label": "Risk-reward (VETO)",
+      "prompt": "R-multiple >=1.5 to TP1, >=3 to TP2?",
+      "guidance": "VETO rule — fails this and the whole trade fails regardless of other scores.",
+      "weight": 1,
+      "auto_scorable": true
+    },
+    {
+      "id": "vol_band",
+      "label": "Volatility band",
+      "prompt": "ATR/price near 12mo average, not extreme high/low?",
+      "guidance": "Overheated or compressed vol = poor entry timing.",
+      "weight": 1,
+      "auto_scorable": true
+    },
+    {
+      "id": "distance_to_sr",
+      "label": "Distance to S/R",
+      "prompt": "Entry within 1 ATR of meaningful support?",
+      "guidance": "Far-from-structure entries have loose stops and poor R.",
+      "weight": 1,
+      "auto_scorable": true
+    },
+    {
+      "id": "chart_cleanliness",
+      "label": "Chart cleanliness",
+      "prompt": "No divergences, failed breakouts, contradicting candle patterns?",
+      "guidance": "Judgment call — bots are unreliable here.",
+      "weight": 1,
+      "auto_scorable": false
+    },
+    {
+      "id": "catalyst_proximity",
+      "label": "Catalyst proximity",
+      "prompt": "No earnings / FOMC / known events within 2 weeks that could gap past stop?",
+      "guidance": "FT pulls earnings dates; user confirms interpretation.",
+      "weight": 1,
+      "auto_scorable": false
+    }
+  ],
+  "scoring": {
+    "scale": "0_1_2",
+    "max_total": 16,
+    "pass_threshold": 13,
+    "strong_signals": ["risk_reward"],
+    "veto_questions": ["risk_reward"]
+  },
+  "tags": {
+    "setup_type": ["A_breakout_retest", "B_support_bounce", "C_continuation"]
+  }
+}

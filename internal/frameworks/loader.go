@@ -35,18 +35,23 @@ type Framework struct {
 
 // Question is one row in the 8-Question Screen UI.
 type Question struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Prompt   string `json:"prompt"`
-	Guidance string `json:"guidance,omitempty"`
-	Weight   int    `json:"weight"`
+	ID            string `json:"id"`
+	Label         string `json:"label"`
+	Prompt        string `json:"prompt"`
+	Guidance      string `json:"guidance,omitempty"`
+	Weight        int    `json:"weight"`
+	AutoScorable  bool   `json:"auto_scorable,omitempty"`
 }
 
 type Scoring struct {
-	Scale          string   `json:"scale"`            // "0_1_2"
+	Scale          string   `json:"scale"` // "0_1_2"
 	MaxTotal       int      `json:"max_total"`
 	PassThreshold  int      `json:"pass_threshold"`
 	StrongSignals  []string `json:"strong_signals,omitempty"`
+	// Spec 9c — veto questions. If ANY of these score 0, the entire
+	// scorecard fails the pass-check regardless of total. Honored by
+	// Passes() below.
+	VetoQuestions []string `json:"veto_questions,omitempty"`
 }
 
 // Validate enforces the contract the rest of the code relies on. Called once
@@ -59,8 +64,8 @@ func (f Framework) Validate() error {
 	if f.ID == "" {
 		return fmt.Errorf("missing id")
 	}
-	if f.AppliesTo != "stock" && f.AppliesTo != "crypto" {
-		return fmt.Errorf("applies_to must be stock|crypto, got %q", f.AppliesTo)
+	if f.AppliesTo != "stock" && f.AppliesTo != "crypto" && f.AppliesTo != "both" {
+		return fmt.Errorf("applies_to must be stock|crypto|both, got %q", f.AppliesTo)
 	}
 	if len(f.Questions) == 0 {
 		return fmt.Errorf("no questions")
@@ -105,6 +110,35 @@ func (f Framework) QuestionByID(id string) (*Question, bool) {
 // score multiplier.
 func (f Framework) MaxScore() int {
 	return 2 * len(f.Questions)
+}
+
+// Passes reports whether a per-question score map passes the framework.
+// Spec 9c D8 introduces the VETO concept: if any veto-tagged question
+// scores 0, the trade fails regardless of total. Otherwise checks the
+// total against PassThreshold.
+//
+// `scores` is question_id → 0/1/2. Missing entries treated as 0.
+func (f Framework) Passes(scores map[string]int) bool {
+	for _, vetoID := range f.Scoring.VetoQuestions {
+		if scores[vetoID] == 0 {
+			return false
+		}
+	}
+	total := 0
+	for _, q := range f.Questions {
+		total += scores[q.ID]
+	}
+	return total >= f.Scoring.PassThreshold
+}
+
+// IsVeto reports whether a question id is in the veto list.
+func (f Framework) IsVeto(qid string) bool {
+	for _, v := range f.Scoring.VetoQuestions {
+		if v == qid {
+			return true
+		}
+	}
+	return false
 }
 
 // ----- registry ----------------------------------------------------------

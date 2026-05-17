@@ -49,6 +49,95 @@ type AutoScoreResult struct {
 	Rationales map[string]string // question_id → human-readable why
 }
 
+// BuildAutoScoreInputs assembles the inputs vector from a series of daily
+// bars + caller-supplied user-set levels. Returns zero-valued inputs
+// gracefully when there's not enough history (AutoScorePercoco handles
+// zero gracefully too).
+//
+// `dailyBars` must be ASCENDING by date. `support1, resistance1, resistance2`
+// are the user-set or auto-proposed levels.
+func BuildAutoScoreInputs(dailyBars []Bar, currentPrice, support1, resistance1, resistance2, entryPrice, stopPrice, tp1, tp2 float64) AutoScoreInputs {
+	in := AutoScoreInputs{
+		CurrentPrice: currentPrice,
+		Support1:     support1,
+		Resistance1:  resistance1,
+		Resistance2:  resistance2,
+		EntryPrice:   entryPrice,
+		StopPrice:    stopPrice,
+		TP1:          tp1,
+		TP2:          tp2,
+	}
+	if len(dailyBars) < 30 {
+		return in
+	}
+	// SMA200D from daily.
+	if len(dailyBars) >= 200 {
+		in.SMA200D = avgCloses(dailyBars[len(dailyBars)-200:])
+		in.SMA200DTrend = trendOf(dailyBars[len(dailyBars)-200:], dailyBars[len(dailyBars)-1].Close)
+	}
+	// Aggregate to weekly for 50W MA + ATR.
+	weekly := AggregateToWeekly(dailyBars)
+	if len(weekly) >= 50 {
+		in.SMA50W = avgCloses(weekly[len(weekly)-50:])
+		in.SMA50WTrend = trendOf(weekly[len(weekly)-50:], weekly[len(weekly)-1].Close)
+	}
+	// Monthly trend: 12-month-ago daily close vs last close.
+	if len(dailyBars) >= 252 {
+		old := dailyBars[len(dailyBars)-252].Close
+		now := dailyBars[len(dailyBars)-1].Close
+		switch {
+		case now > old*1.02:
+			in.MonthlyTrend = "up"
+		case now < old*0.98:
+			in.MonthlyTrend = "down"
+		default:
+			in.MonthlyTrend = "flat"
+		}
+	}
+	// ATR + ATR pct snapshots.
+	if len(weekly) >= 15 {
+		in.ATRWeekly = ATR(weekly, 14)
+		if currentPrice > 0 && in.ATRWeekly > 0 {
+			in.ATRPctCurrent = in.ATRWeekly / currentPrice
+		}
+		in.ATRPctAvg12mo = AvgATRPctOverWindow(weekly, 14, 52)
+	}
+	// Distance to support in ATRs.
+	if entryPrice > 0 && support1 > 0 && in.ATRWeekly > 0 {
+		in.DistanceToSupport = (entryPrice - support1) / in.ATRWeekly
+	}
+	return in
+}
+
+// avgCloses returns the simple average of close prices.
+func avgCloses(bars []Bar) float64 {
+	if len(bars) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, b := range bars {
+		sum += b.Close
+	}
+	return sum / float64(len(bars))
+}
+
+// trendOf returns "up" / "flat" / "down" based on whether the current close
+// is above/around/below the average. Tolerance ±0.5%.
+func trendOf(bars []Bar, current float64) string {
+	a := avgCloses(bars)
+	if a == 0 {
+		return "flat"
+	}
+	switch {
+	case current > a*1.005:
+		return "up"
+	case current < a*0.995:
+		return "down"
+	default:
+		return "flat"
+	}
+}
+
 // AutoScorePercoco computes the six auto-scorable questions of the
 // percoco.json framework. See `internal/frameworks/definitions/
 // percoco.json` for the canonical question IDs.

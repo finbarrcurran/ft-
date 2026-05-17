@@ -99,6 +99,33 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Spec 9c D14 — Percoco stage events (TP1/TP2 proximity+hit, BOUNCE,
+	// TIME_STOP). Distinct alert_kind strings for dedup.
+	for _, h := range stocks {
+		events := alert.ComputeStageEvents(h, margin)
+		for _, ev := range events {
+			if onlyUnnotified {
+				acked, err := s.store.HasAlertBeenAckedToday(r.Context(), "stock", h.ID, ev.Kind, today)
+				if err != nil {
+					mapStoreError(w, err)
+					return
+				}
+				if acked {
+					continue
+				}
+			}
+			out = append(out, alertOut{
+				HoldingKind:  "stock",
+				HoldingID:    h.ID,
+				Ticker:       h.Ticker,
+				Name:         h.Name,
+				Kind:         ev.Kind,
+				Triggers:     []string{ev.Trigger},
+				CurrentPrice: h.CurrentPrice,
+			})
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"asOf":   time.Now().UTC().Format(time.RFC3339),
 		"alerts": out,

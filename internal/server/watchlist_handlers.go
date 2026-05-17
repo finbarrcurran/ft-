@@ -440,6 +440,14 @@ func (s *Server) handleCreateScore(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Spec 9c — build a numeric score map and use Framework.Passes() so
+	// veto questions are honored (Percoco Q4 risk_reward fails the whole
+	// trade when scored 0).
+	numericScores := make(map[string]int, len(req.Scores))
+	for k, v := range req.Scores {
+		numericScores[k] = v.Score
+	}
+
 	fs := &domain.FrameworkScore{
 		UserID:       userID,
 		TargetKind:   req.TargetKind,
@@ -447,7 +455,7 @@ func (s *Server) handleCreateScore(w http.ResponseWriter, r *http.Request) {
 		FrameworkID:  req.FrameworkID,
 		TotalScore:   total,
 		MaxScore:     fw.MaxScore(),
-		Passes:       total >= fw.Scoring.PassThreshold,
+		Passes:       fw.Passes(numericScores),
 		ScoresJSON:   string(scoresJSON),
 		TagsJSON:     tagsJSONp,
 		ReviewerNote: req.ReviewerNote,

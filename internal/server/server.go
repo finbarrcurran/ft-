@@ -122,6 +122,12 @@ func (s *Server) routes() {
 	// Token-or-cookie so the bot's /levels command works.
 	s.mux.HandleFunc("GET /api/holdings/stocks/{id}/levels", s.requireUserOrToken(s.handleStockLevels))
 	s.mux.HandleFunc("GET /api/holdings/crypto/{id}/levels", s.requireUserOrToken(s.handleCryptoLevels))
+	// Spec 9c D9: Percoco auto-scoring (6/8 questions).
+	s.mux.HandleFunc("POST /api/holdings/stocks/{id}/autoscore", s.requireUser(s.handleStockAutoscore))
+	s.mux.HandleFunc("POST /api/holdings/crypto/{id}/autoscore", s.requireUser(s.handleCryptoAutoscore))
+	// Spec 9c D12/D13/D16: portfolio risk dashboard + daily snapshot.
+	s.mux.HandleFunc("GET /api/risk/dashboard", s.requireUserOrToken(s.handleRiskDashboard))
+	s.mux.HandleFunc("POST /api/risk/snapshot", s.requireUserOrToken(s.handleRiskSnapshot))
 
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))

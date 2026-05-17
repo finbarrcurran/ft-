@@ -15,6 +15,7 @@ package refresh
 import (
 	"context"
 	"fmt"
+	"ft/internal/domain"
 	"ft/internal/market"
 	"ft/internal/store"
 	"ft/internal/technicals"
@@ -194,6 +195,12 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 		r.PrunedRows = n
 	}
 
+	// Spec 9c D13 — daily portfolio value snapshot for drawdown tracking.
+	// Computed AFTER history + ATR work above so live prices are current.
+	if err := s.snapshotPortfolioValue(ctx, userID, stocks, cryptos); err != nil {
+		r.Errors = append(r.Errors, fmt.Sprintf("portfolio snapshot: %s", err))
+	}
+
 	r.FinishedAt = time.Now().UTC()
 	slog.Info("daily job done",
 		"stocks_history", fmt.Sprintf("%d/%d", r.StocksHistoryOK, r.StocksProcessed),
@@ -205,6 +212,31 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 		"took", r.FinishedAt.Sub(r.StartedAt).Round(time.Millisecond),
 	)
 	return r
+}
+
+// snapshotPortfolioValue writes one row to portfolio_value_history for
+// today (UTC). Idempotent: re-runs upsert on the same date.
+func (s *Service) snapshotPortfolioValue(ctx context.Context, userID int64, stocks []*domain.StockHolding, cryptos []*domain.CryptoHolding) error {
+	_ = userID
+	stockUSD := 0.0
+	cryptoUSD := 0.0
+	for _, h := range stocks {
+		if h.CurrentPrice != nil && h.AvgOpenPrice != nil && *h.AvgOpenPrice > 0 {
+			qty := h.InvestedUSD / *h.AvgOpenPrice
+			stockUSD += qty * *h.CurrentPrice
+		} else {
+			stockUSD += h.InvestedUSD
+		}
+	}
+	for _, h := range cryptos {
+		if h.CurrentValueUSD != nil {
+			cryptoUSD += *h.CurrentValueUSD
+		} else if h.CostBasisUSD != nil {
+			cryptoUSD += *h.CostBasisUSD
+		}
+	}
+	date := time.Now().UTC().Format("2006-01-02")
+	return s.Store.UpsertPortfolioValue(ctx, date, stockUSD+cryptoUSD, stockUSD, cryptoUSD)
 }
 
 // pickYahooRange maps requested history depth to a Yahoo range string.
