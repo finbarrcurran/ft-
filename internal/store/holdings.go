@@ -26,7 +26,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         support_1, support_2, resistance_1, resistance_2,
         atr_weekly, vol_tier_auto, setup_type, stage,
         tp1_hit_at, tp2_hit_at, time_stop_review_at,
-        thesis_link, realized_pnl_usd,
+        thesis_link, realized_pnl_usd, volatility_12m_pct,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -209,7 +209,8 @@ const cryptoSelectCols = `id, user_id, name, symbol, classification, is_core, ca
         support_1, support_2, resistance_1, resistance_2,
         atr_weekly, vol_tier_auto, setup_type, stage,
         tp1_hit_at, tp2_hit_at, time_stop_review_at,
-        thesis_link, realized_pnl_usd,
+        thesis_link, realized_pnl_usd, volatility_12m_pct,
+        current_location,
         updated_at`
 
 func (s *Store) ListCryptoHoldings(ctx context.Context, userID int64) ([]*domain.CryptoHolding, error) {
@@ -293,14 +294,16 @@ func execInsertCrypto(ctx context.Context, e execer, h *domain.CryptoHolding) (i
 		    avg_buy_usd, cost_basis_usd, current_price_usd, current_value_usd,
 		    rsi14, change_7d_pct, change_30d_pct, strategy_note,
 		    note, vol_tier,
+		    current_location,
 		    updated_at
-		 ) VALUES (?,?,?,?,?,?,?, ?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?, strftime('%s','now'))`,
+		 ) VALUES (?,?,?,?,?,?,?, ?,?, ?,?,?,?, ?,?,?,?, ?,?,?,?, ?,?, ?, strftime('%s','now'))`,
 		h.UserID, h.Name, h.Symbol, h.Classification, isCore, strPtrToNull(h.Category), strPtrToNull(h.Wallet),
 		h.QuantityHeld, h.QuantityStaked,
 		fp(h.AvgBuyEUR), fp(h.CostBasisEUR), fp(h.CurrentPriceEUR), fp(h.CurrentValueEUR),
 		fp(h.AvgBuyUSD), fp(h.CostBasisUSD), fp(h.CurrentPriceUSD), fp(h.CurrentValueUSD),
 		fp(h.RSI14), fp(h.Change7dPct), fp(h.Change30dPct), h.StrategyNote,
 		strPtrToNull(h.Note), tier,
+		strPtrToNull(h.CurrentLocation),
 	)
 	if err != nil {
 		return 0, err
@@ -327,6 +330,7 @@ func (s *Store) UpdateCryptoHolding(ctx context.Context, h *domain.CryptoHolding
 		   support_1 = ?, support_2 = ?, resistance_1 = ?, resistance_2 = ?,
 		   setup_type = ?, stage = ?,
 		   thesis_link = ?,
+		   current_location = ?,
 		   updated_at = strftime('%s','now')
 		 WHERE user_id = ? AND id = ?`,
 		h.Name, h.Symbol, h.Classification, isCore, tier,
@@ -337,6 +341,7 @@ func (s *Store) UpdateCryptoHolding(ctx context.Context, h *domain.CryptoHolding
 		fp(h.Support1), fp(h.Support2), fp(h.Resistance1), fp(h.Resistance2),
 		strPtrToNull(h.SetupType), h.Stage,
 		strPtrToNull(h.ThesisLink),
+		strPtrToNull(h.CurrentLocation),
 		h.UserID, h.ID,
 	)
 	return err
@@ -400,6 +405,8 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	// Spec 10 columns:
 	var thesisLink sql.NullString
 	var realizedPnL float64
+	// Spec 12 D5e columns:
+	var vol12m sql.NullFloat64
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -413,13 +420,14 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&support1, &support2, &resistance1, &resistance2,
 		&atrWeekly, &volTierAuto, &setupType, &stage,
 		&tp1HitAt, &tp2HitAt, &timeStopReviewAt,
-		&thesisLink, &realizedPnL,
+		&thesisLink, &realizedPnL, &vol12m,
 		&updatedAt,
 	); err != nil {
 		return nil, err
 	}
 	h.ThesisLink = nsToPtrNonEmpty(thesisLink)
 	h.RealizedPnLUSD = realizedPnL
+	h.Volatility12mPct = nfToPtr(vol12m)
 	h.Support1 = nfToPtr(support1)
 	h.Support2 = nfToPtr(support2)
 	h.Resistance1 = nfToPtr(resistance1)
@@ -490,6 +498,9 @@ func scanCrypto(r Scannable) (*domain.CryptoHolding, error) {
 	// Spec 10 columns:
 	var thesisLink sql.NullString
 	var realizedPnL float64
+	// Spec 12 columns:
+	var vol12m sql.NullFloat64
+	var currentLocation sql.NullString
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &h.Symbol, &h.Classification, &isCore, &category, &wallet,
 		&h.QuantityHeld, &h.QuantityStaked,
@@ -500,13 +511,16 @@ func scanCrypto(r Scannable) (*domain.CryptoHolding, error) {
 		&support1, &support2, &resistance1, &resistance2,
 		&atrWeekly, &volTierAuto, &setupType, &stage,
 		&tp1HitAt, &tp2HitAt, &timeStopReviewAt,
-		&thesisLink, &realizedPnL,
+		&thesisLink, &realizedPnL, &vol12m,
+		&currentLocation,
 		&updatedAt,
 	); err != nil {
 		return nil, err
 	}
 	h.ThesisLink = nsToPtrNonEmpty(thesisLink)
 	h.RealizedPnLUSD = realizedPnL
+	h.Volatility12mPct = nfToPtr(vol12m)
+	h.CurrentLocation = nsToPtrNonEmpty(currentLocation)
 	h.IsCore = isCore != 0
 	h.Category = nsToPtr(category)
 	h.Wallet = nsToPtr(wallet)

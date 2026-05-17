@@ -97,7 +97,8 @@ func runSeed(args []string) {
 func runDaily(args []string) {
 	fs := flag.NewFlagSet("daily", flag.ExitOnError)
 	userID := fs.Int64("user-id", 1, "user id whose holdings to refresh")
-	days := fs.Int("days", 30, "history depth in days")
+	// Spec 12 D5e bumped default to 365 (annualised vol needs the year).
+	days := fs.Int("days", 365, "history depth in days")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load()
@@ -107,7 +108,7 @@ func runDaily(args []string) {
 	defer st.Close()
 	must("migrate", st.Migrate())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	res := refresh.New(st).RunDailyJob(ctx, *userID, *days)
 	fmt.Printf("daily: stocks_history=%d/%d crypto_history=%d/%d calendar=%d beta=%d pruned=%d errs=%d took=%s\n",
@@ -246,15 +247,19 @@ func runServe() {
 		slog.Info("auto-refresh disabled (FT_REFRESH_INTERVAL=0)")
 	}
 
-	// Daily background job at 04:00 UTC: sparkline history + calendar + beta.
-	// Best-effort, decoupled from the 15-min refresh so a transient Yahoo
-	// rate-limit can't take down both.
+	// Daily background job at 04:00 UTC: sparkline history + calendar + beta
+	// + 12m volatility (Spec 12 D5e). Best-effort, decoupled from the 15-min
+	// refresh so a transient Yahoo rate-limit can't take down both.
+	//
+	// 365-day window covers Spec 12's annualized realized vol math. Timeout
+	// bumped to 15 min (~23 stocks × ~3s Yahoo + 13 crypto × 2.5s CoinGecko
+	// + processing ≈ 10 min worst case).
 	go func() {
 		dailySvc := refresh.New(st)
 		refresh.ScheduleDailyJob(bgCtx, func() {
-			ctx, cancel := context.WithTimeout(bgCtx, 5*time.Minute)
+			ctx, cancel := context.WithTimeout(bgCtx, 15*time.Minute)
 			defer cancel()
-			dailySvc.RunDailyJob(ctx, 1, 30)
+			dailySvc.RunDailyJob(ctx, 1, 365)
 		})
 	}()
 

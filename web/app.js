@@ -96,6 +96,40 @@ function suggestedDelta(entryPrice, manualPrice, suggestedPct, kind) {
   };
 }
 
+// proposedLevelCell — Spec 12 D5b. Renders SL/TP as "price | ±%" two-row cell.
+//   manualPrice: user-entered stop/take levels (preferred when present)
+//   suggestedPct: backend-computed % offset from cost basis
+//   avgOpenPrice: entry, used when only the suggested pct is available
+//   currentPrice: for the right-hand offset percentage (% from current price)
+//   kind: 'sl' renders ↓ red, 'tp' renders ↑ green
+function proposedLevelCell(manualPrice, suggestedPct, avgOpenPrice, currentPrice, kind) {
+  // Resolve absolute price level.
+  let price = manualPrice;
+  if (price == null && suggestedPct != null && avgOpenPrice != null) {
+    // Suggested pct is signed relative to cost basis (negative for SL).
+    price = avgOpenPrice * (1 + suggestedPct / 100);
+  }
+  if (price == null) return '<span class="dim">—</span>';
+  // % offset from current price (or fall back to avgOpenPrice).
+  const ref = currentPrice != null ? currentPrice : avgOpenPrice;
+  let pctStr = '';
+  let toneClass = kind === 'sl' ? 'loss' : 'gain';
+  let arrow = kind === 'sl' ? '↓' : '↑';
+  if (ref != null && ref > 0) {
+    const offsetPct = ((price - ref) / ref) * 100;
+    pctStr = `${arrow} ${Math.abs(offsetPct).toFixed(1)}%`;
+  } else {
+    pctStr = '—';
+    toneClass = 'dim';
+  }
+  return `
+    <span class="proposed-level">
+      <span class="pl-price">$${fmtNum2.format(price)}</span>
+      <span class="pl-pct ${toneClass}">${pctStr}</span>
+    </span>
+  `;
+}
+
 // earningsCell + exDivCell — Spec 3 D10.
 // Date strings are 'YYYY-MM-DD' from Yahoo calendarEvents.
 function daysUntilISO(iso) {
@@ -2129,7 +2163,9 @@ function renderStocks() {
     </div>
   `;
 
-  // Table
+  // Table — Spec 12 D5 canonical column order. SL/TP now render as
+  // price | %, "Stop Loss" → "Proposed SL", and 12m vol slots in between
+  // distance-to-SL and earnings.
   const body = rows.map((r) => {
     const m = r.metrics;
     const a = r.alert || { status: 'neutral', triggers: [] };
@@ -2141,13 +2177,15 @@ function renderStocks() {
     const noteCell = r.note
       ? `<td class="note-cell"><span class="note-bubble" data-note="${escapeHTML(r.note)}" tabindex="0" aria-label="Show note" title="Hover for full note">💬</span></td>`
       : `<td></td>`;
-    // SL/TP suggestion comparison: arrow only when manual is set and the
-    // direction is clear. ↑ means manual SL is tighter (less drawdown allowed),
-    // ↓ means manual SL is looser (more drawdown allowed). Both render in cell.
-    const slDelta = suggestedDelta(r.avgOpenPrice, r.stopLoss, r.suggestedSlPct, 'sl');
-    const tpDelta = suggestedDelta(r.avgOpenPrice, r.takeProfit, r.suggestedTpPct, 'tp');
+    // Spec 12 D5b — combined price|% cell. Falls back to "—" when one
+    // side is missing.
+    const proposedSL = proposedLevelCell(r.stopLoss, r.suggestedSlPct, r.avgOpenPrice, r.currentPrice, 'sl');
+    const proposedTP = proposedLevelCell(r.takeProfit, r.suggestedTpPct, r.avgOpenPrice, r.currentPrice, 'tp');
     const sparkSvg = r.sparklineSvg || '<span class="sparkline-empty">—</span>';
     const tickerCell = `<span class="ticker-hover" data-row-id="${r.id}" data-row-kind="stock" tabindex="0">${escapeHTML(r.ticker || '—')}</span>`;
+    const vol12mCell = r.volatility12mPct != null
+      ? `<td class="num" title="Annualized 12m realized volatility">${fmtNum1.format(r.volatility12mPct)}%</td>`
+      : `<td class="num dim">—</td>`;
     return `
       <tr data-row-id="${r.id}" data-row-kind="stock">
         <td>${badge}</td>
@@ -2161,10 +2199,10 @@ function renderStocks() {
         <td class="num" data-flash-id="stock-${r.id}-pnl" data-flash-value="${m.pnlUsd ?? ''}">${dashSigned(m.pnlUsd, fmtNum2, '$')}</td>
         <td class="num">${pct(m.pnlPct, 2)}</td>
         <td class="num">${dash(r.rsi14, fmtNum2)}</td>
-        <td class="num">${dash(r.stopLoss, fmtNum2)}</td>
+        <td class="num">${proposedSL}</td>
+        <td class="num">${proposedTP}</td>
         <td class="num">${pct(m.distanceToSlPct, 1)}</td>
-        <td class="num suggested" title="${slDelta.title}">${fmtNum1.format(r.suggestedSlPct)}%${slDelta.icon}</td>
-        <td class="num suggested" title="${tpDelta.title}">${fmtNum1.format(r.suggestedTpPct)}%${tpDelta.icon}</td>
+        ${vol12mCell}
         <td>${earningsCell(r.earningsDate)}</td>
         <td>${exDivCell(r.exDividendDate)}</td>
         <td class="sparkline-cell">${sparkSvg}</td>
@@ -2182,6 +2220,7 @@ function renderStocks() {
     </div>
   `;
 
+  // Spec 12 D5d — header tooltips on technical / risk metric headers.
   $('#content').innerHTML = chips + toolbar + `
     <div class="tablewrap">
       <table class="holdings">
@@ -2192,17 +2231,17 @@ function renderStocks() {
             <th class="num">Invested $</th>
             <th class="num">Avg Open</th>
             <th class="num">Current</th>
-            <th class="num">P&amp;L $</th>
-            <th class="num">P&amp;L %</th>
-            <th class="num">RSI(14)</th>
-            <th class="num">Stop Loss</th>
-            <th class="num">Dist to SL</th>
-            <th class="num" title="Suggested stop-loss % per beta">Sug SL</th>
-            <th class="num" title="Suggested take-profit % per beta">Sug TP</th>
+            <th class="num" title="Profit/loss in absolute dollars from invested capital">P&amp;L $</th>
+            <th class="num" title="Profit/loss as a percentage of invested capital">P&amp;L %</th>
+            <th class="num" title="Relative Strength Index over 14 periods. >70 = overbought, <30 = oversold.">RSI(14)</th>
+            <th class="num" title="Recommended stop-loss level (price | % from current). Set on eToro manually.">Proposed SL</th>
+            <th class="num" title="Recommended take-profit level (price | % from current). Set on eToro manually.">Proposed TP</th>
+            <th class="num" title="How close the current price is to the proposed stop-loss.">Dist to SL</th>
+            <th class="num" title="Annualized realized volatility over the past 12 months.">12m Vol</th>
             <th title="Next earnings">Earn</th>
             <th title="Next ex-dividend">Ex-Div</th>
-            <th>30-day</th>
-            <th title="Latest framework score">Score</th>
+            <th title="30-day price sparkline (daily closes).">30-day</th>
+            <th title="Latest Jordi framework score. Click to rescore.">Score</th>
             <th title="Exchange hours for this ticker">Market</th>
             <th>Note</th>
             <th></th>
@@ -2269,6 +2308,12 @@ function renderCrypto() {
     </div>
   `;
 
+  // Spec 12 D6 — Crypto table refinements:
+  //   D6a  Current Location column (where it lives now, vs wallet=where bought)
+  //   D6b  Cost → "Original Cost", Value → "Current Value"
+  //   D6c  Removed Sug SL / Sug TP columns (crypto uses Cowen risk bands)
+  //   D6e  Added 12m Vol % column (replaces vol_tier dropdown on display)
+  //   D6f  Auto Core/Alt (BTC/ETH) — Class column kept as a read-only label
   const body = rows.map((r) => {
     const m = r.metrics;
     const noteCell = r.note
@@ -2276,6 +2321,13 @@ function renderCrypto() {
       : `<td></td>`;
     const sparkSvg = r.sparklineSvg || '<span class="sparkline-empty">—</span>';
     const symbolCell = `<span class="ticker-hover" data-row-id="${r.id}" data-row-kind="crypto" tabindex="0">${escapeHTML(r.symbol)}</span>`;
+    const loc = r.currentLocation ? cryptoLocationLabel(r.currentLocation) : '';
+    const locCell = loc
+      ? `<td><span class="loc-pill" title="Current custody location">${loc}</span></td>`
+      : `<td><span class="dim">—</span></td>`;
+    const vol12mCell = r.volatility12mPct != null
+      ? `<td class="num" title="Annualized 12m realized volatility">${fmtNum1.format(r.volatility12mPct)}%</td>`
+      : `<td class="num dim" title="vol tier: ${escapeHTML(r.volTier || 'medium')}">— <span class="dim">(${escapeHTML(r.volTier || 'medium')})</span></td>`;
     return `
       <tr data-row-id="${r.id}" data-row-kind="crypto">
         <td class="holding-name-cell" data-holding-detail="crypto:${r.id}" title="Open detail page">
@@ -2283,6 +2335,7 @@ function renderCrypto() {
           <div class="ticker">${r.category ? escapeHTML(r.category) : '—'}${r.wallet ? ' · <span class="dim">' + escapeHTML(r.wallet) + '</span>' : ''}</div>
         </td>
         <td><span class="tag ${r.classification === 'core' ? 'core' : ''}">${escapeHTML(r.classification)}</span></td>
+        ${locCell}
         <td class="num">${fmtNum6.format(m.totalQuantity)}</td>
         <td class="num" data-flash-id="crypto-${r.id}-price" data-flash-value="${r.currentPriceUsd ?? ''}">${dash(r.currentPriceUsd, fmtNum4)}</td>
         <td class="num">${dash(r.costBasisUsd, fmtNum2)}</td>
@@ -2291,11 +2344,9 @@ function renderCrypto() {
         <td class="num">${pct(m.pnlPct, 2)}</td>
         <td class="num">${pct(r.change7dPct, 1)}</td>
         <td class="num">${pct(r.change30dPct, 1)}</td>
-        <td class="num suggested" title="Suggested SL for ${escapeHTML(r.volTier || 'medium')}-vol">${fmtNum1.format(r.suggestedSlPct)}%</td>
-        <td class="num suggested" title="Suggested TP for ${escapeHTML(r.volTier || 'medium')}-vol">${fmtNum1.format(r.suggestedTpPct)}%</td>
+        ${vol12mCell}
         <td class="sparkline-cell">${sparkSvg}</td>
         <td>${scoreCell(r.score, true, 'crypto', r.id)}</td>
-        <td class="market-cell"><span class="dim" title="Crypto trades 24/7">—</span></td>
         ${noteCell}
         <td><button class="row-edit" data-row-id="${r.id}" data-row-kind="crypto" title="Edit">✎</button></td>
       </tr>
@@ -2314,20 +2365,19 @@ function renderCrypto() {
         <thead>
           <tr>
             <th>Name / Symbol</th>
-            <th>Class</th>
+            <th title="Core (BTC/ETH) vs alt — auto-assigned by symbol.">Class</th>
+            <th title="Where the asset currently lives.">Location</th>
             <th class="num">Qty</th>
             <th class="num">Price $</th>
-            <th class="num">Cost $</th>
-            <th class="num">Value $</th>
-            <th class="num">P&amp;L $</th>
-            <th class="num">P&amp;L %</th>
+            <th class="num" title="Cost basis at acquisition.">Original Cost</th>
+            <th class="num" title="Current market value of the position.">Current Value</th>
+            <th class="num" title="Profit/loss in absolute dollars.">P&amp;L $</th>
+            <th class="num" title="Profit/loss as a % of cost basis.">P&amp;L %</th>
             <th class="num">7d %</th>
             <th class="num">30d %</th>
-            <th class="num" title="Suggested stop-loss % per vol tier">Sug SL</th>
-            <th class="num" title="Suggested take-profit % per vol tier">Sug TP</th>
+            <th class="num" title="Annualized realized volatility over 12m (365d). Falls back to vol tier when insufficient history.">12m Vol</th>
             <th>30-day</th>
-            <th title="Latest framework score">Score</th>
-            <th title="Crypto trades 24/7">Market</th>
+            <th title="Latest Cowen framework score. Click to rescore.">Score</th>
             <th>Note</th>
             <th></th>
           </tr>
@@ -2596,13 +2646,38 @@ const stockFields = [
   { name: 'strategyNote', label: 'Strategy note',  type: 'textarea' },
   { name: 'note',         label: 'Note',           type: 'textarea' },
 ];
+// Spec 12 D6a — current location options. Order matters: surface most-used
+// first so the dropdown is usable without scrolling.
+const CRYPTO_LOCATIONS = [
+  { value: '',                label: '— (unset)' },
+  { value: 'hardware_wallet', label: '🔐 Hardware wallet' },
+  { value: 'ledger',          label: '🔐 Ledger' },
+  { value: 'kraken',          label: '🏦 Kraken' },
+  { value: 'binance',         label: '🏦 Binance' },
+  { value: 'revolut',         label: '🏦 Revolut' },
+  { value: 'etoro',           label: '🏦 eToro' },
+  { value: 'phantom',         label: '👻 Phantom' },
+  { value: 'metamask',        label: '🦊 MetaMask' },
+  { value: 'other',           label: 'Other' },
+];
+
+function cryptoLocationLabel(code) {
+  const found = CRYPTO_LOCATIONS.find(l => l.value === code);
+  return found ? escapeHTML(found.label) : escapeHTML(code);
+}
+
 const cryptoFields = [
   { name: 'name',           label: 'Name',                 type: 'text',     required: true },
   { name: 'symbol',         label: 'Symbol',               type: 'text',     required: true },
+  // Spec 12 D6f — Classification auto-assigned on save by symbol (BTC/ETH=core,
+  // else alt). Kept in the form as a read-only-ish hint; user-typed value is
+  // honoured server-side as an override.
   { name: 'classification', label: 'Classification',       type: 'select', options: ['core', 'alt'] },
-  { name: 'volTier',        label: 'Volatility tier',      type: 'select', options: ['low','medium','high','extreme'] },
+  { name: 'volTier',        label: 'Volatility tier (manual override)', type: 'select', options: ['low','medium','high','extreme'] },
+  // Spec 12 D6a — current custody location (vs `wallet` = where bought).
+  { name: 'currentLocation', label: 'Current location',    type: 'select-kv', options: CRYPTO_LOCATIONS },
   { name: 'category',       label: 'Category',             type: 'text' },
-  { name: 'wallet',         label: 'Wallet',               type: 'text' },
+  { name: 'wallet',         label: 'Wallet (where bought)',type: 'text' },
   { name: 'quantityHeld',   label: 'Quantity held',        type: 'number', step: 'any', required: true },
   { name: 'quantityStaked', label: 'Quantity staked',      type: 'number', step: 'any' },
   { name: 'avgBuyEur',      label: 'Avg buy €',            type: 'number', step: '0.0001' },
@@ -2901,10 +2976,10 @@ async function submitHoldingForm({ kind, mode, holding }) {
     } else if (f.type === 'text' || f.type === 'textarea' || f.type === 'select') {
       v = v.trim();
       if (v === '' && f.name !== 'name' && f.name !== 'symbol' && f.name !== 'classification' && f.name !== 'volTier') {
-        // exchangeOverride: empty string = "clear the override" (user-intent
-        // signal); keep it so the server can blank the field. Null would
-        // mean "preserve" instead.
-        if (f.name !== 'exchangeOverride') {
+        // exchangeOverride + currentLocation: empty string = "clear the
+        // value" (user-intent signal); keep it so the server can blank
+        // the field. Null would mean "preserve" instead.
+        if (f.name !== 'exchangeOverride' && f.name !== 'currentLocation') {
           v = null;
         }
       }

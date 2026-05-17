@@ -134,6 +134,11 @@ type StockHolding struct {
 	ThesisLink     *string `json:"thesisLink,omitempty"` // external URL (Notion, Google Doc, ...)
 	RealizedPnLUSD float64 `json:"realizedPnlUsd"`       // derived from transactions; cached
 
+	// Spec 12 — 12-month annualized realized volatility. Long-horizon display
+	// metric, NOT used for stop sizing (Spec 9c ATR owns that). Populated by
+	// the daily cron from price_history.
+	Volatility12mPct *float64 `json:"volatility12mPct,omitempty"`
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -193,6 +198,14 @@ type CryptoHolding struct {
 	// Spec 10 — per-holding detail extensions.
 	ThesisLink     *string `json:"thesisLink,omitempty"`
 	RealizedPnLUSD float64 `json:"realizedPnlUsd"`
+
+	// Spec 12 D6a — where it currently lives (vs `wallet` which was where
+	// it was originally bought). Validated server-side. Empty = unset.
+	CurrentLocation *string `json:"currentLocation,omitempty"`
+
+	// Spec 12 D6e — 12-month annualized realized volatility, same metric as
+	// stocks. Populated by daily cron from price_history.
+	Volatility12mPct *float64 `json:"volatility12mPct,omitempty"`
 
 	UpdatedAt time.Time `json:"updatedAt"`
 }

@@ -72,8 +72,12 @@ type cryptoMutationReq struct {
 	Stage       *string  `json:"stage"`
 	// Spec 10 — thesis URL.
 	ThesisLink *string `json:"thesisLink"`
-	Reason     *string `json:"reason,omitempty"`
-	ReasonCode *string `json:"reasonCode,omitempty"` // Spec 12 D9
+	// Spec 12 D6a — current custody location (hardware_wallet / kraken /
+	// binance / revolut / phantom / metamask / ledger / etoro / other).
+	// Empty string clears.
+	CurrentLocation *string `json:"currentLocation,omitempty"`
+	Reason          *string `json:"reason,omitempty"`
+	ReasonCode      *string `json:"reasonCode,omitempty"` // Spec 12 D9
 }
 
 type restoreReq struct {
@@ -211,6 +215,8 @@ func (s *Server) handleUpdateStock(w http.ResponseWriter, r *http.Request) {
 	} else {
 		h.ExchangeOverride = trimStrPtr(req.ExchangeOverride)
 	}
+	// Spec 12 D5e — volatility_12m_pct owned by daily cron.
+	h.Volatility12mPct = old.Volatility12mPct
 	// realized_pnl_usd is owned by the transactions pipeline.
 	h.RealizedPnLUSD = old.RealizedPnLUSD
 
@@ -421,6 +427,22 @@ func (s *Server) handleUpdateCrypto(w http.ResponseWriter, r *http.Request) {
 	} else {
 		h.ThesisLink = trimStrPtr(req.ThesisLink)
 	}
+	// Spec 12 D6a — preserve location on nil; allow clearing with "".
+	if req.CurrentLocation == nil {
+		h.CurrentLocation = old.CurrentLocation
+	} else {
+		v := strings.TrimSpace(*req.CurrentLocation)
+		if v == "" {
+			h.CurrentLocation = nil
+		} else if validCryptoLocations[v] {
+			h.CurrentLocation = &v
+		} else {
+			// Unknown → preserve.
+			h.CurrentLocation = old.CurrentLocation
+		}
+	}
+	// Spec 12 D6e — volatility owned by daily cron.
+	h.Volatility12mPct = old.Volatility12mPct
 	h.RealizedPnLUSD = old.RealizedPnLUSD
 
 	if err := s.store.UpdateCryptoHolding(r.Context(), h); err != nil {
@@ -593,11 +615,28 @@ func cryptoFromReq(req cryptoMutationReq) *domain.CryptoHolding {
 	if req.Stage != nil && *req.Stage != "" {
 		stage = *req.Stage
 	}
+	// Spec 12 D6f — auto Core/Alt by symbol. BTC/ETH are core; everything
+	// else is alt. The Classification dropdown is going away in the UI but
+	// the server still accepts user-supplied "core" as an override.
+	classification := strings.ToLower(strings.TrimSpace(req.Classification))
+	isCore := req.IsCore || classification == "core"
+	sym := strings.ToUpper(strings.TrimSpace(req.Symbol))
+	if sym == "BTC" || sym == "ETH" {
+		isCore = true
+		classification = "core"
+	} else if classification == "" {
+		classification = "alt"
+	}
+	// Spec 12 D6a — validate current_location (silent drop on unknown).
+	cl := trimStrPtr(req.CurrentLocation)
+	if cl != nil && !validCryptoLocations[*cl] {
+		cl = nil
+	}
 	return &domain.CryptoHolding{
 		Name:            strings.TrimSpace(req.Name),
-		Symbol:          req.Symbol,
-		Classification:  req.Classification,
-		IsCore:          req.IsCore || req.Classification == "core",
+		Symbol:          sym,
+		Classification:  classification,
+		IsCore:          isCore,
 		Category:        trimStrPtr(req.Category),
 		Wallet:          trimStrPtr(req.Wallet),
 		QuantityHeld:    req.QuantityHeld,
@@ -617,7 +656,23 @@ func cryptoFromReq(req cryptoMutationReq) *domain.CryptoHolding {
 		Stage:       stage,
 		// Spec 10
 		ThesisLink: trimStrPtr(req.ThesisLink),
+		// Spec 12
+		CurrentLocation: cl,
 	}
+}
+
+// validCryptoLocations whitelists the Spec 12 D6a values. Empty string means
+// "unset" and is handled by trimStrPtr returning nil.
+var validCryptoLocations = map[string]bool{
+	"hardware_wallet": true,
+	"kraken":          true,
+	"binance":         true,
+	"revolut":         true,
+	"phantom":         true,
+	"metamask":        true,
+	"ledger":          true,
+	"etoro":           true,
+	"other":           true,
 }
 
 func stockSnapshot(h *domain.StockHolding) map[string]any {

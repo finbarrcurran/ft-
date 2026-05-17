@@ -1254,6 +1254,34 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   color: rgb(var(--color-text-muted));
   margin-top: 0.3rem;
 }
+/* Spec 12 D6a — crypto current-location pill. */
+.loc-pill {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius2);
+  background: rgb(var(--color-surface-raised));
+  border: 1px solid rgb(var(--color-border));
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* Spec 12 D5b — Proposed SL/TP rendered as price | % stack. */
+.proposed-level {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.15;
+}
+.pl-price {
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+}
+.pl-pct {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
 /* Spec 12 D8 — note bubble + hover popover. */
 .note-bubble {
   display: inline-block;

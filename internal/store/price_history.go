@@ -150,6 +150,25 @@ func (s *Store) PrunePriceHistory(ctx context.Context, days int) (int64, error) 
 	return n, nil
 }
 
+// SetStockVolatility12m updates volatility_12m_pct on a stock_holdings row by
+// ticker. Spec 12 D5e. Called by the daily cron after the closes-fetch.
+func (s *Store) SetStockVolatility12m(ctx context.Context, userID int64, ticker string, pct float64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings SET volatility_12m_pct = ?
+		 WHERE user_id = ? AND ticker = ? AND deleted_at IS NULL`,
+		pct, userID, ticker)
+	return err
+}
+
+// SetCryptoVolatility12m — crypto equivalent, matched by symbol.
+func (s *Store) SetCryptoVolatility12m(ctx context.Context, userID int64, symbol string, pct float64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE crypto_holdings SET volatility_12m_pct = ?
+		 WHERE user_id = ? AND symbol = ? AND deleted_at IS NULL`,
+		pct, userID, symbol)
+	return err
+}
+
 // SetStockBeta writes the beta value for a stock by ticker. Beta seeds the
 // Spec 3 D11 suggested SL/TP columns. (Spec 3 D2/D11.)
 func (s *Store) SetStockBeta(ctx context.Context, userID int64, ticker string, beta float64) error {

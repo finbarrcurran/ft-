@@ -21,6 +21,7 @@ import (
 	"ft/internal/store"
 	"ft/internal/technicals"
 	"log/slog"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -115,6 +116,15 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 					r.StocksHistoryOK++
 					stockMu.Unlock()
 				}
+				// Spec 12 D5e — annualised realised volatility from log returns.
+				// Needs ≥30 daily closes to be meaningful; below that, skip.
+				closesOnly := make([]float64, 0, len(toStore))
+				for _, p := range toStore {
+					closesOnly = append(closesOnly, p.Close)
+				}
+				if v, ok := annualizedVolPct(closesOnly, 252); ok {
+					_ = s.Store.SetStockVolatility12m(ctx, userID, ticker, v)
+				}
 				// daily_bars: full 2y OHLC.
 				ohlcRows := make([]store.DailyBarRow, 0, len(bars))
 				for _, b := range bars {
@@ -185,6 +195,15 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 		}
 		if err := s.Store.InsertPriceHistoryBatch(ctx, h.Symbol, "crypto", toStore); err == nil {
 			r.CryptoHistoryOK++
+		}
+		// Spec 12 D6e — crypto annualised vol. Use 365 trading-day equivalent
+		// since crypto trades 24/7 (no weekends/holidays); √365 instead of √252.
+		closesOnly := make([]float64, 0, len(toStore))
+		for _, p := range toStore {
+			closesOnly = append(closesOnly, p.Close)
+		}
+		if v, ok := annualizedVolPct(closesOnly, 365); ok {
+			_ = s.Store.SetCryptoVolatility12m(ctx, userID, h.Symbol, v)
 		}
 		select {
 		case <-ctx.Done():
@@ -308,3 +327,49 @@ func nextRunAt(now time.Time, hour, minute int) time.Time {
 	}
 	return candidate
 }
+
+// annualizedVolPct returns σ_daily × √annualizationDays × 100, computed
+// over the log-returns of the closes series. Spec 12 D5e for stocks
+// (annualizationDays=252) and D6e for crypto (annualizationDays=365 since
+// crypto trades 24/7). Returns (0, false) when fewer than 30 usable rows.
+func annualizedVolPct(closes []float64, annualizationDays int) (float64, bool) {
+	if len(closes) < 30 {
+		return 0, false
+	}
+	rets := make([]float64, 0, len(closes)-1)
+	for i := 1; i < len(closes); i++ {
+		prev := closes[i-1]
+		cur := closes[i]
+		if prev <= 0 || cur <= 0 {
+			continue
+		}
+		// log(cur/prev) via Logarithm-free natural-log proxy.
+		rets = append(rets, logRatio(cur, prev))
+	}
+	if len(rets) < 30 {
+		return 0, false
+	}
+	mean := 0.0
+	for _, r := range rets {
+		mean += r
+	}
+	mean /= float64(len(rets))
+	sq := 0.0
+	for _, r := range rets {
+		d := r - mean
+		sq += d * d
+	}
+	// Sample variance: divide by (n-1).
+	variance := sq / float64(len(rets)-1)
+	if variance <= 0 {
+		return 0, false
+	}
+	stdev := math.Sqrt(variance)
+	annualised := stdev * math.Sqrt(float64(annualizationDays))
+	return annualised * 100, true
+}
+
+func logRatio(a, b float64) float64 {
+	return math.Log(a / b)
+}
+
