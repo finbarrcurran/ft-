@@ -146,6 +146,11 @@ type StockHolding struct {
 	ForecastHigh      *float64   `json:"forecastHigh,omitempty"`
 	ForecastFetchedAt *time.Time `json:"forecastFetchedAt,omitempty"`
 
+	// Spec 12 D7 AC #15 — listing currency (e.g. "USD", "GBP"). Autofilled
+	// from Yahoo's quoteSummary.price.currency. NOT used for any P&L math
+	// (everything stays USD-denominated); pure metadata for display.
+	Currency *string `json:"currency,omitempty"`
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 

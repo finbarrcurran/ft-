@@ -44,8 +44,10 @@ type stockMutationReq struct {
 	// Spec 5 polish — override the suffix-based exchange-detection rule.
 	// Empty string clears any prior override.
 	ExchangeOverride *string `json:"exchangeOverride"`
-	Reason           *string `json:"reason,omitempty"`     // for update audit row
-	ReasonCode       *string `json:"reasonCode,omitempty"` // Spec 12 D9 typed reason
+	// Spec 12 D7 AC #15 — listing currency, autofilled from Yahoo.
+	Currency   *string `json:"currency,omitempty"`
+	Reason     *string `json:"reason,omitempty"`     // for update audit row
+	ReasonCode *string `json:"reasonCode,omitempty"` // Spec 12 D9 typed reason
 }
 
 type cryptoMutationReq struct {
@@ -217,6 +219,17 @@ func (s *Server) handleUpdateStock(w http.ResponseWriter, r *http.Request) {
 	}
 	// Spec 12 D5e — volatility_12m_pct owned by daily cron.
 	h.Volatility12mPct = old.Volatility12mPct
+	// Spec 12 D4a — forecast columns owned by daily cron.
+	h.ForecastLow = old.ForecastLow
+	h.ForecastMean = old.ForecastMean
+	h.ForecastHigh = old.ForecastHigh
+	h.ForecastFetchedAt = old.ForecastFetchedAt
+	// Spec 12 D7 — currency, preserve on nil; allow user clear with "".
+	if req.Currency == nil {
+		h.Currency = old.Currency
+	} else {
+		h.Currency = trimStrPtr(req.Currency)
+	}
 	// realized_pnl_usd is owned by the transactions pipeline.
 	h.RealizedPnLUSD = old.RealizedPnLUSD
 
@@ -607,6 +620,8 @@ func stockFromReq(req stockMutationReq) *domain.StockHolding {
 		ThesisLink: trimStrPtr(req.ThesisLink),
 		// Spec 5 polish — exchange override.
 		ExchangeOverride: trimStrPtr(req.ExchangeOverride),
+		// Spec 12 D7 — listing currency.
+		Currency: trimStrPtr(req.Currency),
 	}
 }
 

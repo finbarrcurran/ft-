@@ -1019,6 +1019,23 @@ function renderImportBody() {
         </div>
       `;
 
+      // Spec 12 D7 — enrichment banner. Lists tickers + which fields were
+      // auto-filled from Yahoo during preview. Highlights only — the user
+      // can edit individual cells in a follow-up, or just hit Apply to
+      // accept everything (which is the daily-use flow).
+      const enr = p.enriched || [];
+      const enrichPanel = enr.length === 0 ? '' : `
+        <div class="warn-panel" style="border-color:rgb(var(--color-accent)/0.35); background:rgb(var(--color-accent)/0.08)">
+          <div class="head" style="color:rgb(var(--color-accent))">
+            ✨ Auto-filled from Yahoo (${enr.length} row${enr.length === 1 ? '' : 's'})
+          </div>
+          <ul>
+            ${enr.slice(0, 10).map(e => `<li class="tabular">· <strong>${escapeHTML(e.ticker)}</strong> <span class="dim">${escapeHTML((e.fields || []).join(', '))}</span></li>`).join('')}
+            ${enr.length > 10 ? `<li class="dim">· …and ${enr.length - 10} more</li>` : ''}
+          </ul>
+        </div>
+      `;
+
       const meta = (p.schemaVersion != null || p.fxSnapshotEurUsd != null) ? `
         <div class="dim" style="font-size:0.7rem; letter-spacing:0.12em; text-transform:uppercase; margin-top:0.8rem">
           ${p.schemaVersion != null ? `schema v${p.schemaVersion}` : ''}
@@ -1026,7 +1043,7 @@ function renderImportBody() {
         </div>
       ` : '';
 
-      body.innerHTML = sections.join('') + warnPanel + meta;
+      body.innerHTML = sections.join('') + enrichPanel + warnPanel + meta;
 
       const sCb = $('#apply-stocks');
       const cCb = $('#apply-crypto');
@@ -2617,6 +2634,9 @@ const stockFields = [
   { name: 'ticker',       label: 'Ticker',         type: 'text' },
   { name: 'category',     label: 'Category',       type: 'text' },
   { name: 'sector',       label: 'Sector',         type: 'text' },
+  // Spec 12 D7 AC #15 — listing currency auto-filled from Yahoo. Display
+  // only; no P&L math depends on this.
+  { name: 'currency',     label: 'Currency',       type: 'text' },
   { name: 'investedUsd',  label: 'Invested ($)',   type: 'number', required: true, step: '0.01' },
   { name: 'avgOpenPrice', label: 'Avg open price', type: 'number', step: '0.01' },
   { name: 'currentPrice', label: 'Current price',  type: 'number', step: '0.01' },
@@ -2873,6 +2893,7 @@ function installAutofillForHoldingModal(kind, mode) {
       fillIfBlank('#hm-ticker', p.ticker);
       fillIfBlank('#hm-name', p.name);
       fillIfBlank('#hm-sector', p.sector);
+      fillIfBlank('#hm-currency', p.currency);
     } else {
       fillIfBlank('#hm-symbol', p.symbol);
       fillIfBlank('#hm-name', p.name);

@@ -28,6 +28,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         tp1_hit_at, tp2_hit_at, time_stop_review_at,
         thesis_link, realized_pnl_usd, volatility_12m_pct,
         forecast_low, forecast_mean, forecast_high, forecast_fetched_at,
+        currency,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -151,6 +152,7 @@ func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) 
 		   setup_type = ?, stage = ?,
 		   thesis_link = ?,
 		   exchange_override = ?,
+		   currency = ?,
 		   updated_at = strftime('%s','now')
 		 WHERE user_id = ? AND id = ?`,
 		h.Name, strPtrToNull(h.Ticker), strPtrToNull(h.Category), strPtrToNull(h.Sector),
@@ -161,6 +163,7 @@ func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) 
 		strPtrToNull(h.SetupType), h.Stage,
 		strPtrToNull(h.ThesisLink),
 		strPtrToNull(h.ExchangeOverride),
+		strPtrToNull(h.Currency),
 		h.UserID, h.ID,
 	)
 	return err
@@ -411,6 +414,8 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	// Spec 12 D4a columns:
 	var fLow, fMean, fHigh sql.NullFloat64
 	var fFetched sql.NullInt64
+	// Spec 12 D7 AC #15:
+	var currency sql.NullString
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -426,10 +431,12 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&tp1HitAt, &tp2HitAt, &timeStopReviewAt,
 		&thesisLink, &realizedPnL, &vol12m,
 		&fLow, &fMean, &fHigh, &fFetched,
+		&currency,
 		&updatedAt,
 	); err != nil {
 		return nil, err
 	}
+	h.Currency = nsToPtrNonEmpty(currency)
 	h.ThesisLink = nsToPtrNonEmpty(thesisLink)
 	h.RealizedPnLUSD = realizedPnL
 	h.Volatility12mPct = nfToPtr(vol12m)

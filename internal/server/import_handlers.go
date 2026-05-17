@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"ft/internal/domain"
+	"ft/internal/market"
 	"ft/internal/persistence"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -91,6 +94,12 @@ func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Spec 12 D7 — pre-fill missing fields on each parsed row via the
+	// lookup endpoint. Mutates parsed.Stocks in place, returns a list of
+	// {ticker, fields[]} hints so the UI can highlight which cells came
+	// from Yahoo vs the user's sheet.
+	enriched := enrichParsedStocks(r.Context(), parsed.Stocks)
+
 	stockDiff := persistence.DiffStocks(currentStocks, parsed.Stocks)
 	cryptoDiff := persistence.DiffCrypto(currentCrypto, parsed.Crypto)
 
@@ -115,6 +124,7 @@ func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 		"skipped":              parsed.Skipped,
 		"stockDiff":            stockDiff,
 		"cryptoDiff":           cryptoDiff,
+		"enriched":             enriched, // Spec 12 D7 — UI highlight hints
 		"ttlSeconds":           int(pendingTTL.Seconds()),
 	})
 }
@@ -195,4 +205,58 @@ func (s *Server) handleImportApply(w http.ResponseWriter, r *http.Request) {
 		"stocksApplied": stocksApplied,
 		"cryptoApplied": cryptoApplied,
 	})
+}
+
+// enrichParsedStocks runs the Spec 12 D7 lookup on every parsed row whose
+// name / sector / currency is missing. Mutates h in place; returns one
+// hint per affected ticker so the preview UI can highlight enriched cells.
+//
+// Performed sequentially with a small inter-call gap to stay under Yahoo's
+// quoteSummary budget. If a single ticker fails, the rest still run.
+func enrichParsedStocks(ctx context.Context, stocks []*domain.StockHolding) []map[string]any {
+	out := make([]map[string]any, 0)
+	for _, h := range stocks {
+		if h == nil || h.Ticker == nil || *h.Ticker == "" {
+			continue
+		}
+		needName := strings.TrimSpace(h.Name) == ""
+		needSector := h.Sector == nil || strings.TrimSpace(*h.Sector) == ""
+		needCurrency := h.Currency == nil || strings.TrimSpace(*h.Currency) == ""
+		if !needName && !needSector && !needCurrency {
+			continue
+		}
+		p, err := market.FetchYahooProfile(ctx, *h.Ticker)
+		if err != nil || p == nil {
+			continue
+		}
+		filled := []string{}
+		if needName && p.Name != "" {
+			h.Name = p.Name
+			filled = append(filled, "name")
+		}
+		if needSector && p.Sector != "" {
+			s := p.Sector
+			h.Sector = &s
+			filled = append(filled, "sector")
+		}
+		if needCurrency && p.Currency != "" {
+			c := p.Currency
+			h.Currency = &c
+			filled = append(filled, "currency")
+		}
+		if len(filled) > 0 {
+			out = append(out, map[string]any{
+				"ticker": *h.Ticker,
+				"fields": filled,
+				"source": "yahoo",
+			})
+		}
+		// 250ms inter-call gap so we don't hammer Yahoo on a 36-row sheet.
+		select {
+		case <-ctx.Done():
+			return out
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return out
 }
