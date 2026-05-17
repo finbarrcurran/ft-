@@ -36,6 +36,7 @@ const fmtUSD = new Intl.NumberFormat('en-US', {
 const fmtEUR = new Intl.NumberFormat('en-IE', {
   style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2,
 });
+const fmtNum0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 const fmtNum1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fmtNum2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtNum4 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
@@ -2137,6 +2138,20 @@ function wireTickerHover(kind) {
 }
 
 // Form schemas. Each field has: name (JSON key), label, type, optional opts.
+// Spec 9c setup type + stage option lists, shared between stock + crypto.
+const SETUP_TYPES = [
+  { value: '',                   label: '(unset)' },
+  { value: 'A_breakout_retest',  label: 'A — Breakout-retest' },
+  { value: 'B_support_bounce',   label: 'B — Support bounce' },
+  { value: 'C_continuation',     label: 'C — Continuation' },
+];
+const STAGES = [
+  { value: 'pre_tp1',  label: 'pre-TP1' },
+  { value: 'post_tp1', label: 'post-TP1' },
+  { value: 'runner',   label: 'runner' },
+  { value: 'stopped',  label: 'stopped' },
+];
+
 const stockFields = [
   { name: 'name',         label: 'Name',           type: 'text',     required: true },
   { name: 'ticker',       label: 'Ticker',         type: 'text' },
@@ -2148,6 +2163,13 @@ const stockFields = [
   { name: 'stopLoss',     label: 'Stop loss',      type: 'number', step: '0.01' },
   { name: 'takeProfit',   label: 'Take profit',    type: 'number', step: '0.01' },
   { name: 'beta',         label: 'Beta (manual)',  type: 'number', step: '0.01' },
+  // Spec 9c — Percoco levels + setup classification.
+  { name: 'support1',     label: 'Support 1',      type: 'number', step: '0.01', section: 'levels' },
+  { name: 'support2',     label: 'Support 2',      type: 'number', step: '0.01', section: 'levels' },
+  { name: 'resistance1',  label: 'Resistance 1 (TP1 ref)', type: 'number', step: '0.01', section: 'levels' },
+  { name: 'resistance2',  label: 'Resistance 2 (TP2 ref)', type: 'number', step: '0.01', section: 'levels' },
+  { name: 'setupType',    label: 'Setup type',     type: 'select-kv', options: SETUP_TYPES, section: 'levels' },
+  { name: 'stage',        label: 'Stage',          type: 'select-kv', options: STAGES, section: 'levels' },
   { name: 'strategyNote', label: 'Strategy note',  type: 'textarea' },
   { name: 'note',         label: 'Note',           type: 'textarea' },
 ];
@@ -2163,6 +2185,13 @@ const cryptoFields = [
   { name: 'avgBuyEur',      label: 'Avg buy €',            type: 'number', step: '0.0001' },
   { name: 'costBasisEur',   label: 'Cost basis €',         type: 'number', step: '0.01' },
   { name: 'currentPriceEur',label: 'Current price €',      type: 'number', step: '0.0001' },
+  // Spec 9c — same Percoco fields apply to crypto.
+  { name: 'support1',       label: 'Support 1',            type: 'number', step: '0.01', section: 'levels' },
+  { name: 'support2',       label: 'Support 2',            type: 'number', step: '0.01', section: 'levels' },
+  { name: 'resistance1',    label: 'Resistance 1 (TP1 ref)', type: 'number', step: '0.01', section: 'levels' },
+  { name: 'resistance2',    label: 'Resistance 2 (TP2 ref)', type: 'number', step: '0.01', section: 'levels' },
+  { name: 'setupType',      label: 'Setup type',           type: 'select-kv', options: SETUP_TYPES, section: 'levels' },
+  { name: 'stage',          label: 'Stage',                type: 'select-kv', options: STAGES, section: 'levels' },
   { name: 'strategyNote',   label: 'Strategy note',        type: 'textarea' },
   { name: 'note',           label: 'Note',                 type: 'textarea' },
 ];
@@ -2172,8 +2201,10 @@ function openHoldingModal({ kind, mode, holding }) {
   const isEdit = mode === 'edit';
   const title = `${isEdit ? 'Edit' : 'Add'} ${kind === 'stock' ? 'stock' : 'crypto'} holding`;
 
-  // Build form HTML
-  const fieldRows = fields.map((f) => {
+  // Build form HTML. Spec 9c: fields marked `section:'levels'` cluster
+  // visually under a "Levels & setup" heading with a thinner top border.
+  // First emit non-level fields, then a separator + level fields.
+  const renderField = (f) => {
     const id = `hm-${f.name}`;
     const val = isEdit && holding ? (holding[f.name] ?? '') : '';
     const req = f.required ? 'required' : '';
@@ -2183,6 +2214,10 @@ function openHoldingModal({ kind, mode, holding }) {
     } else if (f.type === 'select') {
       input = `<select id="${id}" name="${f.name}">` +
         f.options.map((o) => `<option value="${o}" ${o === val ? 'selected' : ''}>${o}</option>`).join('') +
+        `</select>`;
+    } else if (f.type === 'select-kv') {
+      input = `<select id="${id}" name="${f.name}">` +
+        f.options.map((o) => `<option value="${escapeHTML(o.value)}" ${o.value === val ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('') +
         `</select>`;
     } else {
       const step = f.step ? ` step="${f.step}"` : '';
@@ -2194,7 +2229,20 @@ function openHoldingModal({ kind, mode, holding }) {
         ${input}
       </div>
     `;
-  }).join('');
+  };
+  const mainFields = fields.filter(f => f.section !== 'levels').map(renderField).join('');
+  const levelFields = fields.filter(f => f.section === 'levels').map(renderField).join('');
+  // Spec 9c — Levels & Suggestions panel renders only in edit mode (needs
+  // backend data from /levels endpoint).
+  const levelsPanel = isEdit && holding ? `
+    <div class="levels-panel" id="hm-levels-panel">
+      <div class="levels-head">Suggestions <span class="dim" style="font-weight:normal">(updates as you change S/R)</span></div>
+      <div class="levels-grid" id="hm-suggestions">loading…</div>
+      <div class="position-size" id="hm-position-size"></div>
+    </div>
+  ` : '';
+  const fieldRows = mainFields
+    + (levelFields ? `<div class="form-section-head">Levels & setup (Spec 9c)</div>${levelFields}${levelsPanel}` : '');
 
   const reasonField = isEdit ? `
     <div class="form-row">
@@ -2240,6 +2288,156 @@ function openHoldingModal({ kind, mode, holding }) {
   $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
   $('#hm-save').addEventListener('click', () => submitHoldingForm({ kind, mode, holding }));
   if (isEdit) $('#hm-delete').addEventListener('click', () => deleteHoldingFromModal({ kind, holding }));
+
+  // Spec 9c — wire the Levels & Suggestions panel (edit mode only).
+  if (isEdit && holding) {
+    setupHoldingLevelsPanel({ kind, holding });
+  }
+}
+
+// Spec 9c — fetch /api/holdings/.../levels, render the suggestions card,
+// wire live re-compute as the user types in support_1 / resistance_1 / etc.
+async function setupHoldingLevelsPanel({ kind, holding }) {
+  let data;
+  try {
+    data = await api(`/api/holdings/${kind === 'stock' ? 'stocks' : 'crypto'}/${holding.id}/levels`);
+  } catch (e) {
+    const el = $('#hm-suggestions');
+    if (el) el.textContent = 'levels endpoint failed: ' + e.message;
+    return;
+  }
+  // Initial render from server values.
+  recomputeLevelsPanel(data);
+  // Live recompute as user edits S/R inputs. Math is identical to server's:
+  // SL = support_1 − N×ATR; TP1 = R1 − 0.25×ATR; etc.
+  ['support1','resistance1','resistance2','stopLoss'].forEach(name => {
+    const el = document.querySelector(`#hm-${name}`);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      // Build an in-memory override of data with the typed values.
+      const override = JSON.parse(JSON.stringify(data));
+      const num = (id) => {
+        const e = document.querySelector(`#hm-${id}`);
+        const v = e ? e.value.trim() : '';
+        return v === '' ? null : parseFloat(v);
+      };
+      override.support1 = num('support1') ?? data.support1;
+      override.resistance1 = num('resistance1') ?? data.resistance1;
+      override.resistance2 = num('resistance2') ?? data.resistance2;
+      const atr = override.atrWeekly || 0;
+      const tier = override.suggestions.usingTier;
+      const N = ({ low: 1.5, medium: 2.0, high: 2.5, extreme: 3.0 }[tier] || 2.0);
+      // Re-derive suggestions client-side (mirror of internal/technicals).
+      override.suggestions.sl = (override.support1 && atr) ? override.support1 - N * atr : 0;
+      override.suggestions.tp1 = (override.resistance1 && atr) ? override.resistance1 - 0.25 * atr : 0;
+      override.suggestions.tp2 = (override.resistance2 && atr) ? override.resistance2 - 0.25 * atr : 0;
+      // Use user-entered entry (currentPrice if missing) for R-multiples.
+      const entry = override.currentPrice || 0;
+      const sl = override.suggestions.sl;
+      override.suggestions.rMultipleTp1 = (entry > sl && sl > 0 && override.suggestions.tp1)
+        ? (override.suggestions.tp1 - entry) / (entry - sl) : 0;
+      override.suggestions.rMultipleTp2 = (entry > sl && sl > 0 && override.suggestions.tp2)
+        ? (override.suggestions.tp2 - entry) / (entry - sl) : 0;
+      recomputeLevelsPanel(override);
+    });
+  });
+}
+
+function recomputeLevelsPanel(d) {
+  const el = $('#hm-suggestions');
+  if (!el) return;
+  const s = d.suggestions || {};
+  const atr = d.atrWeekly ? `$${fmtNum2.format(d.atrWeekly)}` : '—';
+  const tier = s.usingTier ? `${s.usingTier} <span class="dim">(${s.usingTierSource})</span>` : '—';
+  const slStr = s.sl > 0 ? `$${fmtNum2.format(s.sl)}` : '—';
+  const tp1Str = s.tp1 > 0 ? `$${fmtNum2.format(s.tp1)}` : '—';
+  const tp2Str = s.tp2 > 0 ? `$${fmtNum2.format(s.tp2)}` : '—';
+  const r1 = s.rMultipleTp1;
+  const r2 = s.rMultipleTp2;
+  const r1Class = r1 >= 1.5 ? 'gain' : r1 > 0 ? 'loss' : 'dim';
+  const r2Class = r2 >= 3.0 ? 'gain' : r2 > 0 ? 'loss' : 'dim';
+
+  // S/R candidate buttons — one-click "Use this value".
+  const candHTML = (rows, target) => (rows || []).slice(0, 3).map(c =>
+    `<button class="sr-candidate" data-target="${target}" data-value="${c.price.toFixed(2)}">
+        $${fmtNum2.format(c.price)} <span class="dim">(${c.touches}×)</span>
+     </button>`).join('');
+
+  el.innerHTML = `
+    <div class="levels-row"><span class="dim">ATR (14w):</span> ${atr}</div>
+    <div class="levels-row"><span class="dim">Vol tier:</span> ${tier}</div>
+    <div class="levels-row"><span class="dim">Suggested SL:</span> <strong class="num">${slStr}</strong></div>
+    <div class="levels-row"><span class="dim">Proposed TP1:</span> <strong class="num">${tp1Str}</strong> · R ≈ <span class="${r1Class} num">${r1 ? r1.toFixed(2) : '—'}</span></div>
+    <div class="levels-row"><span class="dim">Proposed TP2:</span> <strong class="num">${tp2Str}</strong> · R ≈ <span class="${r2Class} num">${r2 ? r2.toFixed(2) : '—'}</span></div>
+    ${d.candidates && d.candidates.supports && d.candidates.supports.length ? `
+      <div class="levels-row"><span class="dim">Support candidates:</span> ${candHTML(d.candidates.supports, 'support1')}</div>` : ''}
+    ${d.candidates && d.candidates.resistances && d.candidates.resistances.length ? `
+      <div class="levels-row"><span class="dim">Resistance candidates:</span> ${candHTML(d.candidates.resistances, 'resistance1')}</div>` : ''}
+  `;
+  // Wire candidate buttons → set the corresponding input + retrigger input event.
+  el.querySelectorAll('.sr-candidate').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const target = btn.dataset.target;
+      const value = btn.dataset.value;
+      const input = document.querySelector(`#hm-${target}`);
+      if (input) {
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+  });
+
+  // Position Size Calculator below.
+  renderPositionSizeCalc(d);
+}
+
+// Spec 9c — Position Size Calculator. Always pulls portfolio value from
+// last loaded /api/summary; per-trade risk % defaults to 1% (override).
+function renderPositionSizeCalc(d) {
+  const el = $('#hm-position-size');
+  if (!el) return;
+  const portfolioValue = (state.summary && state.summary.kpis && state.summary.kpis.totalValue) || 100000;
+  const entryEl = document.querySelector('#hm-currentPrice');
+  const slEl = document.querySelector('#hm-stopLoss');
+  // Live values: pull from the form so they update as user types.
+  const entry = entryEl ? parseFloat(entryEl.value) || (d.currentPrice || 0) : (d.currentPrice || 0);
+  const sl = slEl && slEl.value !== '' ? parseFloat(slEl.value) : (d.suggestions ? d.suggestions.sl : 0);
+  el.innerHTML = `
+    <div class="pos-size-head">Position size calculator <span class="dim">(1% per-trade risk default)</span></div>
+    <div class="pos-size-grid">
+      <div class="dim">Portfolio value</div><div class="num">$${fmtNum0.format(portfolioValue)}</div>
+      <div class="dim">Per-trade risk %</div><div><input id="hm-risk-pct" type="number" step="0.1" min="0.1" max="5" value="1" /></div>
+      <div class="dim">Entry</div><div class="num" id="ps-entry">$${entry ? fmtNum2.format(entry) : '—'}</div>
+      <div class="dim">Stop loss (effective)</div><div class="num" id="ps-sl">$${sl ? fmtNum2.format(sl) : '—'}</div>
+      <div class="dim">Position size</div><div id="ps-size" class="num"><strong>—</strong></div>
+      <div class="dim">Max loss</div><div id="ps-loss" class="num">—</div>
+    </div>
+  `;
+  const recompute = () => {
+    const pct = parseFloat($('#hm-risk-pct').value) || 1;
+    const eEl = document.querySelector('#hm-currentPrice');
+    const sEl = document.querySelector('#hm-stopLoss');
+    const e = eEl && eEl.value ? parseFloat(eEl.value) : entry;
+    const s = sEl && sEl.value ? parseFloat(sEl.value) : sl;
+    const riskUsd = portfolioValue * (pct / 100);
+    if (!e || !s || e <= s) {
+      $('#ps-size').innerHTML = '<span class="dim">invalid</span>';
+      $('#ps-loss').innerHTML = '—';
+      return;
+    }
+    const units = riskUsd / (e - s);
+    const sizeUsd = units * e;
+    const pctOfPort = (sizeUsd / portfolioValue) * 100;
+    $('#ps-entry').textContent = `$${fmtNum2.format(e)}`;
+    $('#ps-sl').textContent = `$${fmtNum2.format(s)}`;
+    $('#ps-size').innerHTML = `<strong>${fmtNum2.format(units)}</strong> units · $${fmtNum0.format(sizeUsd)} (${pctOfPort.toFixed(1)}% of port)`;
+    $('#ps-loss').innerHTML = `$${fmtNum0.format(riskUsd)} (${pct.toFixed(1)}%)`;
+  };
+  $('#hm-risk-pct').addEventListener('input', recompute);
+  document.querySelector('#hm-currentPrice')?.addEventListener('input', recompute);
+  document.querySelector('#hm-stopLoss')?.addEventListener('input', recompute);
+  recompute();
 }
 
 async function submitHoldingForm({ kind, mode, holding }) {
