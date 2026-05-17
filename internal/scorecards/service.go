@@ -400,6 +400,16 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 			IsDoctrine: false,
 			AppliesTo: []string{"oil_gas_integrated", "gics_energy"},
 		},
+		{
+			Code: "pharma",
+			DisplayName: "Pharma",
+			ShortDescription: "Branded pharma — innovators with patent-protected revenue. Sub-types: metabolic-obesity / diversified-immunology / oncology / rare-specialty / mega-diversified.",
+			File: "seed/pharma.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft has 5 open decisions per §7
+			IsDoctrine: false,
+			AppliesTo: []string{"pharma_metabolic", "pharma_immunology", "gics_healthcare"},
+		},
 	}
 
 	for _, sd := range seeds {

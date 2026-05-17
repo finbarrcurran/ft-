@@ -58,7 +58,7 @@ Top bar: brand · market pill (clickable for all 7 exchanges, click-to-focus) ·
 | 0017 | `spec12_batch_c` | Forecast columns (low/mean/high/fetched_at) on watchlist + stock_holdings |
 | 0018 | `spec12_currency` | `stock_holdings.currency` (autofilled from Yahoo) |
 | 0019 | `sector_rotation` | `sector_universe` (34 rows), `sector_snapshots`, `user_sector_ordering`, `sector_rotation_digests`. `sector_universe_id` on holdings + watchlist. 22/24 holdings backfilled |
-| 0020 | `scorecards` | `sector_scorecards`, `sector_scorecard_versions`. Seeded 4 docs (Philosophy + Energy-Power + Hydrocarbons + Master Spec) |
+| 0020 | `scorecards` | `sector_scorecards`, `sector_scorecard_versions`. Seeded 5 docs (Philosophy + Energy-Power + Hydrocarbons + Pharma + Master Spec) |
 | 0021 | `holding_theses` | `holding_theses` (one per kind+holding_id), `holding_thesis_versions` (append-only history) |
 | 0022 | `mapping_v1_1_retag` | Refresh-session re-tag of ORCL → `data_center_reits` and WPM → `precious_metals_gold` per Sector_Holdings_Mapping_v1.1 |
 
@@ -217,6 +217,7 @@ ft token list                            list tokens (no plaintext)
 | 1.0 | 2026-05-17 | Initial author at the close of Specs 9f + 9g build. Captures every spec 1 → 12 + 9b/c/c.1/d/f/g + 7 + 10 + 11 + 11b. |
 | 1.1 | 2026-05-17 | Spec 14 (per-holding theses) shipped. Added migration 0021 + thesis endpoints + Detail-page UI block. |
 | 1.2 | 2026-05-17 | Handoff package v2 — Spec 9f D9 Whitespace Watchlist view shipped (filter pills, "+ watchlist" affordance carrying sector pre-selection). Migration 0022 retagged ORCL → data_center_reits + WPM → precious_metals_gold per Sector_Holdings_Mapping_v1.1. Watchlist schema extension: `sectorUniverseId` accepted on create. |
+| 1.3 | 2026-05-17 | Pharma adapter v1 (draft) added to Scorecards repo. Applies to pharma_metabolic + pharma_immunology + gics_healthcare. Status `needs-review` (5 open decisions in §7 of the source MD). LLY + ABBV worked examples both calibrate to 13/16. |
 
 ---
 
