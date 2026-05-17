@@ -65,11 +65,13 @@ func (s *Store) CreateWatchlistEntry(ctx context.Context, e *domain.WatchlistEnt
 		INSERT INTO watchlist (
 			user_id, ticker, kind, company_name, sector,
 			current_price, target_entry_low, target_entry_high,
-			thesis_link, note, added_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+			thesis_link, note, added_at, updated_at,
+			sector_universe_id
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		e.UserID, e.Ticker, e.Kind, e.CompanyName, e.Sector,
 		e.CurrentPrice, e.TargetEntryLow, e.TargetEntryHigh,
-		e.ThesisLink, e.Note, e.AddedAt.Unix(), e.UpdatedAt.Unix())
+		e.ThesisLink, e.Note, e.AddedAt.Unix(), e.UpdatedAt.Unix(),
+		nullInt(e.SectorUniverseID))
 	if err != nil {
 		return nil, err
 	}

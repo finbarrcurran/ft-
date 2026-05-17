@@ -1300,6 +1300,35 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
 .sector-rotation .sr-sortable.active { color: rgb(var(--color-text)); }
 .sector-rotation .sr-name { min-width: 220px; }
 svg.sector-spark { display: block; }
+/* Spec 9f D9 — Whitespace filter pills + actions column. */
+.sr-filter-toggle {
+  display: inline-flex;
+  gap: 0.2rem;
+  margin-right: 0.6rem;
+}
+.srf-btn {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius2);
+  color: rgb(var(--color-text-muted));
+  font-size: 0.78rem;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+}
+.srf-btn:hover { color: rgb(var(--color-text)); }
+.srf-btn.active {
+  background: rgb(var(--color-accent) / 0.18);
+  color: rgb(var(--color-text));
+  border-color: rgb(var(--color-accent));
+}
+.sector-rotation .sr-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.sector-rotation .sr-add-candidate {
+  font-size: 0.72rem !important;
+  padding: 0.15rem 0.45rem !important;
+}
 /* Spec 14 — Per-holding in-app thesis block on the detail page. */
 .thesis-body-block {
   background: rgb(var(--color-surface));

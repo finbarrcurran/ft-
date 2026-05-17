@@ -43,6 +43,9 @@ type watchlistReq struct {
 	TargetEntryHigh *float64 `json:"targetEntryHigh"`
 	ThesisLink      *string  `json:"thesisLink"`
 	Note            *string  `json:"note"`
+	// Spec 9f D9 — Whitespace "+ watchlist" affordance preselects the
+	// sector_universe row when adding from the rotation tab.
+	SectorUniverseID *int64 `json:"sectorUniverseId,omitempty"`
 }
 
 type watchlistRow struct {
@@ -129,16 +132,17 @@ func (s *Server) handleCreateWatchlist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	e := &domain.WatchlistEntry{
-		UserID:          userID,
-		Ticker:          strings.ToUpper(strings.TrimSpace(req.Ticker)),
-		Kind:            req.Kind,
-		CompanyName:     trimStrPtrW(req.CompanyName),
-		Sector:          trimStrPtrW(req.Sector),
-		CurrentPrice:    req.CurrentPrice,
-		TargetEntryLow:  req.TargetEntryLow,
-		TargetEntryHigh: req.TargetEntryHigh,
-		ThesisLink:      trimStrPtrW(req.ThesisLink),
-		Note:            trimStrPtrW(req.Note),
+		UserID:           userID,
+		Ticker:           strings.ToUpper(strings.TrimSpace(req.Ticker)),
+		Kind:             req.Kind,
+		CompanyName:      trimStrPtrW(req.CompanyName),
+		Sector:           trimStrPtrW(req.Sector),
+		CurrentPrice:     req.CurrentPrice,
+		TargetEntryLow:   req.TargetEntryLow,
+		TargetEntryHigh:  req.TargetEntryHigh,
+		ThesisLink:       trimStrPtrW(req.ThesisLink),
+		Note:             trimStrPtrW(req.Note),
+		SectorUniverseID: req.SectorUniverseID, // Spec 9f D9
 	}
 	created, err := s.store.CreateWatchlistEntry(r.Context(), e)
 	if err != nil {

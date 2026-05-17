@@ -4498,6 +4498,16 @@ function openWatchlistModal({ kind, mode, entry, prefill }) {
   $('#modal-close').addEventListener('click', closeImportModal);
   $('#wl-cancel').addEventListener('click', closeImportModal);
   $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  // Spec 9f D9 — surface a small chip when the modal was opened with a
+  // pre-chosen sector. The hidden field carries it through to submit.
+  if (!isEdit && prefill && prefill.sectorUniverseId != null) {
+    const form = root.querySelector('#wl-form');
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'sectorUniverseId';
+    hidden.value = String(prefill.sectorUniverseId);
+    form.appendChild(hidden);
+  }
   $('#wl-save').addEventListener('click', () => submitWatchlistForm({ kind, mode, entry }));
 }
 
@@ -4517,6 +4527,11 @@ async function submitWatchlistForm({ kind, mode, entry }) {
     thesisLink: str('thesisLink'),
     note: str('note'),
   };
+  // Spec 9f D9 — sector tag passed through from the rotation tab.
+  const sectorField = form.querySelector('[name=sectorUniverseId]');
+  if (sectorField && sectorField.value) {
+    body.sectorUniverseId = parseInt(sectorField.value, 10);
+  }
   if (body.targetEntryLow != null && body.targetEntryHigh != null && body.targetEntryLow > body.targetEntryHigh) {
     err.textContent = 'target low must be ≤ target high';
     return;
@@ -6258,6 +6273,10 @@ function pctReturn(v, digits) {
 }
 
 let _sectorSort = { key: 'return3m', dir: 'desc' };
+// Spec 9f D9 — Whitespace filter mode.
+//   'all'        → every sector (default)
+//   'whitespace' → tag=rotating_in AND holdingsCount=0 (where you don't have exposure but the rotation says you might want some)
+let _sectorFilter = 'all';
 
 async function renderSectorRotation() {
   const content = $('#content');
@@ -6275,7 +6294,20 @@ async function renderSectorRotation() {
   }
 
   let sectors = data.sectors || [];
+  const allSectorsCount = sectors.length;
   const hasUserOrder = sectors.some(s => s.displayOrderUser != null);
+
+  // Spec 9f D9 — Whitespace filter: sub-sectors rotating in where the
+  // portfolio has zero exposure. Surfaces "the rotation says yes but I
+  // don't own any of it yet".
+  let whitespaceCount = 0;
+  for (const s of sectors) {
+    if (s.tag === 'rotating_in' && (s.holdingsCount || 0) === 0) whitespaceCount++;
+  }
+  if (_sectorFilter === 'whitespace') {
+    sectors = sectors.filter(s => s.tag === 'rotating_in' && (s.holdingsCount || 0) === 0);
+  }
+
   // If user has saved an order, server already sorted; otherwise apply
   // local column sort (defaults to 3M desc per spec).
   if (!hasUserOrder) {
@@ -6338,6 +6370,11 @@ async function renderSectorRotation() {
       <td class="num">${(s.holdingsCount || 0) + (s.watchlistCount || 0) === 0
         ? '<span class="dim">—</span>'
         : `<span class="${s.holdingsCount > 0 ? '' : 'dim'}">${s.holdingsCount || 0}h${s.watchlistCount > 0 ? ` · ${s.watchlistCount}w` : ''}</span>`}</td>
+      <td class="sr-actions">
+        ${(s.tag === 'rotating_in' && (s.holdingsCount || 0) === 0)
+          ? `<button class="btn-ghost btn-mini sr-add-candidate" data-sr-add-sector="${s.sectorId}" data-sr-add-code="${escapeHTML(s.code)}" title="Add a candidate to the watchlist for this sub-sector">+ watchlist</button>`
+          : ''}
+      </td>
     </tr>
   `;
   }).join('');
@@ -6348,13 +6385,26 @@ async function renderSectorRotation() {
     : '';
   const saveBtn = `<button class="btn-ghost" id="sr-save" disabled>Save order</button>`;
 
+  // Spec 9f D9 — filter toggle pills.
+  const filterToggle = `
+    <div class="sr-filter-toggle" role="tablist" aria-label="Sector filter">
+      <button class="srf-btn ${_sectorFilter === 'all' ? 'active' : ''}" data-srf="all" role="tab">All sectors <span class="dim">${allSectorsCount}</span></button>
+      <button class="srf-btn ${_sectorFilter === 'whitespace' ? 'active' : ''}" data-srf="whitespace" role="tab" title="Sub-sectors rotating in where you have no exposure yet">
+        Whitespace <span class="dim">${whitespaceCount}</span>
+      </button>
+    </div>
+  `;
+
   content.innerHTML = `
     ${macroStrip}
     <div class="table-toolbar">
+      ${filterToggle}
       ${saveBtn}
       ${resetBtn}
       <span class="dim" id="sr-saved-stamp" style="margin-left:0.5rem;font-size:0.78rem">
-        ${hasUserOrder ? 'Manual order active.' : 'Auto-ranking (3M descending). Drag rows to reorder.'}
+        ${_sectorFilter === 'whitespace'
+          ? `Whitespace view — ${whitespaceCount} sub-sector${whitespaceCount === 1 ? '' : 's'} rotating in with zero exposure.`
+          : (hasUserOrder ? 'Manual order active.' : 'Auto-ranking (3M descending). Drag rows to reorder.')}
       </span>
     </div>
     <div class="tablewrap">
@@ -6372,6 +6422,7 @@ async function renderSectorRotation() {
             <th title="rotating_in if RS ≥ 1.05; rotating_out if ≤ 0.95">Tag</th>
             <th title="26-week weekly closes">Spark</th>
             <th class="num" title="Holdings (h) + Watchlist (w) tagged to this sector">In portfolio</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -6387,6 +6438,27 @@ async function renderSectorRotation() {
       <div id="sr-digest-list" class="dim">loading…</div>
     </details>
   `;
+
+  // Spec 9f D9 — filter toggle.
+  for (const btn of content.querySelectorAll('.srf-btn[data-srf]')) {
+    btn.addEventListener('click', () => {
+      _sectorFilter = btn.dataset.srf;
+      renderSectorRotation();
+    });
+  }
+  // Spec 9f D9 — "+ watchlist" candidate-add affordance on whitespace rows.
+  for (const btn of content.querySelectorAll('.sr-add-candidate')) {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const sectorId = parseInt(btn.dataset.srAddSector, 10);
+      // Pre-fill the watchlist add modal with the sector preselected.
+      openWatchlistModal({
+        kind: 'stock',
+        mode: 'add',
+        prefill: { sectorUniverseId: sectorId },
+      });
+    });
+  }
 
   // Spec 9g D4 — wire 📋 Scorecard buttons.
   for (const btn of content.querySelectorAll('.sr-sc-btn[data-sc-jump]')) {
