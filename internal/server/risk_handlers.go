@@ -156,6 +156,17 @@ func (s *Server) loadRiskCaps(ctx context.Context) technicals.RiskCaps {
 	}
 }
 
+// cachedPortfolioValueUSD returns the most recent portfolio_value_history
+// snapshot (Spec 9c D13). Returns 0 if no snapshot exists. Used by
+// trade_snapshot_json on open so the journal records portfolio context.
+func (s *Server) cachedPortfolioValueUSD(ctx context.Context) float64 {
+	rows, err := s.store.GetPortfolioValueHistory(ctx, 1)
+	if err != nil || len(rows) == 0 {
+		return 0
+	}
+	return rows[len(rows)-1].Total
+}
+
 func openPositionFromStock(h *domain.StockHolding, m metrics.StockMetrics) technicals.OpenPosition {
 	op := technicals.OpenPosition{
 		Sector: "Other",

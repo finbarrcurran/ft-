@@ -2516,16 +2516,98 @@ async function deleteHoldingFromModal({ kind, holding }) {
 
 // ---------- Settings tab (Spec 3 D6 restore UI + D13 audit log) ----------
 
+// Spec 9c D16 — Portfolio Risk Dashboard. Bar visualisations of
+// concentration / theme / total active risk / drawdown against caps,
+// plus circuit-breaker state.
+function renderPortfolioRiskSection(r) {
+  const caps = r.caps || {};
+  const concEntries = Object.entries(r.concentration || {}).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const themeEntries = Object.entries(r.themeConcentration || {}).sort((a, b) => b[1] - a[1]);
+
+  const barRow = (label, value, cap, suffix = '%') => {
+    // Clamp bar at 100% even if value > cap.
+    const widthPct = Math.min(100, (value / Math.max(cap, 0.01)) * 100);
+    const over = value > cap;
+    const tone = over ? 'risk-bar-over' : 'risk-bar-ok';
+    return `
+      <div class="risk-row">
+        <div class="risk-label">${escapeHTML(label)}</div>
+        <div class="risk-bar-track">
+          <div class="risk-bar ${tone}" style="width:${widthPct.toFixed(1)}%"></div>
+        </div>
+        <div class="risk-value num">${value.toFixed(1)}${suffix}${over ? ' ⚠' : ''}</div>
+      </div>
+    `;
+  };
+
+  const concRows = concEntries.map(([t, p]) => barRow(t, p, caps.concentrationPct || 15)).join('');
+  const themeRows = themeEntries.map(([t, p]) => barRow(t, p, caps.themeConcentrationPct || 30)).join('');
+
+  const cbStatus = r.circuitBreakerActive
+    ? `<span class="loss">🛑 ARMED${r.circuitBreakerUntil ? ` until ${escapeHTML(r.circuitBreakerUntil)}` : ''}</span>`
+    : '<span class="gain">🟢 NORMAL</span>';
+
+  const dd = (r.drawdownPct || 0);
+  const ddCap = caps.drawdownCircuitPct || 10;
+
+  const warns = (r.warnings || []).length
+    ? `<ul class="risk-warnings">${r.warnings.map(w => `<li>⚠ ${escapeHTML(w)}</li>`).join('')}</ul>`
+    : '';
+
+  return `
+    <section class="settings-block">
+      <h3 class="settings-h3">Portfolio risk <span class="dim" style="font-size:0.78rem; font-weight:normal">(Spec 9c)</span></h3>
+      <div class="risk-summary">
+        <div class="risk-stat">
+          <div class="risk-stat-label">Portfolio value</div>
+          <div class="risk-stat-value num">$${fmtNum0.format(r.portfolioValue || 0)}</div>
+        </div>
+        <div class="risk-stat">
+          <div class="risk-stat-label">Drawdown from peak</div>
+          <div class="risk-stat-value num ${dd <= -ddCap ? 'loss' : dd < -3 ? 'amber-text' : ''}">${dd.toFixed(2)}%</div>
+          <div class="risk-stat-sub dim">cap: -${ddCap}%</div>
+        </div>
+        <div class="risk-stat">
+          <div class="risk-stat-label">Total active risk</div>
+          <div class="risk-stat-value num">${(r.totalActiveRiskPct || 0).toFixed(2)}%</div>
+          <div class="risk-stat-sub dim">cap: ${caps.totalActivePct || 8}%</div>
+        </div>
+        <div class="risk-stat">
+          <div class="risk-stat-label">Circuit breaker</div>
+          <div class="risk-stat-value">${cbStatus}</div>
+        </div>
+      </div>
+
+      <h4 class="rh-side" style="margin-top:1rem">Concentration (cap ${caps.concentrationPct || 15}%)</h4>
+      <div class="risk-bars">${concRows || '<div class="dim">No positions.</div>'}</div>
+
+      <h4 class="rh-side" style="margin-top:0.8rem">Theme exposure (cap ${caps.themeConcentrationPct || 30}%)</h4>
+      <div class="risk-bars">${themeRows || '<div class="dim">No themed positions.</div>'}</div>
+
+      ${warns}
+
+      <div style="margin-top:0.8rem">
+        <button class="btn-ghost" id="risk-snapshot-btn">Run snapshot now</button>
+      </div>
+    </section>
+  `;
+}
+
 async function renderSettings() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading…</div>';
 
-  const [delStocks, delCrypto, audit, regimeHist] = await Promise.all([
+  const [delStocks, delCrypto, audit, regimeHist, risk] = await Promise.all([
     api('/api/holdings/stocks/deleted').catch(() => ({ holdings: [] })),
     api('/api/holdings/crypto/deleted').catch(() => ({ holdings: [] })),
     api('/api/audit?limit=100').catch(() => ({ audit: [] })),
     api('/api/regime/history?limit=50').catch(() => ({ history: [] })),
+    api('/api/risk/dashboard').catch(() => null),
   ]);
+
+  // Spec 9c D16 — Portfolio Risk Dashboard. Renders first so it's the
+  // most prominent thing on the Settings page (above regime history).
+  const portfolioRiskHTML = risk ? renderPortfolioRiskSection(risk) : '';
 
   // Regime history table — Spec 9b D13. Two columns (Jordi / Cowen).
   const hist = regimeHist.history || [];
@@ -2609,6 +2691,7 @@ async function renderSettings() {
   content.innerHTML = `
     <h2 class="settings-h">Settings</h2>
 
+    ${portfolioRiskHTML}
     ${regimeHistoryHTML}
 
     <section class="settings-block">
@@ -2646,6 +2729,23 @@ async function renderSettings() {
         renderSettings();
       } catch (e) {
         alert('Restore failed: ' + e.message);
+      }
+    });
+  }
+
+  // Spec 9c — "Run snapshot now" button.
+  const snapBtn = document.querySelector('#risk-snapshot-btn');
+  if (snapBtn) {
+    snapBtn.addEventListener('click', async () => {
+      snapBtn.disabled = true;
+      snapBtn.textContent = 'snapshotting…';
+      try {
+        await api('/api/risk/snapshot', { method: 'POST' });
+        renderSettings();
+      } catch (e) {
+        alert('Snapshot failed: ' + e.message);
+        snapBtn.disabled = false;
+        snapBtn.textContent = 'Run snapshot now';
       }
     });
   }

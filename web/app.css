@@ -609,6 +609,71 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   gap: 0.4rem;
   cursor: pointer;
 }
+/* Spec 9c D16 — Portfolio Risk Dashboard */
+.risk-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+.risk-stat {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+}
+.risk-stat-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(var(--color-text-muted));
+  margin-bottom: 0.2rem;
+}
+.risk-stat-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.risk-stat-sub {
+  font-size: 0.7rem;
+  margin-top: 2px;
+}
+.risk-bars { display: flex; flex-direction: column; gap: 0.25rem; }
+.risk-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr 6rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+.risk-label { font-family: var(--font-mono); }
+.risk-bar-track {
+  height: 10px;
+  background: rgb(var(--color-surface-sunken));
+  border-radius: 4px;
+  overflow: hidden;
+}
+.risk-bar {
+  height: 100%;
+  transition: width 0.2s ease;
+}
+.risk-bar-ok   { background: rgb(var(--color-gain) / 0.55); }
+.risk-bar-over { background: rgb(var(--color-loss) / 0.65); }
+.risk-value { text-align: right; font-family: var(--font-mono); font-size: 0.78rem; }
+.risk-warnings {
+  list-style: none;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+.risk-warnings li {
+  padding: 0.3rem 0.5rem;
+  background: rgb(var(--color-amber) / 0.1);
+  border: 1px solid rgb(var(--color-amber) / 0.3);
+  border-radius: var(--radius2);
+  margin-bottom: 0.3rem;
+  color: rgb(var(--color-amber));
+}
+
 /* Spec 9c — Edit-modal Levels & Suggestions panel */
 .form-section-head {
   margin-top: 1rem;

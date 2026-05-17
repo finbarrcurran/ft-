@@ -96,9 +96,20 @@ func (s *Server) handleCreateStock(w http.ResponseWriter, r *http.Request) {
 	}
 	h.ID = id
 
+	// Spec 9c D17 — per-trade journal snapshot. Captures regime + setup +
+	// levels + sizing math at trade open for retrospective cohort analytics
+	// (Spec 9d will consume this). Always written alongside the basic
+	// "new" snapshot in changes_json.
+	effRegime := string(s.currentEffectiveRegime(r.Context()))
+	slPct, tpPct := domain.SuggestStockRisk(h.Beta)
+	portfolioValue := s.cachedPortfolioValueUSD(r.Context())
+	tradeSnap := buildTradeSnapshotStock(h, slPct, tpPct, portfolioValue, 1.0, nil, nil, effRegime)
 	_ = s.store.RecordAudit(r.Context(), userID, "stock", id,
 		h.Ticker, nil, store.AuditCreate,
-		map[string]any{"new": stockSnapshot(h)},
+		map[string]any{
+			"new":                 stockSnapshot(h),
+			"trade_snapshot_json": tradeSnap,
+		},
 		req.Reason)
 
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
@@ -556,6 +567,15 @@ func stockSnapshot(h *domain.StockHolding) map[string]any {
 		"takeProfit":   h.TakeProfit,
 		"strategyNote": h.StrategyNote,
 		"note":         h.Note,
+		// Spec 9c additions — captured at trade open for retrospective.
+		"support1":    h.Support1,
+		"support2":    h.Support2,
+		"resistance1": h.Resistance1,
+		"resistance2": h.Resistance2,
+		"atrWeekly":   h.ATRWeekly,
+		"volTierAuto": h.VolTierAuto,
+		"setupType":   h.SetupType,
+		"stage":       h.Stage,
 	}
 }
 
@@ -574,7 +594,47 @@ func cryptoSnapshot(h *domain.CryptoHolding) map[string]any {
 		"volTier":        h.VolTier,
 		"strategyNote":   h.StrategyNote,
 		"note":           h.Note,
+		// Spec 9c additions.
+		"support1":    h.Support1,
+		"support2":    h.Support2,
+		"resistance1": h.Resistance1,
+		"resistance2": h.Resistance2,
+		"atrWeekly":   h.ATRWeekly,
+		"volTierAuto": h.VolTierAuto,
+		"setupType":   h.SetupType,
+		"stage":       h.Stage,
 	}
+}
+
+// buildTradeSnapshot is the per-trade structured journal entry (Spec 9c D17).
+// Includes the regime + framework scores at trade open so cohort analytics
+// later (Spec 9d) can compare actual outcomes against entry conditions.
+// Called from handleCreateStock / handleCreateCrypto.
+//
+// Numeric fields use the same field names as the JSON in the spec doc so
+// future readers can grep across spec docs + DB.
+func buildTradeSnapshotStock(h *domain.StockHolding, slPct, tpPct float64, portfolioValueUSD float64, perTradeRiskPct float64, jordiScore, percocoScore *int, effectiveRegime string) map[string]any {
+	out := map[string]any{
+		"setup_type":               h.SetupType,
+		"regime_effective":         effectiveRegime,
+		"stage":                    h.Stage,
+		"atr_weekly":               h.ATRWeekly,
+		"vol_tier_auto":            h.VolTierAuto,
+		"support_1":                h.Support1,
+		"resistance_1":             h.Resistance1,
+		"resistance_2":             h.Resistance2,
+		"entry":                    h.AvgOpenPrice,
+		"sl":                       h.StopLoss,
+		"tp1":                      h.TakeProfit,
+		"tp2":                      h.Resistance2, // best-guess until D8 polish
+		"per_trade_risk_pct":       perTradeRiskPct,
+		"portfolio_value_at_entry": portfolioValueUSD,
+		"jordi_score":              jordiScore,
+		"percoco_score":            percocoScore,
+		"suggested_sl_pct":         slPct,
+		"suggested_tp_pct":         tpPct,
+	}
+	return out
 }
 
 func stockDiff(old, new *domain.StockHolding) map[string]any {
