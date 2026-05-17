@@ -358,6 +358,16 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 	}
 	seeds := []seed{
 		{
+			Code: "master-spec",
+			DisplayName: "Master Spec (living)",
+			ShortDescription: "Canonical record of how FT works right now. Updated after every shipped change.",
+			File: "seed/master-spec.md",
+			Version: "1.0",
+			Status: "locked",
+			IsDoctrine: false, // editable from UI
+			AppliesTo: []string{}, // doesn't pollute sector pills
+		},
+		{
 			Code: "philosophy",
 			DisplayName: "Cross-Sector Investment Philosophy",
 			ShortDescription: "Doctrine — Universal Law + two-layer model. Read-only.",

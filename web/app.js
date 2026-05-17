@@ -3231,6 +3231,23 @@ function renderPortfolioRiskSection(r) {
 }
 
 // Spec 7 — Diagnostics & provider-health section.
+// Spec 8 / Master Spec — small Settings section linking into the
+// Scorecards tab with master-spec preselected. Reuses 100% of the
+// Scorecards machinery for storage, render, edit, and versioning.
+function renderSpecDocsSection() {
+  return `
+    <section class="settings-block">
+      <h3 class="settings-h3">Spec docs</h3>
+      <p class="dim" style="font-size:0.85rem; margin: 0 0 0.6rem 0">
+        Living documentation of FT's current behaviour. Updated after every shipped change.
+      </p>
+      <button class="btn-ghost" id="spec-docs-open-master">📄 Open Master Spec</button>
+      <button class="btn-ghost" id="spec-docs-open-philosophy" style="margin-left:0.4rem">📖 Open Philosophy doctrine</button>
+      <button class="btn-ghost" id="spec-docs-open-all" style="margin-left:0.4rem">All scorecards →</button>
+    </section>
+  `;
+}
+
 function renderDiagnosticsSection(d) {
   const fmtAgo = (sec) => {
     if (sec == null) return '—';
@@ -3841,9 +3858,13 @@ async function renderSettings() {
   // Spec 7 — diagnostics panel. Conditionally rendered if endpoint responded.
   const diagnosticsHTML = diag ? renderDiagnosticsSection(diag) : '';
 
+  // Spec 8 / Master Spec — link to the living-doc scorecard.
+  const specDocsHTML = renderSpecDocsSection();
+
   content.innerHTML = `
     <h2 class="settings-h">Settings</h2>
 
+    ${specDocsHTML}
     ${portfolioRiskHTML}
     ${llmSpendHTML}
     ${diagnosticsHTML}
@@ -3911,6 +3932,20 @@ async function renderSettings() {
 
   // Spec 7 — Diagnostics manual refresh.
   document.querySelector('#diag-refresh-btn')?.addEventListener('click', () => renderSettings());
+
+  // Spec 8 / Master Spec — jump into the Scorecards tab with the right doc.
+  document.querySelector('#spec-docs-open-master')?.addEventListener('click', () => {
+    state.selectedScorecard = 'master-spec';
+    switchTab('scorecards');
+  });
+  document.querySelector('#spec-docs-open-philosophy')?.addEventListener('click', () => {
+    state.selectedScorecard = 'philosophy';
+    switchTab('scorecards');
+  });
+  document.querySelector('#spec-docs-open-all')?.addEventListener('click', () => {
+    state.selectedScorecard = null;
+    switchTab('scorecards');
+  });
 
   // Spec 9c.1 — LLM Spend section action buttons.
   document.querySelector('#llm-adjust-btn')?.addEventListener('click', openLLMBudgetModal);
