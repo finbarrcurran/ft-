@@ -40,6 +40,20 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		currency = "EUR"
 	}
 
+	// Spec 12 D2 — cash balance from user_preferences. Stored separately per
+	// currency; we read both and convert via fx so the active-currency slice
+	// is accurate even when the user has only filled in one.
+	cashUSD := readPrefFloat(r, s, "cash_balance_usd", 0)
+	cashEUR := readPrefFloat(r, s, "cash_balance_eur", 0)
+	// Display cash in the active currency. Prefer the natively-stored one
+	// when set, otherwise convert.
+	var cashDisplayUSD float64
+	if cashUSD > 0 {
+		cashDisplayUSD = cashUSD
+	} else if cashEUR > 0 && fx > 0 {
+		cashDisplayUSD = cashEUR * fx
+	}
+
 	// ---- KPI numbers --------------------------------------------------
 	var (
 		stocksInvested  float64
@@ -107,9 +121,17 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			Label: "Crypto", Value: cryptoValueUSD, Color: "rgb(16,200,124)",
 		})
 	}
+	// Spec 12 D2 — cash slice (only when balance > 0).
+	if cashDisplayUSD > 0 {
+		classSlices = append(classSlices, donut.Slice{
+			Label: "Cash", Value: cashDisplayUSD, Color: "rgb(160,164,170)",
+		})
+	}
+	// Donut center text reflects the totalValue *including* cash.
+	totalIncludingCash := totalValue + cashDisplayUSD
 	assetClassSVG := donut.Render(classSlices, donut.Options{
 		Width: 200, Height: 200,
-		CenterText: fmtMoney(totalValue, currency, fx),
+		CenterText: fmtMoney(totalIncludingCash, currency, fx),
 		CenterSub:  "value",
 	})
 
@@ -211,7 +233,13 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			"totalPnlPct":    totalPnlPct,
 			"todayChange":    todayChange,
 			"todayChangePct": todayPct,
-			"cash":           nil, // Placeholder — Spec 2 D2 keeps this dim
+			// Spec 12 D2 — cash now has real numbers. `cash` is the
+			// display-currency-adjusted USD figure used by the KPI card;
+			// `cashUsd` / `cashEur` expose the raw stored values so the edit
+			// modal can pre-fill the right input.
+			"cash":           cashDisplayUSD,
+			"cashUsd":        cashUSD,
+			"cashEur":        cashEUR,
 			"valued":         stocksValued || cryptoValued,
 		},
 		"donuts": map[string]any{
@@ -263,6 +291,20 @@ func buildLegend(slices []donut.Slice, currency string, fx float64) []map[string
 		out = append(out, row)
 	}
 	return out
+}
+
+// readPrefFloat reads a user_preferences key and parses it as a float.
+// Returns def on missing / unparseable. Used by Spec 12 D2 cash balance.
+func readPrefFloat(r *http.Request, s *Server, key string, def float64) float64 {
+	v, err := s.store.GetPreference(r.Context(), key)
+	if err != nil || v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
+	}
+	return f
 }
 
 // fmtMoney formats a USD-source number into either USD or EUR display.

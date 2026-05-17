@@ -495,6 +495,17 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
 .markets-dropdown .md-when { font-size: 0.78rem; }
 .markets-dropdown .md-row.open .md-status { color: rgb(var(--color-gain-strong)); }
 .markets-dropdown .md-row.break .md-status { color: rgb(var(--color-amber)); }
+/* Spec 12 D3 — clickable rows in market dropdown. */
+.markets-dropdown .md-row-clickable { cursor: pointer; }
+.markets-dropdown .md-row-clickable:hover,
+.markets-dropdown .md-row-clickable:focus {
+  background: rgb(var(--color-surface-raised));
+  outline: none;
+}
+.markets-dropdown .md-row.focused {
+  border-left: 3px solid rgb(var(--color-accent));
+  padding-left: calc(0.9rem - 3px);
+}
 
 /* Spec 5 D3 — per-row Market column on holdings tables. */
 .market-cell {
@@ -1242,6 +1253,43 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   font-size: 0.78rem;
   color: rgb(var(--color-text-muted));
   margin-top: 0.3rem;
+}
+/* Spec 12 D8 — note bubble + hover popover. */
+.note-bubble {
+  display: inline-block;
+  cursor: help;
+  font-size: 0.95rem;
+  padding: 0 0.2rem;
+  user-select: none;
+}
+.note-bubble:focus { outline: 1px dashed rgb(var(--color-accent)); }
+.note-bubble-popover {
+  display: none;
+  position: absolute;
+  z-index: 900;
+  max-width: 500px;
+  background: rgb(var(--color-surface-raised));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: rgb(var(--color-text));
+  box-shadow: 0 6px 22px rgb(0 0 0 / 0.35);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Spec 12 D2 — clickable cash KPI. */
+.kpi-cash-clickable {
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.kpi-cash-clickable:hover,
+.kpi-cash-clickable:focus {
+  border-color: rgb(var(--color-accent));
+  background: rgb(var(--color-surface-raised));
+  outline: none;
 }
 
 .donut-row {

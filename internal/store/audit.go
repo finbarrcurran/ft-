@@ -18,6 +18,7 @@ const (
 )
 
 // RecordAudit appends one row to holdings_audit. `changes` is marshalled to JSON.
+// Spec 12 D9 layered reasonCode on top (optional, typed). Empty → NULL.
 func (s *Store) RecordAudit(
 	ctx context.Context,
 	userID int64,
@@ -29,17 +30,39 @@ func (s *Store) RecordAudit(
 	changes any,
 	reason *string,
 ) error {
+	return s.RecordAuditWithCode(ctx, userID, kind, holdingID, ticker, symbol, action, changes, reason, "")
+}
+
+// RecordAuditWithCode is the typed-reason variant. Callers that want to set
+// the structured reason_code use this; legacy callers stay on RecordAudit.
+func (s *Store) RecordAuditWithCode(
+	ctx context.Context,
+	userID int64,
+	kind string,
+	holdingID int64,
+	ticker *string,
+	symbol *string,
+	action string,
+	changes any,
+	reason *string,
+	reasonCode string,
+) error {
 	body, err := json.Marshal(changes)
 	if err != nil {
 		body = []byte(`{}`)
 	}
+	var codeArg any
+	if reasonCode != "" {
+		codeArg = reasonCode
+	}
 	_, err = s.DB.ExecContext(ctx,
 		`INSERT INTO holdings_audit
-		   (ts, user_id, holding_kind, holding_id, ticker, symbol, action, changes_json, reason, actor)
-		 VALUES (strftime('%s','now'), ?, ?, ?, ?, ?, ?, ?, ?, 'fin')`,
+		   (ts, user_id, holding_kind, holding_id, ticker, symbol,
+		    action, changes_json, reason, reason_code, actor)
+		 VALUES (strftime('%s','now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'fin')`,
 		userID, kind, holdingID,
 		strPtrToNull(ticker), strPtrToNull(symbol),
-		action, string(body), strPtrToNull(reason),
+		action, string(body), strPtrToNull(reason), codeArg,
 	)
 	return err
 }
@@ -55,7 +78,7 @@ func (s *Store) ListAudit(ctx context.Context, userID int64, limit, offset int) 
 	}
 	rows, err := s.DB.QueryContext(ctx,
 		`SELECT id, ts, user_id, holding_kind, holding_id,
-		        ticker, symbol, action, changes_json, reason, actor
+		        ticker, symbol, action, changes_json, reason, reason_code, actor
 		 FROM holdings_audit WHERE user_id = ?
 		 ORDER BY ts DESC, id DESC
 		 LIMIT ? OFFSET ?`, userID, limit, offset,
@@ -68,10 +91,10 @@ func (s *Store) ListAudit(ctx context.Context, userID int64, limit, offset int) 
 	for rows.Next() {
 		var a domain.HoldingsAudit
 		var ts int64
-		var ticker, symbol, reason sql.NullString
+		var ticker, symbol, reason, reasonCode sql.NullString
 		if err := rows.Scan(
 			&a.ID, &ts, &a.UserID, &a.HoldingKind, &a.HoldingID,
-			&ticker, &symbol, &a.Action, &a.Changes, &reason, &a.Actor,
+			&ticker, &symbol, &a.Action, &a.Changes, &reason, &reasonCode, &a.Actor,
 		); err != nil {
 			return nil, err
 		}
@@ -79,6 +102,7 @@ func (s *Store) ListAudit(ctx context.Context, userID int64, limit, offset int) 
 		a.Ticker = nsToPtr(ticker)
 		a.Symbol = nsToPtr(symbol)
 		a.Reason = nsToPtr(reason)
+		a.ReasonCode = nsToPtr(reasonCode)
 		out = append(out, &a)
 	}
 	return out, rows.Err()

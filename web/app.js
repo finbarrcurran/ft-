@@ -305,6 +305,13 @@ let marketState = null;
 let marketTicker = null;
 
 async function startMarketPill() {
+  // Spec 12 D3 — load focused-exchange pref. Drives which row of the
+  // /api/marketstatus/all payload is used for the collapsed pill text.
+  try {
+    const r = await api('/api/preferences/focused_exchange');
+    if (r && typeof r.value === 'string') state.focusedExchange = r.value;
+  } catch (_) { /* default to server's primary */ }
+
   await refreshMarketStatus();
   setInterval(refreshMarketStatus, 5 * 60 * 1000);
   if (marketTicker) clearInterval(marketTicker);
@@ -326,6 +333,21 @@ async function startMarketPill() {
   });
 }
 
+// Spec 12 D3 — resolve which exchange row to show in the collapsed pill.
+// Returns the focused exchange when set + present in payload; otherwise
+// falls back to the server-computed summary (earliest closing if any open,
+// else earliest opening).
+function focusedMarketRow() {
+  if (!marketState) return null;
+  const want = state.focusedExchange;
+  if (want && Array.isArray(marketState.exchanges)) {
+    // Server's payload uses `exchange` for the code (Spec 5 status.go).
+    const row = marketState.exchanges.find(e => e.exchange === want);
+    if (row) return row;
+  }
+  return null;
+}
+
 async function refreshMarketStatus() {
   try {
     marketState = await api('/api/marketstatus/all');
@@ -338,7 +360,24 @@ async function refreshMarketStatus() {
 
 function updateMarketPillText() {
   const el = $('#market-pill');
-  if (!el || !marketState || !marketState.summary) return;
+  if (!el || !marketState) return;
+
+  // Spec 12 D3 — prefer user's focused exchange when set + available.
+  const focused = focusedMarketRow();
+  if (focused) {
+    const dot  = focused.open ? '🟢' : focused.onBreak ? '🟡' : '🔴';
+    const verb = focused.nextChangeKind === 'close' ? 'closes' :
+                 focused.nextChangeKind === 'break_start' ? 'breaks' :
+                 focused.nextChangeKind === 'break_end' ? 'resumes' : 'opens';
+    const remaining = formatCountdown(focused.nextChange);
+    const label = focused.open ? focused.name : `${focused.name} closed`;
+    el.innerHTML = `${dot} <span class="mp-label">${escapeHTML(label)}</span> · ${escapeHTML(verb)} in <span class="num mp-eta">${escapeHTML(remaining)}</span>`;
+    el.classList.toggle('market-pill--open', !!focused.open);
+    return;
+  }
+
+  // Fallback to server's primary.
+  if (!marketState.summary) return;
   const s = marketState.summary;
   if (!s.primaryExchange) {
     el.innerHTML = '<span class="dim">—</span>';
@@ -377,6 +416,7 @@ function closeMarketsDropdown() {
 function renderMarketsDropdown() {
   const dd = $('#markets-dropdown');
   if (!dd || !marketState || !Array.isArray(marketState.exchanges)) return;
+  const focused = state.focusedExchange;
   const rows = marketState.exchanges.map((e) => {
     const dot = e.open ? '🟢' : e.onBreak ? '🟡' : '🔴';
     const label = e.open ? 'Open' : e.onBreak ? 'Break' : 'Closed';
@@ -385,16 +425,39 @@ function renderMarketsDropdown() {
                   e.nextChangeKind === 'break_end' ? 'resumes' : 'opens';
     const when = formatLocalTimeShort(e.nextChange);
     const dur  = formatCountdown(e.nextChange);
+    const isFocused = e.exchange === focused;
     return `
-      <div class="md-row${e.open ? ' open' : e.onBreak ? ' break' : ''}">
+      <div class="md-row md-row-clickable${e.open ? ' open' : e.onBreak ? ' break' : ''}${isFocused ? ' focused' : ''}" data-exchange="${escapeHTML(e.exchange)}" role="button" tabindex="0" title="Set as focused market for the pill">
         <span class="md-dot">${dot}</span>
-        <span class="md-name">${escapeHTML(e.name)}</span>
+        <span class="md-name">${escapeHTML(e.name)}${isFocused ? ' <span class="dim">★</span>' : ''}</span>
         <span class="md-status">${escapeHTML(label)}</span>
         <span class="md-when dim">${escapeHTML(verb)} ${escapeHTML(when)} <span class="num">(${escapeHTML(dur)})</span></span>
       </div>
     `;
   }).join('');
-  dd.innerHTML = `<div class="md-head">Markets</div>${rows}`;
+  dd.innerHTML = `<div class="md-head">Markets <span class="dim" style="font-weight:normal; font-size:0.75rem">— click a row to set as pill focus</span></div>${rows}`;
+
+  // Spec 12 D3 — wire row clicks.
+  dd.querySelectorAll('[data-exchange]').forEach(row => {
+    const set = async () => {
+      const code = row.dataset.exchange;
+      state.focusedExchange = code;
+      try {
+        await api('/api/preferences/focused_exchange', {
+          method: 'PUT',
+          body: JSON.stringify({ value: code }),
+        });
+      } catch (e) {
+        console.warn('focused_exchange persist failed', e.message);
+      }
+      closeMarketsDropdown();
+      updateMarketPillText();
+    };
+    row.addEventListener('click', set);
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); set(); }
+    });
+  });
 }
 
 // Render the next-change moment as the user's local time. ISO → "Mon 14:30".
@@ -1240,12 +1303,28 @@ async function renderSummary() {
   const todayStr = k.valued ? `${k.todayChange >= 0 ? '+' : '-'}${formatMoney(Math.abs(k.todayChange))}` : '—';
   const todayPctStr = k.todayChangePct != null ? `${k.todayChangePct >= 0 ? '+' : ''}${k.todayChangePct.toFixed(2)}%` : '';
 
+  // Spec 12 D2 — cash KPI is now editable. Click anywhere on the card to
+  // open the inline edit modal. Displayed value comes from /api/summary
+  // (already currency-adjusted server-side).
+  const cashValue = k.cash != null ? Number(k.cash) : 0;
+  const cashStr = cashValue > 0 ? formatMoney(cashValue) : '—';
+  const cashSub = cashValue > 0
+    ? '<span class="dim">click to edit</span>'
+    : '<span class="dim">click to set</span>';
+  const cashCard = `
+    <div class="kpi-card kpi-cash-clickable" id="kpi-cash" role="button" tabindex="0" title="Click to edit cash balance">
+      <div class="kpi-label">Cash</div>
+      <div class="kpi-value num">${cashStr}</div>
+      <div class="kpi-sub">${cashSub}</div>
+    </div>
+  `;
+
   const kpiRow = `
     <div class="kpi-row">
       ${kpiCard('Total Value',     valueStr,                          `invested ${investedStr}`,         '',         'kpi-total-value', k.totalValue)}
       ${kpiCard('Total P&amp;L',   pnlStr,                            pnlPctStr,                          pnlTone,    'kpi-total-pnl',   k.totalPnl)}
       ${kpiCard('Today\'s Change', todayStr,                          todayPctStr,                        todayTone,  'kpi-today',       k.todayChange)}
-      ${kpiCard('Cash',            '<span class="dim">—</span>',      '<span class="dim">unset</span>',   'dim',      null,              null)}
+      ${cashCard}
     </div>
   `;
 
@@ -1315,6 +1394,88 @@ async function renderSummary() {
   updateStaleScoreBanner();
   // Spec 11 D6 — stale-thesis nudge.
   updateStaleThesisBanner();
+
+  // Spec 12 D2 — cash KPI editable. Click + Enter/Space (a11y) both fire.
+  const cashEl = document.querySelector('#kpi-cash');
+  if (cashEl) {
+    const open = () => openCashBalanceModal(s);
+    cashEl.addEventListener('click', open);
+    cashEl.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        open();
+      }
+    });
+  }
+}
+
+// Spec 12 D2 — minimal modal for cash balance edit. Reads current values
+// from /api/summary payload (cashUsd / cashEur) to pre-fill, writes back
+// via /api/preferences. On save, invalidates summary state + re-renders.
+function openCashBalanceModal(summaryPayload) {
+  closeImportModal();
+  const k = (summaryPayload && summaryPayload.kpis) || {};
+  const ccy = (summaryPayload && summaryPayload.currency) || 'USD';
+  const curUsd = Number(k.cashUsd || 0);
+  const curEur = Number(k.cashEur || 0);
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Set cash balance</div>
+            <div class="desc">Single-row, single-user. Stored separately per currency.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="cash-form">
+            <div class="form-row">
+              <label for="cash-ccy">Currency</label>
+              <select id="cash-ccy">
+                <option value="USD" ${ccy === 'USD' ? 'selected' : ''}>USD</option>
+                <option value="EUR" ${ccy === 'EUR' ? 'selected' : ''}>EUR</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="cash-amount">Amount</label>
+              <input id="cash-amount" type="number" step="0.01" min="0" value="${ccy === 'EUR' ? curEur : curUsd}" />
+            </div>
+            <p class="dim" style="font-size:0.78rem">Current: $${curUsd.toFixed(2)} USD · €${curEur.toFixed(2)} EUR. Cash shows as a slice on the Asset Class donut whenever non-zero.</p>
+            <div class="error" id="cash-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="cash-cancel">Cancel</button>
+          <button class="btn-primary" id="cash-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#cash-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#cash-save').addEventListener('click', async () => {
+    const errEl = $('#cash-err'); errEl.textContent = '';
+    const v = parseFloat($('#cash-amount').value);
+    if (!Number.isFinite(v) || v < 0) { errEl.textContent = 'amount must be ≥ 0'; return; }
+    const c = $('#cash-ccy').value;
+    const key = c === 'EUR' ? 'cash_balance_eur' : 'cash_balance_usd';
+    try {
+      await api(`/api/preferences/${key}`, {
+        method: 'PUT',
+        body: JSON.stringify({ value: String(v) }),
+      });
+      closeImportModal();
+      state.summary = null;
+      renderSummary();
+    } catch (e) {
+      errEl.textContent = e.message;
+    }
+  });
 }
 
 // Spec 11 D6 — surface holdings with no thesis notes in 90+ days.
@@ -1666,7 +1827,12 @@ function renderFeed(feed, scope, macroData) {
     </div>`;
   }
 
-  const fgChip = scope === 'crypto' ? `<div id="fg-chip" class="fg-chip">fear &amp; greed: loading…</div>` : '';
+  // Spec 12 D10a — F&G placement.
+  //   News tab → CNN Stocks F&G via /api/feargreed/stocks
+  //   Crypto News tab → Alternative.me Crypto F&G via /api/feargreed
+  // Both reuse the same chip element (#fg-chip) but the loader picks the
+  // right endpoint via scope.
+  const fgChip = `<div id="fg-chip" class="fg-chip">fear &amp; greed: loading…</div>`;
 
   if (articles.length === 0) {
     content.innerHTML = filterToggle + macroHTML + banner + fgChip +
@@ -1702,7 +1868,8 @@ function renderFeed(feed, scope, macroData) {
   }
 
   wireNewsToggle(scope);
-  if (scope === 'crypto') loadFearGreed();
+  // Spec 12 D10a — both tabs get an F&G chip; endpoint depends on scope.
+  loadFearGreed(scope);
 }
 
 // Spec 11 D5 — open Add Note modal from a news article. The user picks a
@@ -1868,21 +2035,25 @@ function renderMacroCards(d) {
   return `<div class="macro-block">${upcomingHTML}${recentHTML}</div>`;
 }
 
-async function loadFearGreed() {
+async function loadFearGreed(scope) {
   const el = $('#fg-chip');
   if (!el) return;
+  // Spec 12 D10a — pick endpoint by scope. crypto: alternative.me;
+  // market: CNN. Both return the same {value, classification} shape.
+  const endpoint = scope === 'market' ? '/api/feargreed/stocks' : '/api/feargreed';
+  const label = scope === 'market' ? 'stocks fear &amp; greed' : 'crypto fear &amp; greed';
   try {
-    const fg = await api('/api/feargreed');
+    const fg = await api(endpoint);
     if (fg.value == null) {
-      el.textContent = 'fear & greed: unavailable';
+      el.textContent = (scope === 'market' ? 'stocks ' : 'crypto ') + 'fear & greed: unavailable';
       el.classList.add('dim');
       return;
     }
     const v = fg.value;
     const tone = v >= 75 ? 'gain' : v >= 55 ? 'gain dim' : v >= 45 ? 'dim' : v >= 25 ? 'loss dim' : 'loss';
-    el.innerHTML = `fear &amp; greed: <span class="${tone}" style="font-weight:600">${v}</span> · ${escapeHTML(fg.classification || '')}`;
+    el.innerHTML = `${label}: <span class="${tone}" style="font-weight:600">${v}</span> · ${escapeHTML(fg.classification || '')}`;
   } catch (_) {
-    el.textContent = 'fear & greed: error';
+    el.textContent = (scope === 'market' ? 'stocks ' : 'crypto ') + 'fear & greed: error';
   }
 }
 
@@ -1968,8 +2139,8 @@ function renderStocks() {
       </span>
     `;
     const noteCell = r.note
-      ? `<td class="note-cell" title="${escapeHTML(r.note)}">${escapeHTML(r.note.length > 30 ? r.note.slice(0, 28) + '…' : r.note)}</td>`
-      : `<td class="dim">—</td>`;
+      ? `<td class="note-cell"><span class="note-bubble" data-note="${escapeHTML(r.note)}" tabindex="0" aria-label="Show note" title="Hover for full note">💬</span></td>`
+      : `<td></td>`;
     // SL/TP suggestion comparison: arrow only when manual is set and the
     // direction is clear. ↑ means manual SL is tighter (less drawdown allowed),
     // ↓ means manual SL is looser (more drawdown allowed). Both render in cell.
@@ -2101,8 +2272,8 @@ function renderCrypto() {
   const body = rows.map((r) => {
     const m = r.metrics;
     const noteCell = r.note
-      ? `<td class="note-cell" title="${escapeHTML(r.note)}">${escapeHTML(r.note.length > 30 ? r.note.slice(0, 28) + '…' : r.note)}</td>`
-      : `<td class="dim">—</td>`;
+      ? `<td class="note-cell"><span class="note-bubble" data-note="${escapeHTML(r.note)}" tabindex="0" aria-label="Show note" title="Hover for full note">💬</span></td>`
+      : `<td></td>`;
     const sparkSvg = r.sparklineSvg || '<span class="sparkline-empty">—</span>';
     const symbolCell = `<span class="ticker-hover" data-row-id="${r.id}" data-row-kind="crypto" tabindex="0">${escapeHTML(r.symbol)}</span>`;
     return `
@@ -2496,10 +2667,31 @@ function openHoldingModal({ kind, mode, holding }) {
   const fieldRows = mainFields
     + (levelFields ? `<div class="form-section-head">Levels & setup (Spec 9c)</div>${levelFields}${levelsPanel}` : '');
 
+  // Spec 12 D9 — structured reason dropdown + optional free-text. Submitted
+  // as `reasonCode` (typed code) and `reason` (free-text); audit row stores
+  // both. Codes shown only on edits where SL/TP/stage could change.
+  const reasonCodes = [
+    { code: '',                      label: '— (no code)' },
+    { code: 'tech_break',            label: 'Move stop after technical break' },
+    { code: 'tp1_hit',               label: 'Adjust after TP1 hit' },
+    { code: 'tighten_on_profit',     label: 'Tighten as position moves to profit' },
+    { code: 'loosen_vol',            label: 'Loosen due to volatility expansion' },
+    { code: 'thesis_break',          label: 'Thesis broken — exit setup' },
+    { code: 'earnings_approaching',  label: 'Earnings within 2 weeks' },
+    { code: 'rebalance',             label: 'Portfolio rebalance' },
+    { code: 'manual_other',          label: 'Other (free-text required)' },
+  ];
+  const reasonCodeOptions = reasonCodes
+    .map(rc => `<option value="${escapeHTML(rc.code)}">${escapeHTML(rc.label)}</option>`)
+    .join('');
   const reasonField = isEdit ? `
     <div class="form-row">
-      <label for="hm-reason">Reason (optional)</label>
-      <input id="hm-reason" name="reason" type="text" placeholder="e.g. moved stop after technical break" />
+      <label for="hm-reason-code">Reason code</label>
+      <select id="hm-reason-code" name="reasonCode">${reasonCodeOptions}</select>
+    </div>
+    <div class="form-row">
+      <label for="hm-reason">Reason note <span class="dim">(optional unless code = Other)</span></label>
+      <input id="hm-reason" name="reason" type="text" placeholder="e.g. broke trendline at $148; trailing stop to $142" />
     </div>
   ` : '';
 
@@ -2728,11 +2920,20 @@ async function submitHoldingForm({ kind, mode, holding }) {
   if (kind === 'crypto') {
     body.isCore = body.classification === 'core';
   }
-  // Update reason
+  // Update reason — Spec 12 D9 adds the typed reasonCode + keeps free-text.
   if (mode === 'edit') {
     const reasonEl = form.querySelector('[name="reason"]');
+    const codeEl   = form.querySelector('[name="reasonCode"]');
     if (reasonEl && reasonEl.value.trim()) {
       body.reason = reasonEl.value.trim();
+    }
+    if (codeEl && codeEl.value) {
+      body.reasonCode = codeEl.value;
+      // Enforce "manual_other → text required" rule before submit.
+      if (codeEl.value === 'manual_other' && !body.reason) {
+        err.textContent = 'reason text required when code = Other';
+        return;
+      }
     }
   }
 
@@ -3443,6 +3644,9 @@ async function renderSettings() {
         changesPreview = 'created';
       }
     } catch (_) { /* keep empty */ }
+    // Spec 12 D9 — surface typed reasonCode alongside the free-text reason.
+    const reasonBlob = [a.reasonCode ? `[${a.reasonCode}]` : '', a.reason || '']
+      .filter(Boolean).join(' ');
     return `
       <tr>
         <td class="num dim">${escapeHTML(new Date(a.ts).toLocaleString())}</td>
@@ -3450,7 +3654,7 @@ async function renderSettings() {
         <td>${escapeHTML(a.holdingKind)}</td>
         <td class="ticker">${escapeHTML(tickerOrSymbol)}</td>
         <td class="dim" style="font-size:0.78rem">${escapeHTML(changesPreview)}</td>
-        <td class="dim" style="font-size:0.78rem">${escapeHTML(a.reason || '')}</td>
+        <td class="dim" style="font-size:0.78rem">${escapeHTML(reasonBlob)}</td>
       </tr>
     `;
   }).join('') || `<tr><td colspan="6" class="dim" style="text-align:center; padding:0.7rem">No audit entries yet. Audit log fills as you create / edit / delete / restore holdings.</td></tr>`;
@@ -3841,7 +4045,7 @@ async function renderWatchlist() {
     const tagCell = tag ? `<span class="tag-pill">${escapeHTML(tag)}</span>` : `<span class="dim">—</span>`;
     const added = relativeAge(e.addedAt);
     const note = e.note
-      ? `<span class="note-cell" title="${escapeHTML(e.note)}">${escapeHTML(e.note.length > 30 ? e.note.slice(0, 28) + '…' : e.note)}</span>`
+      ? `<span class="note-cell"><span class="note-bubble" data-note="${escapeHTML(e.note)}" tabindex="0" aria-label="Show note" title="Hover for full note">💬</span></span>`
       : '<span class="dim">—</span>';
     return `
       <tr data-wid="${e.id}">
@@ -5578,5 +5782,58 @@ function installCommandPaletteShortcut() {
 }
 
 installCommandPaletteShortcut();
+
+// Spec 12 D8 — Notes-as-hover-bubbles popover. Single floating element
+// reused across Stocks / Crypto / Watchlist tables. Delegated listeners so
+// per-render wiring isn't needed.
+let _noteBubbleEl = null;
+function ensureNoteBubble() {
+  if (_noteBubbleEl) return _noteBubbleEl;
+  _noteBubbleEl = document.createElement('div');
+  _noteBubbleEl.className = 'note-bubble-popover';
+  _noteBubbleEl.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(_noteBubbleEl);
+  return _noteBubbleEl;
+}
+function showNoteBubble(el) {
+  const text = el.dataset.note;
+  if (!text) return;
+  const pop = ensureNoteBubble();
+  pop.textContent = text;
+  const r = el.getBoundingClientRect();
+  pop.style.display = 'block';
+  // Position above the bubble, fall back to below if no room.
+  const popH = pop.offsetHeight;
+  const top = r.top - popH - 8 > 0 ? (r.top - popH - 8) : (r.bottom + 8);
+  let left = r.left;
+  // Keep it inside the viewport horizontally.
+  const popW = pop.offsetWidth;
+  if (left + popW > window.innerWidth - 12) left = window.innerWidth - popW - 12;
+  if (left < 8) left = 8;
+  pop.style.top = `${top + window.scrollY}px`;
+  pop.style.left = `${left + window.scrollX}px`;
+  pop.setAttribute('aria-hidden', 'false');
+}
+function hideNoteBubble() {
+  if (!_noteBubbleEl) return;
+  _noteBubbleEl.style.display = 'none';
+  _noteBubbleEl.setAttribute('aria-hidden', 'true');
+}
+document.addEventListener('mouseover', (ev) => {
+  const t = ev.target.closest('.note-bubble');
+  if (t) showNoteBubble(t);
+});
+document.addEventListener('mouseout', (ev) => {
+  const t = ev.target.closest('.note-bubble');
+  if (t) hideNoteBubble();
+});
+document.addEventListener('focusin', (ev) => {
+  const t = ev.target.closest('.note-bubble');
+  if (t) showNoteBubble(t);
+});
+document.addEventListener('focusout', (ev) => {
+  const t = ev.target.closest('.note-bubble');
+  if (t) hideNoteBubble();
+});
 
 boot();

@@ -220,6 +220,11 @@ type HoldingsAudit struct {
 	Action      string    `json:"action"` // "create" | "update" | "soft_delete" | "restore" | "import_replace"
 	Changes     string    `json:"changes"` // raw JSON string of the diff
 	Reason      *string   `json:"reason,omitempty"`
+	// Spec 12 D9 — typed reason code (one of tech_break, tp1_hit,
+	// tighten_on_profit, loosen_vol, thesis_break, earnings_approaching,
+	// rebalance, manual_other). Free-form Reason still carries the prose
+	// elaboration when present.
+	ReasonCode  *string   `json:"reasonCode,omitempty"`
 	Actor       string    `json:"actor"`
 }
 

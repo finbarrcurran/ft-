@@ -44,7 +44,8 @@ type stockMutationReq struct {
 	// Spec 5 polish — override the suffix-based exchange-detection rule.
 	// Empty string clears any prior override.
 	ExchangeOverride *string `json:"exchangeOverride"`
-	Reason           *string `json:"reason,omitempty"` // for update audit row
+	Reason           *string `json:"reason,omitempty"`     // for update audit row
+	ReasonCode       *string `json:"reasonCode,omitempty"` // Spec 12 D9 typed reason
 }
 
 type cryptoMutationReq struct {
@@ -72,6 +73,7 @@ type cryptoMutationReq struct {
 	// Spec 10 — thesis URL.
 	ThesisLink *string `json:"thesisLink"`
 	Reason     *string `json:"reason,omitempty"`
+	ReasonCode *string `json:"reasonCode,omitempty"` // Spec 12 D9
 }
 
 type restoreReq struct {
@@ -219,8 +221,12 @@ func (s *Server) handleUpdateStock(w http.ResponseWriter, r *http.Request) {
 
 	changes := stockDiff(old, h)
 	if len(changes) > 0 {
-		_ = s.store.RecordAudit(r.Context(), userID, "stock", id,
-			h.Ticker, nil, store.AuditUpdate, changes, req.Reason)
+		code := ""
+		if req.ReasonCode != nil {
+			code = validateReasonCode(*req.ReasonCode)
+		}
+		_ = s.store.RecordAuditWithCode(r.Context(), userID, "stock", id,
+			h.Ticker, nil, store.AuditUpdate, changes, req.Reason, code)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "changed": len(changes)})
@@ -424,8 +430,12 @@ func (s *Server) handleUpdateCrypto(w http.ResponseWriter, r *http.Request) {
 
 	changes := cryptoDiff(old, h)
 	if len(changes) > 0 {
-		_ = s.store.RecordAudit(r.Context(), userID, "crypto", id,
-			nil, &h.Symbol, store.AuditUpdate, changes, req.Reason)
+		code := ""
+		if req.ReasonCode != nil {
+			code = validateReasonCode(*req.ReasonCode)
+		}
+		_ = s.store.RecordAuditWithCode(r.Context(), userID, "crypto", id,
+			nil, &h.Symbol, store.AuditUpdate, changes, req.Reason, code)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "changed": len(changes)})
@@ -523,6 +533,26 @@ func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 // ===========================================================================
 // Helpers — request → domain, diff, snapshot
 // ===========================================================================
+
+// validReasonCodes is the Spec 12 D9 whitelist. Anything outside this set
+// is silently dropped — never erroring on a stale client.
+var validReasonCodes = map[string]bool{
+	"tech_break":            true,
+	"tp1_hit":               true,
+	"tighten_on_profit":     true,
+	"loosen_vol":            true,
+	"thesis_break":          true,
+	"earnings_approaching":  true,
+	"rebalance":             true,
+	"manual_other":          true,
+}
+
+func validateReasonCode(c string) string {
+	if validReasonCodes[c] {
+		return c
+	}
+	return ""
+}
 
 func stockFromReq(req stockMutationReq) *domain.StockHolding {
 	stage := "pre_tp1"

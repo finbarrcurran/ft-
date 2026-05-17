@@ -90,6 +90,37 @@ func validPreferenceValue(key, value string) bool {
 	case "alerts_snooze_until":
 		// Backlog polish — unix-seconds timestamp as a string. "0" clears.
 		return len(value) > 0 && len(value) <= 16
+	case "cash_balance_usd", "cash_balance_eur":
+		// Spec 12 D2 — non-negative decimal string. Generous cap for ultra-
+		// wealthy users (16 chars handles up to $9.9 trillion).
+		if len(value) == 0 || len(value) > 16 {
+			return false
+		}
+		// Permit digits + at most one decimal point. "0" is valid.
+		dot := 0
+		for _, c := range value {
+			if c == '.' {
+				dot++
+				if dot > 1 {
+					return false
+				}
+				continue
+			}
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+		return true
+	case "focused_exchange":
+		// Spec 12 D3 — one of the 7 supported markets.
+		switch value {
+		case "US", "LSE", "EURONEXT", "XETRA", "TSE", "HKEX", "B3":
+			return true
+		}
+		return false
+	case "pnl_currency":
+		// Spec 12 D5g — toggle for stocks-table P&L display.
+		return value == "USD" || value == "EUR"
 	}
 	// Spec 9c.1 — llm_* keys are bounded TEXT/bool/number values; accept
 	// anything that survives the generic length check above.
