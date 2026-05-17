@@ -465,3 +465,165 @@ func FetchYahooBeta(ctx context.Context, ticker string) (*float64, error) {
 	}
 	return nil, fmt.Errorf("no beta for %s", ticker)
 }
+
+// ----- Spec 12 D4a / D7 — analyst targets + profile lookup ---------------
+
+// AnalystTargets carries Yahoo's price-target consensus.
+type AnalystTargets struct {
+	Low  *float64 `json:"low,omitempty"`
+	Mean *float64 `json:"mean,omitempty"`
+	High *float64 `json:"high,omitempty"`
+}
+
+// TickerProfile is the shape returned by /api/lookup/ticker for stocks.
+// Fields populated best-effort; missing values stay nil/empty.
+type TickerProfile struct {
+	Ticker   string         `json:"ticker"`
+	Name     string         `json:"name,omitempty"`
+	Exchange string         `json:"exchange,omitempty"`
+	Sector   string         `json:"sector,omitempty"`
+	Industry string         `json:"industry,omitempty"`
+	Currency string         `json:"currency,omitempty"`
+	Targets  AnalystTargets `json:"targets"`
+	Source   string         `json:"source"`
+}
+
+// FetchYahooAnalystTargets pulls the bear/base/bull consensus targets.
+// Endpoint: quoteSummary?modules=financialData.
+func FetchYahooAnalystTargets(ctx context.Context, ticker string) (out AnalystTargets, retErr error) {
+	defer func() { health.Record(ctx, "yahoo", retErr) }()
+	u := fmt.Sprintf("https://query1.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=financialData",
+		url.PathEscape(ticker))
+	raw, err := yahoo.yahooGet(ctx, u)
+	if err != nil {
+		return out, err
+	}
+	var env struct {
+		QuoteSummary struct {
+			Result []struct {
+				FinancialData struct {
+					TargetLowPrice  struct{ Raw float64 `json:"raw"` } `json:"targetLowPrice"`
+					TargetMeanPrice struct{ Raw float64 `json:"raw"` } `json:"targetMeanPrice"`
+					TargetHighPrice struct{ Raw float64 `json:"raw"` } `json:"targetHighPrice"`
+				} `json:"financialData"`
+			} `json:"result"`
+		} `json:"quoteSummary"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return out, err
+	}
+	if len(env.QuoteSummary.Result) == 0 {
+		return out, fmt.Errorf("no financialData for %s", ticker)
+	}
+	fd := env.QuoteSummary.Result[0].FinancialData
+	if fd.TargetLowPrice.Raw > 0 {
+		v := fd.TargetLowPrice.Raw
+		out.Low = &v
+	}
+	if fd.TargetMeanPrice.Raw > 0 {
+		v := fd.TargetMeanPrice.Raw
+		out.Mean = &v
+	}
+	if fd.TargetHighPrice.Raw > 0 {
+		v := fd.TargetHighPrice.Raw
+		out.High = &v
+	}
+	if out.Low == nil && out.Mean == nil && out.High == nil {
+		return out, fmt.Errorf("no targets for %s", ticker)
+	}
+	return out, nil
+}
+
+// FetchYahooProfile fetches name + sector + industry + currency via
+// quoteSummary?modules=summaryProfile,price + the consensus targets.
+// Used by /api/lookup/ticker. Best-effort on every field.
+func FetchYahooProfile(ctx context.Context, ticker string) (p *TickerProfile, retErr error) {
+	defer func() { health.Record(ctx, "yahoo", retErr) }()
+	u := fmt.Sprintf("https://query1.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=summaryProfile,price",
+		url.PathEscape(ticker))
+	raw, err := yahoo.yahooGet(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		QuoteSummary struct {
+			Result []struct {
+				SummaryProfile struct {
+					Sector   string `json:"sector"`
+					Industry string `json:"industry"`
+				} `json:"summaryProfile"`
+				Price struct {
+					LongName     string `json:"longName"`
+					ShortName    string `json:"shortName"`
+					Currency     string `json:"currency"`
+					Exchange     string `json:"exchange"`
+					ExchangeName string `json:"exchangeName"`
+				} `json:"price"`
+			} `json:"result"`
+		} `json:"quoteSummary"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	if len(env.QuoteSummary.Result) == 0 {
+		return nil, fmt.Errorf("no profile for %s", ticker)
+	}
+	r := env.QuoteSummary.Result[0]
+	out := &TickerProfile{
+		Ticker:   strings.ToUpper(ticker),
+		Name:     firstNonEmpty(r.Price.LongName, r.Price.ShortName),
+		Exchange: firstNonEmpty(r.Price.ExchangeName, r.Price.Exchange),
+		Sector:   r.SummaryProfile.Sector,
+		Industry: r.SummaryProfile.Industry,
+		Currency: r.Price.Currency,
+		Source:   "yahoo",
+	}
+	if t, err := FetchYahooAnalystTargets(ctx, ticker); err == nil {
+		out.Targets = t
+	}
+	return out, nil
+}
+
+// SearchYahooTicker resolves a free-text query (company name OR ticker) to
+// the top match. Used by the smart-autofill reverse direction (D7).
+func SearchYahooTicker(ctx context.Context, q string) (sym, name string, retErr error) {
+	defer func() { health.Record(ctx, "yahoo", retErr) }()
+	u := fmt.Sprintf("https://query2.finance.yahoo.com/v1/finance/search?q=%s&quotesCount=5&newsCount=0",
+		url.QueryEscape(q))
+	raw, err := yahoo.yahooGet(ctx, u)
+	if err != nil {
+		return "", "", err
+	}
+	var env struct {
+		Quotes []struct {
+			Symbol    string `json:"symbol"`
+			LongName  string `json:"longname"`
+			ShortName string `json:"shortname"`
+			QuoteType string `json:"quoteType"`
+			Score     float64 `json:"score"`
+		} `json:"quotes"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return "", "", err
+	}
+	if len(env.Quotes) == 0 {
+		return "", "", fmt.Errorf("no match for %q", q)
+	}
+	// Prefer EQUITY / ETF over anything else.
+	for _, c := range env.Quotes {
+		if c.QuoteType == "EQUITY" || c.QuoteType == "ETF" {
+			return c.Symbol, firstNonEmpty(c.LongName, c.ShortName), nil
+		}
+	}
+	c := env.Quotes[0]
+	return c.Symbol, firstNonEmpty(c.LongName, c.ShortName), nil
+}
+
+func firstNonEmpty(a ...string) string {
+	for _, s := range a {
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
+}

@@ -168,6 +168,13 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 					}
 				}
 			}
+
+			// 4) Spec 12 D4a — analyst Bear/Base/Bull targets from Yahoo
+			//    financialData. Best-effort; non-US tickers often return
+			//    null and we just leave the previous value alone.
+			if t, err := market.FetchYahooAnalystTargets(ctx, ticker); err == nil {
+				_ = s.Store.SetStockForecast(ctx, userID, ticker, t.Low, t.Mean, t.High)
+			}
 		}()
 	}
 	stockWG.Wait()
@@ -208,6 +215,23 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 		select {
 		case <-ctx.Done():
 		case <-time.After(2500 * time.Millisecond):
+		}
+	}
+
+	// ---- Spec 12 D4a — watchlist analyst forecasts ----
+	//
+	// We iterate every active stock-kind watchlist entry and pull the
+	// targets. Yahoo's financialData module is cheap (one call per ticker)
+	// and well within the per-day budget. Crypto watchlist entries get
+	// "—" forever (no equivalent free source).
+	if wl, err := s.Store.ListWatchlist(ctx, userID); err == nil {
+		for _, e := range wl {
+			if e.Kind != "stock" {
+				continue
+			}
+			if t, err := market.FetchYahooAnalystTargets(ctx, e.Ticker); err == nil {
+				_ = s.Store.SetWatchlistForecast(ctx, userID, e.Ticker, t.Low, t.Mean, t.High)
+			}
 		}
 	}
 

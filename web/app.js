@@ -2812,6 +2812,80 @@ function openHoldingModal({ kind, mode, holding }) {
   if (isEdit && holding) {
     setupHoldingLevelsPanel({ kind, holding });
   }
+
+  // Spec 12 D7 — smart-autofill on the Add modal (and edits where blanks
+  // exist). Debounced 300ms input on ticker/symbol/name fields. Never
+  // overwrites a user-entered non-empty value; pings a small "auto-filled"
+  // badge near each filled-in field.
+  installAutofillForHoldingModal(kind, mode);
+}
+
+// Spec 12 D7 — autofill ticker → name/sector/currency for stocks, or
+// symbol → name/category for crypto. Reverse-direction (name → ticker)
+// also works because the lookup endpoint accepts freeform queries.
+function installAutofillForHoldingModal(kind, mode) {
+  // Edit-mode autofill is opt-in only on blanks; Add-mode fills aggressively.
+  const tickerEl = document.querySelector(kind === 'stock' ? '#hm-ticker' : '#hm-symbol');
+  const nameEl   = document.querySelector('#hm-name');
+  if (!tickerEl && !nameEl) return;
+
+  let timer = null;
+  let lastLookup = '';
+  const debounceMs = 350;
+
+  const runLookup = async (rawQuery) => {
+    const q = (rawQuery || '').trim();
+    if (q.length < 2 || q === lastLookup) return;
+    lastLookup = q;
+    try {
+      const p = await api(`/api/lookup/ticker?q=${encodeURIComponent(q)}&kind=${kind}`);
+      applyAutofill(p);
+    } catch (_) {
+      // Silent — lookup is best-effort.
+    }
+  };
+
+  const queue = (rawQuery) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => runLookup(rawQuery), debounceMs);
+  };
+
+  if (tickerEl) tickerEl.addEventListener('input', () => queue(tickerEl.value));
+  if (nameEl)   nameEl.addEventListener('input',   () => queue(nameEl.value));
+
+  function applyAutofill(p) {
+    if (!p) return;
+    const fillIfBlank = (selector, value) => {
+      if (value == null || value === '') return;
+      const el = document.querySelector(selector);
+      if (!el) return;
+      if (mode === 'edit' && el.value.trim() !== '') return; // preserve user value
+      if (mode === 'add' && el.value.trim() !== '' && el !== tickerEl && el !== nameEl) {
+        // Don't overwrite something the user explicitly typed.
+        return;
+      }
+      el.value = value;
+      el.classList.add('autofilled');
+      // Quick decay on the visual hint.
+      setTimeout(() => el.classList.remove('autofilled'), 1500);
+    };
+    if (kind === 'stock') {
+      fillIfBlank('#hm-ticker', p.ticker);
+      fillIfBlank('#hm-name', p.name);
+      fillIfBlank('#hm-sector', p.sector);
+    } else {
+      fillIfBlank('#hm-symbol', p.symbol);
+      fillIfBlank('#hm-name', p.name);
+      fillIfBlank('#hm-category', p.category);
+      // Auto core/alt — only set if the user hasn't picked yet.
+      const cls = document.querySelector('#hm-classification');
+      if (cls && (cls.value === '' || cls.value === 'alt') && p.isCore) {
+        cls.value = 'core';
+        cls.classList.add('autofilled');
+        setTimeout(() => cls.classList.remove('autofilled'), 1500);
+      }
+    }
+  }
 }
 
 // Spec 9c — fetch /api/holdings/.../levels, render the suggestions card,
@@ -4122,12 +4196,28 @@ async function renderWatchlist() {
     const note = e.note
       ? `<span class="note-cell"><span class="note-bubble" data-note="${escapeHTML(e.note)}" tabindex="0" aria-label="Show note" title="Hover for full note">💬</span></span>`
       : '<span class="dim">—</span>';
+    // Spec 12 D4a — analyst Bear/Base/Bull. Crypto rows always show "—".
+    const fc = (v) => v != null ? `$${fmtNum2.format(v)}` : '<span class="dim">—</span>';
+    const forecastCell = `
+      <td class="num forecast-stack">
+        <div class="forecast-row">
+          <span class="forecast-label loss">Bear</span><span class="forecast-val">${fc(e.forecastLow)}</span>
+        </div>
+        <div class="forecast-row">
+          <span class="forecast-label">Base</span><span class="forecast-val">${fc(e.forecastMean)}</span>
+        </div>
+        <div class="forecast-row">
+          <span class="forecast-label gain">Bull</span><span class="forecast-val">${fc(e.forecastHigh)}</span>
+        </div>
+      </td>
+    `;
     return `
       <tr data-wid="${e.id}">
         <td><strong>${escapeHTML(e.ticker)}</strong></td>
         <td>${escapeHTML(e.companyName || '—')}</td>
         <td><span class="dim">${escapeHTML(e.sector || '—')}</span></td>
         <td class="num">${dash(e.currentPrice, fmtNum2)}</td>
+        ${forecastCell}
         <td class="num">${target}</td>
         <td><span class="${dist.cls}"${dist.title ? ` title="${escapeHTML(dist.title)}"` : ''}>${dist.label}</span></td>
         <td>${scoreCell}</td>
@@ -4167,6 +4257,7 @@ async function renderWatchlist() {
             ${sortHeader('companyName', 'Company')}
             ${sortHeader('sector',      'Sector')}
             ${sortHeader('currentPrice','Price', 'num')}
+            <th class="num" title="Analyst Bear/Base/Bull price targets (Yahoo financialData). Crypto: not available.">Forecast</th>
             ${sortHeader('target',      'Target', 'num')}
             ${sortHeader('distance',    'Distance')}
             ${sortHeader('score',       'Score')}

@@ -27,6 +27,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         atr_weekly, vol_tier_auto, setup_type, stage,
         tp1_hit_at, tp2_hit_at, time_stop_review_at,
         thesis_link, realized_pnl_usd, volatility_12m_pct,
+        forecast_low, forecast_mean, forecast_high, forecast_fetched_at,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -407,6 +408,9 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	var realizedPnL float64
 	// Spec 12 D5e columns:
 	var vol12m sql.NullFloat64
+	// Spec 12 D4a columns:
+	var fLow, fMean, fHigh sql.NullFloat64
+	var fFetched sql.NullInt64
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -421,6 +425,7 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&atrWeekly, &volTierAuto, &setupType, &stage,
 		&tp1HitAt, &tp2HitAt, &timeStopReviewAt,
 		&thesisLink, &realizedPnL, &vol12m,
+		&fLow, &fMean, &fHigh, &fFetched,
 		&updatedAt,
 	); err != nil {
 		return nil, err
@@ -428,6 +433,13 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	h.ThesisLink = nsToPtrNonEmpty(thesisLink)
 	h.RealizedPnLUSD = realizedPnL
 	h.Volatility12mPct = nfToPtr(vol12m)
+	h.ForecastLow = nfToPtr(fLow)
+	h.ForecastMean = nfToPtr(fMean)
+	h.ForecastHigh = nfToPtr(fHigh)
+	if fFetched.Valid {
+		t := time.Unix(fFetched.Int64, 0).UTC()
+		h.ForecastFetchedAt = &t
+	}
 	h.Support1 = nfToPtr(support1)
 	h.Support2 = nfToPtr(support2)
 	h.Resistance1 = nfToPtr(resistance1)

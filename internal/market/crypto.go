@@ -178,3 +178,47 @@ func fetchPctChange(ctx context.Context, geckoID string, days int) (float64, err
 	}
 	return ((last - first) / first) * 100, nil
 }
+
+// CryptoProfile is the shape returned by /api/lookup/ticker for crypto.
+type CryptoProfile struct {
+	Symbol   string `json:"symbol"`
+	Name     string `json:"name,omitempty"`
+	IsCore   bool   `json:"isCore"`
+	Category string `json:"category,omitempty"`
+	Source   string `json:"source"`
+}
+
+// LookupCryptoBySymbol resolves a symbol (BTC, ETH, SOL…) to a profile via
+// the SymbolToGeckoID map + CoinGecko's /coins/{id}. Spec 12 D7.
+//
+// We avoid /coins/list (1000+ rows, slow) and stick to the curated
+// SymbolToGeckoID table — that's the only set Fin holds anyway, and the
+// table is trivially extensible.
+func LookupCryptoBySymbol(ctx context.Context, symbol string) (p *CryptoProfile, retErr error) {
+	defer func() { health.Record(ctx, "coingecko", retErr) }()
+	sym := strings.ToUpper(strings.TrimSpace(symbol))
+	id, ok := SymbolToGeckoID[sym]
+	if !ok {
+		return nil, fmt.Errorf("unknown symbol %s (extend SymbolToGeckoID)", sym)
+	}
+	u := fmt.Sprintf("https://api.coingecko.com/api/v3/coins/%s?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false",
+		url.PathEscape(id))
+	var resp struct {
+		Name       string   `json:"name"`
+		Symbol     string   `json:"symbol"`
+		Categories []string `json:"categories"`
+	}
+	if err := httpGetJSON(ctx, u, &resp); err != nil {
+		return nil, err
+	}
+	out := &CryptoProfile{
+		Symbol: sym,
+		Name:   resp.Name,
+		IsCore: sym == "BTC" || sym == "ETH",
+		Source: "coingecko",
+	}
+	if len(resp.Categories) > 0 {
+		out.Category = resp.Categories[0]
+	}
+	return out, nil
+}

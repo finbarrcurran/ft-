@@ -169,6 +169,39 @@ func (s *Store) SetCryptoVolatility12m(ctx context.Context, userID int64, symbol
 	return err
 }
 
+// SetStockForecast writes Yahoo's Bear/Base/Bull consensus targets onto
+// stock_holdings by ticker. Spec 12 D4a. nil values are skipped — pass
+// the helper-friendly fp() wrapper if a target is unknown.
+func (s *Store) SetStockForecast(ctx context.Context, userID int64, ticker string, low, mean, high *float64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings SET
+		   forecast_low = ?, forecast_mean = ?, forecast_high = ?,
+		   forecast_fetched_at = strftime('%s','now')
+		 WHERE user_id = ? AND ticker = ? AND deleted_at IS NULL`,
+		fpVal(low), fpVal(mean), fpVal(high), userID, ticker)
+	return err
+}
+
+// SetWatchlistForecast — same shape for watchlist entries.
+func (s *Store) SetWatchlistForecast(ctx context.Context, userID int64, ticker string, low, mean, high *float64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE watchlist SET
+		   forecast_low = ?, forecast_mean = ?, forecast_high = ?,
+		   forecast_fetched_at = strftime('%s','now')
+		 WHERE user_id = ? AND ticker = ? AND deleted_at IS NULL`,
+		fpVal(low), fpVal(mean), fpVal(high), userID, ticker)
+	return err
+}
+
+// fpVal is a small NULL-friendly *float64 → any converter used by the
+// forecast setters above.
+func fpVal(p *float64) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
 // SetStockBeta writes the beta value for a stock by ticker. Beta seeds the
 // Spec 3 D11 suggested SL/TP columns. (Spec 3 D2/D11.)
 func (s *Store) SetStockBeta(ctx context.Context, userID int64, ticker string, beta float64) error {

@@ -169,6 +169,10 @@ func (s *Server) routes() {
 	// Spec 7: diagnostics + provider health.
 	s.mux.HandleFunc("GET /api/diagnostics", s.requireUserOrToken(s.handleDiagnostics))
 
+	// Spec 12 D7: smart-input lookup. Cookie-only — the Edit modal is
+	// browser-driven; no bot use case.
+	s.mux.HandleFunc("GET /api/lookup/ticker", s.requireUser(s.handleLookupTicker))
+
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
 

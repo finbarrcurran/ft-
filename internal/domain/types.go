@@ -139,6 +139,13 @@ type StockHolding struct {
 	// the daily cron from price_history.
 	Volatility12mPct *float64 `json:"volatility12mPct,omitempty"`
 
+	// Spec 12 D4a — analyst price-target consensus from Yahoo's
+	// financialData module. NULL until first cron pass.
+	ForecastLow       *float64   `json:"forecastLow,omitempty"`
+	ForecastMean      *float64   `json:"forecastMean,omitempty"`
+	ForecastHigh      *float64   `json:"forecastHigh,omitempty"`
+	ForecastFetchedAt *time.Time `json:"forecastFetchedAt,omitempty"`
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -273,6 +280,12 @@ type WatchlistEntry struct {
 	ATRWeekly    *float64 `json:"atrWeekly,omitempty"`
 	VolTierAuto  *string  `json:"volTierAuto,omitempty"`
 	SetupType    *string  `json:"setupType,omitempty"`
+
+	// Spec 12 D4a — analyst Bear/Base/Bull targets (stocks only).
+	ForecastLow       *float64   `json:"forecastLow,omitempty"`
+	ForecastMean      *float64   `json:"forecastMean,omitempty"`
+	ForecastHigh      *float64   `json:"forecastHigh,omitempty"`
+	ForecastFetchedAt *time.Time `json:"forecastFetchedAt,omitempty"`
 
 	UpdatedAt          time.Time  `json:"updatedAt"`
 }
