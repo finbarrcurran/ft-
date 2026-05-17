@@ -1573,7 +1573,7 @@ async function renderHeatmap() {
 
   content.innerHTML = legendHTML + `<div class="heatmap-wrap" id="heatmap-svg">loading…</div>
     <div class="heatmap-note">
-      ${ mode === 'pnl'         ? 'Tile area = |P&L| dollars. A position up $5k draws the same as one down $5k. Color still encodes today\\'s daily change.'
+      ${ mode === 'pnl'         ? "Tile area = |P&L| dollars. A position up $5k draws the same as one down $5k. Color still encodes today's daily change."
        : mode === 'my_holdings' ? 'Only your active stock holdings are shown. Empty sectors hidden.'
        :                          'Live prices populated on each refresh; tiles update silently when the background scheduler runs.'}
     </div>`;
