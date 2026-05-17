@@ -39,7 +39,9 @@ type stockMutationReq struct {
 	Resistance2 *float64 `json:"resistance2"`
 	SetupType   *string  `json:"setupType"`
 	Stage       *string  `json:"stage"`
-	Reason      *string  `json:"reason,omitempty"` // for update audit row
+	// Spec 10 — thesis URL (external doc).
+	ThesisLink *string `json:"thesisLink"`
+	Reason     *string `json:"reason,omitempty"` // for update audit row
 }
 
 type cryptoMutationReq struct {
@@ -64,7 +66,9 @@ type cryptoMutationReq struct {
 	Resistance2 *float64 `json:"resistance2"`
 	SetupType   *string  `json:"setupType"`
 	Stage       *string  `json:"stage"`
-	Reason      *string  `json:"reason,omitempty"`
+	// Spec 10 — thesis URL.
+	ThesisLink *string `json:"thesisLink"`
+	Reason     *string `json:"reason,omitempty"`
 }
 
 type restoreReq struct {
@@ -188,6 +192,16 @@ func (s *Server) handleUpdateStock(w http.ResponseWriter, r *http.Request) {
 	if req.Resistance2 == nil {
 		h.Resistance2 = old.Resistance2
 	}
+	// Spec 10 — preserve thesis_link if request omits it (nil) — only
+	// overwrite when caller explicitly sends (even with empty string,
+	// which clears).
+	if req.ThesisLink == nil {
+		h.ThesisLink = old.ThesisLink
+	} else {
+		h.ThesisLink = trimStrPtr(req.ThesisLink)
+	}
+	// realized_pnl_usd is owned by the transactions pipeline.
+	h.RealizedPnLUSD = old.RealizedPnLUSD
 
 	if err := s.store.UpdateStockHolding(r.Context(), h); err != nil {
 		mapStoreError(w, err)
@@ -386,6 +400,13 @@ func (s *Server) handleUpdateCrypto(w http.ResponseWriter, r *http.Request) {
 	if req.Resistance2 == nil {
 		h.Resistance2 = old.Resistance2
 	}
+	// Spec 10
+	if req.ThesisLink == nil {
+		h.ThesisLink = old.ThesisLink
+	} else {
+		h.ThesisLink = trimStrPtr(req.ThesisLink)
+	}
+	h.RealizedPnLUSD = old.RealizedPnLUSD
 
 	if err := s.store.UpdateCryptoHolding(r.Context(), h); err != nil {
 		mapStoreError(w, err)
@@ -521,6 +542,8 @@ func stockFromReq(req stockMutationReq) *domain.StockHolding {
 		Resistance2: req.Resistance2,
 		SetupType:   trimStrPtr(req.SetupType),
 		Stage:       stage,
+		// Spec 10
+		ThesisLink: trimStrPtr(req.ThesisLink),
 	}
 }
 
@@ -551,6 +574,8 @@ func cryptoFromReq(req cryptoMutationReq) *domain.CryptoHolding {
 		Resistance2: req.Resistance2,
 		SetupType:   trimStrPtr(req.SetupType),
 		Stage:       stage,
+		// Spec 10
+		ThesisLink: trimStrPtr(req.ThesisLink),
 	}
 }
 

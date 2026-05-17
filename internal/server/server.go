@@ -147,6 +147,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/performance/cohort/{key}", s.requireUserOrToken(s.handlePerformanceCohortDrill))
 	s.mux.HandleFunc("GET /api/performance/export.csv", s.requireUserOrToken(s.handlePerformanceExport))
 
+	// Spec 10: Transactions + dividends + tax lots.
+	s.mux.HandleFunc("GET /api/transactions", s.requireUser(s.handleListTransactions))
+	s.mux.HandleFunc("POST /api/transactions", s.requireUser(s.handleCreateTransaction))
+	s.mux.HandleFunc("POST /api/transactions/{id}/supersede", s.requireUser(s.handleSupersedeTransaction))
+	s.mux.HandleFunc("GET /api/holdings/stocks/{id}/taxlots", s.requireUser(s.handleStockTaxLots))
+	s.mux.HandleFunc("GET /api/holdings/crypto/{id}/taxlots", s.requireUser(s.handleCryptoTaxLots))
+	s.mux.HandleFunc("GET /api/dividends", s.requireUser(s.handleListDividends))
+	s.mux.HandleFunc("POST /api/dividends", s.requireUser(s.handleCreateDividend))
+
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
 

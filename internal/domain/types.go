@@ -130,6 +130,10 @@ type StockHolding struct {
 	TP2HitAt         *time.Time `json:"tp2HitAt,omitempty"`
 	TimeStopReviewAt *string    `json:"timeStopReviewAt,omitempty"` // ISO YYYY-MM-DD
 
+	// Spec 10 — per-holding detail extensions.
+	ThesisLink     *string `json:"thesisLink,omitempty"` // external URL (Notion, Google Doc, ...)
+	RealizedPnLUSD float64 `json:"realizedPnlUsd"`       // derived from transactions; cached
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -185,6 +189,10 @@ type CryptoHolding struct {
 	TP1HitAt         *time.Time `json:"tp1HitAt,omitempty"`
 	TP2HitAt         *time.Time `json:"tp2HitAt,omitempty"`
 	TimeStopReviewAt *string    `json:"timeStopReviewAt,omitempty"`
+
+	// Spec 10 — per-holding detail extensions.
+	ThesisLink     *string `json:"thesisLink,omitempty"`
+	RealizedPnLUSD float64 `json:"realizedPnlUsd"`
 
 	UpdatedAt time.Time `json:"updatedAt"`
 }

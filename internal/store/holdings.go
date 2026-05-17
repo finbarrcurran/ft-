@@ -26,6 +26,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         support_1, support_2, resistance_1, resistance_2,
         atr_weekly, vol_tier_auto, setup_type, stage,
         tp1_hit_at, tp2_hit_at, time_stop_review_at,
+        thesis_link, realized_pnl_usd,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -147,6 +148,7 @@ func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) 
 		   strategy_note = ?, note = ?,
 		   support_1 = ?, support_2 = ?, resistance_1 = ?, resistance_2 = ?,
 		   setup_type = ?, stage = ?,
+		   thesis_link = ?,
 		   updated_at = strftime('%s','now')
 		 WHERE user_id = ? AND id = ?`,
 		h.Name, strPtrToNull(h.Ticker), strPtrToNull(h.Category), strPtrToNull(h.Sector),
@@ -155,6 +157,7 @@ func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) 
 		h.StrategyNote, strPtrToNull(h.Note),
 		fp(h.Support1), fp(h.Support2), fp(h.Resistance1), fp(h.Resistance2),
 		strPtrToNull(h.SetupType), h.Stage,
+		strPtrToNull(h.ThesisLink),
 		h.UserID, h.ID,
 	)
 	return err
@@ -204,6 +207,7 @@ const cryptoSelectCols = `id, user_id, name, symbol, classification, is_core, ca
         support_1, support_2, resistance_1, resistance_2,
         atr_weekly, vol_tier_auto, setup_type, stage,
         tp1_hit_at, tp2_hit_at, time_stop_review_at,
+        thesis_link, realized_pnl_usd,
         updated_at`
 
 func (s *Store) ListCryptoHoldings(ctx context.Context, userID int64) ([]*domain.CryptoHolding, error) {
@@ -320,6 +324,7 @@ func (s *Store) UpdateCryptoHolding(ctx context.Context, h *domain.CryptoHolding
 		   strategy_note = ?, note = ?,
 		   support_1 = ?, support_2 = ?, resistance_1 = ?, resistance_2 = ?,
 		   setup_type = ?, stage = ?,
+		   thesis_link = ?,
 		   updated_at = strftime('%s','now')
 		 WHERE user_id = ? AND id = ?`,
 		h.Name, h.Symbol, h.Classification, isCore, tier,
@@ -329,6 +334,7 @@ func (s *Store) UpdateCryptoHolding(ctx context.Context, h *domain.CryptoHolding
 		h.StrategyNote, strPtrToNull(h.Note),
 		fp(h.Support1), fp(h.Support2), fp(h.Resistance1), fp(h.Resistance2),
 		strPtrToNull(h.SetupType), h.Stage,
+		strPtrToNull(h.ThesisLink),
 		h.UserID, h.ID,
 	)
 	return err
@@ -389,6 +395,9 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	var atrWeekly sql.NullFloat64
 	var volTierAuto, setupType, stage, timeStopReviewAt sql.NullString
 	var tp1HitAt, tp2HitAt sql.NullInt64
+	// Spec 10 columns:
+	var thesisLink sql.NullString
+	var realizedPnL float64
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -402,10 +411,13 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&support1, &support2, &resistance1, &resistance2,
 		&atrWeekly, &volTierAuto, &setupType, &stage,
 		&tp1HitAt, &tp2HitAt, &timeStopReviewAt,
+		&thesisLink, &realizedPnL,
 		&updatedAt,
 	); err != nil {
 		return nil, err
 	}
+	h.ThesisLink = nsToPtrNonEmpty(thesisLink)
+	h.RealizedPnLUSD = realizedPnL
 	h.Support1 = nfToPtr(support1)
 	h.Support2 = nfToPtr(support2)
 	h.Resistance1 = nfToPtr(resistance1)
@@ -473,6 +485,9 @@ func scanCrypto(r Scannable) (*domain.CryptoHolding, error) {
 	var atrWeekly sql.NullFloat64
 	var volTierAuto, setupType, stage, timeStopReviewAt sql.NullString
 	var tp1HitAt, tp2HitAt sql.NullInt64
+	// Spec 10 columns:
+	var thesisLink sql.NullString
+	var realizedPnL float64
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &h.Symbol, &h.Classification, &isCore, &category, &wallet,
 		&h.QuantityHeld, &h.QuantityStaked,
@@ -483,10 +498,13 @@ func scanCrypto(r Scannable) (*domain.CryptoHolding, error) {
 		&support1, &support2, &resistance1, &resistance2,
 		&atrWeekly, &volTierAuto, &setupType, &stage,
 		&tp1HitAt, &tp2HitAt, &timeStopReviewAt,
+		&thesisLink, &realizedPnL,
 		&updatedAt,
 	); err != nil {
 		return nil, err
 	}
+	h.ThesisLink = nsToPtrNonEmpty(thesisLink)
+	h.RealizedPnLUSD = realizedPnL
 	h.IsCore = isCore != 0
 	h.Category = nsToPtr(category)
 	h.Wallet = nsToPtr(wallet)
