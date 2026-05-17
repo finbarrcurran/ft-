@@ -185,6 +185,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/sector-rotation/digests", s.requireUserOrToken(s.handleSectorDigests))
 	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}/sector", s.requireUser(s.handleUpdateStockSector))
 
+	// Spec 14: Per-holding theses.
+	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis", s.requireUser(s.handleGetHoldingThesis))
+	s.mux.HandleFunc("PUT /api/holdings/{kind}/{id}/thesis", s.requireUser(s.handlePutHoldingThesis))
+	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis/versions", s.requireUser(s.handleHoldingThesisVersions))
+	s.mux.HandleFunc("PUT /api/holdings/{kind}/{id}/thesis/status", s.requireUser(s.handleHoldingThesisStatus))
+	s.mux.HandleFunc("POST /api/holdings/{kind}/{id}/thesis/preview", s.requireUser(s.handleHoldingThesisPreview))
+
 	// Spec 9g: Scorecard Repository.
 	s.mux.HandleFunc("GET /api/scorecards", s.requireUserOrToken(s.handleScorecardsList))
 	s.mux.HandleFunc("GET /api/scorecards/{code}", s.requireUserOrToken(s.handleScorecardGet))

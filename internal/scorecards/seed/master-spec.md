@@ -58,7 +58,8 @@ Top bar: brand · market pill (clickable for all 7 exchanges, click-to-focus) ·
 | 0017 | `spec12_batch_c` | Forecast columns (low/mean/high/fetched_at) on watchlist + stock_holdings |
 | 0018 | `spec12_currency` | `stock_holdings.currency` (autofilled from Yahoo) |
 | 0019 | `sector_rotation` | `sector_universe` (34 rows), `sector_snapshots`, `user_sector_ordering`, `sector_rotation_digests`. `sector_universe_id` on holdings + watchlist. 22/24 holdings backfilled |
-| 0020 | `scorecards` | `sector_scorecards`, `sector_scorecard_versions`. Seeded 3 docs (Philosophy + Energy-Power + Hydrocarbons + this Master Spec) |
+| 0020 | `scorecards` | `sector_scorecards`, `sector_scorecard_versions`. Seeded 4 docs (Philosophy + Energy-Power + Hydrocarbons + Master Spec) |
+| 0021 | `holding_theses` | `holding_theses` (one per kind+holding_id), `holding_thesis_versions` (append-only history) |
 
 ## 4. Background jobs
 
@@ -114,6 +115,8 @@ Top bar: brand · market pill (clickable for all 7 exchanges, click-to-focus) ·
 **Spec 9f — Sector rotation:** `GET /api/sector-rotation/{metrics,sectors,digests}` **T**, `POST/DELETE /api/sector-rotation/ordering`, `POST /api/sector-rotation/refresh` **T**
 
 **Spec 9g — Scorecards:** `GET /api/scorecards{,/{code}{,/versions}}` **T**, `PUT /api/scorecards/{code}`, `POST /api/scorecards/preview`, `PUT /api/scorecards/{code}/status`
+
+**Spec 14 — Per-holding theses:** `GET/PUT /api/holdings/{kind}/{id}/thesis`, `GET /api/holdings/{kind}/{id}/thesis/versions`, `PUT /api/holdings/{kind}/{id}/thesis/status`, `POST /api/holdings/{kind}/{id}/thesis/preview`
 
 **Bot:** `GET /api/bot/{alerts,holdings/summary,holdings/movers}` **T**, `POST /api/bot/alerts/ack` **T**, `POST /api/bot/refresh` **T**
 
@@ -200,7 +203,7 @@ ft token list                            list tokens (no plaintext)
 | 9h | Real-time technicals monitoring (Finnhub WebSocket level breaks) | Drafted in handoff; defer until alert noise is a felt problem |
 | 9i | Adapter scoring engine | Drafted in handoff; depends on 4-5 adapters drafted first |
 | 9j | Additional sector adapters (Pharma, Defense, Mining, Industrial, Semi/AI-Infra) | User-authored as needed |
-| 14 | Thesis repository inside FT (long-form per-holding) | **Building next per 2026-05-17 decision** |
+| 14 | Thesis repository inside FT (long-form per-holding) | ✅ Shipped 2026-05-17 — Detail page Thesis section gains 📄 In-app thesis subsection with goldmark render + textarea editor with live preview + Save / Save-as-new-version + history modal. Migration 0021 + reuses scorecards.Render. |
 | 15 | Investment strategy / allocation framework | Depends on Spec 12 D2 ✓ |
 | 16 | Alert strategy overhaul (851-alert problem) | Needs alert-noise audit first |
 | 13 (numbering collision) | "Test coverage" (v2 doc) vs "Score automation engine" (Spec 12). Rename one | Open |
@@ -211,6 +214,7 @@ ft token list                            list tokens (no plaintext)
 | Version | Date | Notes |
 |---------|------|-------|
 | 1.0 | 2026-05-17 | Initial author at the close of Specs 9f + 9g build. Captures every spec 1 → 12 + 9b/c/c.1/d/f/g + 7 + 10 + 11 + 11b. |
+| 1.1 | 2026-05-17 | Spec 14 (per-holding theses) shipped. Added migration 0021 + thesis endpoints + Detail-page UI block. |
 
 ---
 

@@ -4853,10 +4853,10 @@ async function renderHoldingDetail({ kind, id }) {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading detail…</div>';
 
-  let holding, txns, taxlots, audit, divs, notes;
+  let holding, txns, taxlots, audit, divs, notes, thesisData;
   try {
     const path = kind === 'stock' ? 'stocks' : 'crypto';
-    const [hRes, txnRes, lotRes, auditRes, divRes, notesRes] = await Promise.all([
+    const [hRes, txnRes, lotRes, auditRes, divRes, notesRes, thRes] = await Promise.all([
       api(`/api/holdings/${path}`),
       api(`/api/transactions?holdingKind=${kind}&holdingId=${id}`),
       api(`/api/holdings/${path}/${id}/taxlots`),
@@ -4864,6 +4864,8 @@ async function renderHoldingDetail({ kind, id }) {
       kind === 'stock' ? api(`/api/dividends?holdingId=${id}`) : Promise.resolve({ dividends: [] }),
       // Spec 11 D4 — thesis notes for this holding.
       api(`/api/notes?targetKind=holding&targetId=${id}`),
+      // Spec 14 — in-app thesis (returns {thesis: null} when none yet).
+      api(`/api/holdings/${kind}/${id}/thesis`).catch(() => ({ thesis: null })),
     ]);
     holding = (hRes.holdings || []).find((h) => h.id === id);
     txns = txnRes.transactions || [];
@@ -4871,6 +4873,7 @@ async function renderHoldingDetail({ kind, id }) {
     audit = (auditRes.audit || []).filter((a) => a.holdingKind === kind && a.holdingId === id).slice(0, 20);
     divs = divRes.dividends || [];
     notes = notesRes.notes || [];
+    thesisData = thRes;
   } catch (err) {
     content.innerHTML = `<div class="empty"><div class="loss">detail failed: ${escapeHTML(err.message)}</div></div>`;
     return;
@@ -5033,17 +5036,46 @@ async function renderHoldingDetail({ kind, id }) {
     `;
   }
 
-  // Thesis section — Spec 11 D4 notes list + Spec 10 link field.
+  // Thesis section — Spec 14 in-app body + Spec 11 D4 notes + Spec 10 external link.
   const thesisLink = holding.thesisLink || '';
   const notesHTML = renderNotesList(notes);
+  const thesis = thesisData?.thesis || null;
+  const thesisHTML = thesisData?.html || '';
+
+  // Sub-block: in-app long-form thesis. "Start one" CTA when absent.
+  let thesisBodyBlock;
+  if (thesis) {
+    const statusTone = thesis.status === 'locked' ? 'gain' : thesis.status === 'needs-review' ? 'amber-text' : 'dim';
+    thesisBodyBlock = `
+      <div class="thesis-body-block">
+        <div class="thesis-body-head">
+          <span><strong>📄 In-app thesis</strong> · v${escapeHTML(thesis.currentVersion)} · <span class="${statusTone}">${escapeHTML(thesis.status)}</span></span>
+          <span class="thesis-body-actions">
+            <button class="btn-ghost" id="dh-thesis-edit">✎ Edit</button>
+            <button class="btn-ghost" id="dh-thesis-versions">History</button>
+          </span>
+        </div>
+        <div class="thesis-body-rendered">${thesisHTML}</div>
+      </div>
+    `;
+  } else {
+    thesisBodyBlock = `
+      <div class="thesis-body-block thesis-body-empty">
+        <p class="dim"><strong>📄 No in-app thesis yet.</strong> Start one to write the long-form argument for this holding.</p>
+        <button class="btn-ghost" id="dh-thesis-edit">+ Start thesis</button>
+      </div>
+    `;
+  }
+
   const thesisSection = `
     <section class="detail-section">
       <h3 class="rh-side" style="display:flex; justify-content:space-between; align-items:center">
         <span>Thesis <span class="dim" style="font-size:0.78rem; font-weight:normal">(${notes.length} note${notes.length === 1 ? '' : 's'})</span></span>
         <button class="btn-ghost" id="dh-add-note">+ Add note</button>
       </h3>
-      <div class="form-row" style="margin-bottom:0.6rem">
-        <label for="dh-thesis-link">Thesis link (URL)</label>
+      ${thesisBodyBlock}
+      <div class="form-row" style="margin: 0.8rem 0 0.6rem 0">
+        <label for="dh-thesis-link">External thesis link <span class="dim" style="font-size:0.75rem">(Notion / Google Doc)</span></label>
         <input id="dh-thesis-link" type="text" value="${escapeHTML(thesisLink)}" placeholder="https://notion.so/.../your-thesis" />
         <button class="btn-ghost" id="dh-thesis-save" style="margin-left:0.5rem">Save</button>
         ${thesisLink ? `<a class="btn-ghost" href="${escapeHTML(thesisLink)}" target="_blank" rel="noopener noreferrer" style="margin-left:0.4rem">Open ↗</a>` : ''}
@@ -5089,6 +5121,13 @@ async function renderHoldingDetail({ kind, id }) {
     loadActiveTab();
   });
   $('#dh-add-txn').addEventListener('click', () => openAddTxnModal({ kind, id, ticker: tickerOrSym, currentPrice }));
+  // Spec 14 — in-app thesis editor.
+  document.querySelector('#dh-thesis-edit')?.addEventListener('click', () => {
+    openThesisEditor({ kind, id, ticker: tickerOrSym, name: holding.name, thesis: thesisData?.thesis || null });
+  });
+  document.querySelector('#dh-thesis-versions')?.addEventListener('click', () => {
+    openThesisVersions({ kind, id, ticker: tickerOrSym });
+  });
   $('#dh-thesis-save').addEventListener('click', async () => {
     const newLink = $('#dh-thesis-link').value.trim();
     try {
@@ -5527,6 +5566,134 @@ async function openAddNoteModal({ targetKind, targetId, ticker, holdingKind, exi
       errEl.textContent = ex.message;
     }
   });
+}
+
+// ============================================================================
+// Spec 14 — Per-holding thesis editor + version history
+// ============================================================================
+
+function openThesisEditor({ kind, id, ticker, name, thesis }) {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  const startingMarkdown = thesis?.markdownCurrent || `# Thesis — ${name || ticker}\n\n## Why I own this\n\n_Write the core argument here._\n\n## Catalysts\n\n- \n\n## Risks\n\n- \n\n## Exit conditions\n\n- `;
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal sc-editor-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">${thesis ? 'Edit thesis' : 'Start thesis'} — ${escapeHTML(ticker)}</div>
+            <div class="desc">${thesis ? `Current v${escapeHTML(thesis.currentVersion)}. Save (no bump) or Save as new version.` : 'First save creates v1. Use "Save as new version" for substantive rewrites.'}</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body sc-editor-body">
+          <div class="sc-editor-split">
+            <textarea id="th-md-text" class="sc-md-textarea" spellcheck="true">${escapeHTML(startingMarkdown)}</textarea>
+            <div id="th-md-preview" class="sc-md-preview"></div>
+          </div>
+          <div class="error" id="th-edit-err"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="th-cancel">Cancel</button>
+          <button class="btn-ghost" id="th-save-version">Save as new version…</button>
+          <button class="btn-primary" id="th-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#th-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+
+  const ta = $('#th-md-text');
+  const pv = $('#th-md-preview');
+  let previewTimer = null;
+  const refreshPreview = async () => {
+    try {
+      const res = await fetch(`/api/holdings/${kind}/${id}/thesis/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: ta.value,
+      });
+      pv.innerHTML = await res.text();
+    } catch (_) { /* keep last preview */ }
+  };
+  refreshPreview();
+  ta.addEventListener('input', () => {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(refreshPreview, 300);
+  });
+
+  $('#th-save').addEventListener('click', async () => {
+    const err = $('#th-edit-err'); err.textContent = '';
+    try {
+      await api(`/api/holdings/${kind}/${id}/thesis`, {
+        method: 'PUT',
+        body: JSON.stringify({ markdown: ta.value }),
+      });
+      closeImportModal();
+      renderHoldingDetail({ kind, id });
+    } catch (e) { err.textContent = e.message; }
+  });
+  $('#th-save-version').addEventListener('click', async () => {
+    const err = $('#th-edit-err'); err.textContent = '';
+    const version = prompt('New version string?', thesis ? '' : '1');
+    if (!version) return;
+    const note = prompt('Changelog note (one line)?', '') || '';
+    try {
+      await api(`/api/holdings/${kind}/${id}/thesis`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          markdown: ta.value,
+          asNewVersion: { version, changelogNote: note },
+        }),
+      });
+      closeImportModal();
+      renderHoldingDetail({ kind, id });
+    } catch (e) { err.textContent = e.message; }
+  });
+}
+
+async function openThesisVersions({ kind, id, ticker }) {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Thesis history — ${escapeHTML(ticker)}</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div id="th-versions-list">loading…</div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  try {
+    const r = await api(`/api/holdings/${kind}/${id}/thesis/versions`);
+    const versions = r.versions || [];
+    if (versions.length === 0) {
+      $('#th-versions-list').innerHTML = '<p class="dim">No version history yet — first save creates v1.</p>';
+      return;
+    }
+    $('#th-versions-list').innerHTML = versions.map(v => `
+      <div class="sc-version-row">
+        <div><strong>v${escapeHTML(v.version)}</strong> <span class="dim">${new Date(v.createdAt).toLocaleString()}</span></div>
+        ${v.changelogNote ? `<div class="dim" style="font-size:0.85rem">${escapeHTML(v.changelogNote)}</div>` : ''}
+      </div>
+    `).join('');
+  } catch (e) {
+    $('#th-versions-list').innerHTML = `<p class="loss">load failed: ${escapeHTML(e.message)}</p>`;
+  }
 }
 
 // ============================================================================
