@@ -29,6 +29,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         thesis_link, realized_pnl_usd, volatility_12m_pct,
         forecast_low, forecast_mean, forecast_high, forecast_fetched_at,
         currency,
+        sector_universe_id,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -416,6 +417,8 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	var fFetched sql.NullInt64
 	// Spec 12 D7 AC #15:
 	var currency sql.NullString
+	// Spec 9f D1:
+	var sectorUniverseID sql.NullInt64
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -432,11 +435,16 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&thesisLink, &realizedPnL, &vol12m,
 		&fLow, &fMean, &fHigh, &fFetched,
 		&currency,
+		&sectorUniverseID,
 		&updatedAt,
 	); err != nil {
 		return nil, err
 	}
 	h.Currency = nsToPtrNonEmpty(currency)
+	if sectorUniverseID.Valid {
+		v := sectorUniverseID.Int64
+		h.SectorUniverseID = &v
+	}
 	h.ThesisLink = nsToPtrNonEmpty(thesisLink)
 	h.RealizedPnLUSD = realizedPnL
 	h.Volatility12mPct = nfToPtr(vol12m)

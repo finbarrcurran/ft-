@@ -121,6 +121,9 @@ func validPreferenceValue(key, value string) bool {
 	case "pnl_currency":
 		// Spec 12 D5g — toggle for stocks-table P&L display.
 		return value == "USD" || value == "EUR"
+	case "jordi_current_sector_read":
+		// Spec 9f D7 — free-text macro strip note. Bounded to avoid abuse.
+		return len(value) > 0 && len(value) <= 500
 	}
 	// Spec 9c.1 — llm_* keys are bounded TEXT/bool/number values; accept
 	// anything that survives the generic length check above.

@@ -24,6 +24,7 @@ import (
 	"ft/internal/marketdata"
 	"ft/internal/performance"
 	"ft/internal/refresh"
+	"ft/internal/sector_rotation"
 	"ft/internal/server"
 	"ft/internal/store"
 	"ft/internal/technicals"
@@ -60,6 +61,10 @@ func main() {
 		runBackfillBars(os.Args[2:])
 	case "perf-derive":
 		runPerfDerive(os.Args[2:])
+	case "sector-backfill":
+		runSectorBackfill(os.Args[2:])
+	case "sector-ingest":
+		runSectorIngest(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 	default:
@@ -134,6 +139,8 @@ USAGE
   ft token list [--user-id N]                list service tokens (no plaintext)
   ft backfill-bars [--user-id N] [--range 2y]  fetch 2y daily OHLC for all holdings (Spec 9c)
   ft perf-derive [--user-id N]                  derive closed_trades + regen snapshots (Spec 9d)
+  ft sector-backfill [--months 14]              one-off Spec 9f 14-month ETF snapshot backfill
+  ft sector-ingest                              one Spec 9f daily sector ingest (manual trigger)
   ft help                  print this usage
 
 ENVIRONMENT
@@ -260,6 +267,18 @@ func runServe() {
 			ctx, cancel := context.WithTimeout(bgCtx, 15*time.Minute)
 			defer cancel()
 			dailySvc.RunDailyJob(ctx, 1, 365)
+		})
+	}()
+
+	// Spec 9f D2 — daily sector ETF ingest at 22:00 UTC (after US close,
+	// before APAC open). Independent of the 04:00 UTC job so a stalled
+	// Yahoo call in one path can't block the other.
+	go func() {
+		scheduleAt(bgCtx, 22, 0, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Minute)
+			defer cancel()
+			sector_rotation.IngestDaily(ctx, st, time.Now().UTC())
+			sector_rotation.BustCache()
 		})
 	}()
 
@@ -397,6 +416,50 @@ func runPerfDerive(args []string) {
 	fmt.Println("snapshots regenerated.")
 }
 
+// Spec 9f — one-off 14-month sector ETF backfill. Run once after the
+// 0019 migration lands; subsequent days are covered by the 22:00 UTC cron.
+func runSectorBackfill(args []string) {
+	fs := flag.NewFlagSet("sector-backfill", flag.ExitOnError)
+	months := fs.Int("months", 14, "history depth in months")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	res := sector_rotation.BackfillHistory(ctx, st, *months)
+	fmt.Printf("sector-backfill: sectors_ok=%d/%d errs=%d took=%s\n",
+		res.SectorsOK, res.SectorsTried, len(res.Errors),
+		res.FinishedAt.Sub(res.StartedAt).Round(time.Second))
+	for _, e := range res.Errors {
+		fmt.Println("  err:", e)
+	}
+}
+
+// Spec 9f — manual trigger of the daily ingest (admin/debug).
+func runSectorIngest(args []string) {
+	fs := flag.NewFlagSet("sector-ingest", flag.ExitOnError)
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	res := sector_rotation.IngestDaily(ctx, st, time.Now().UTC())
+	fmt.Printf("sector-ingest: sectors_ok=%d/%d errs=%d\n",
+		res.SectorsOK, res.SectorsTried, len(res.Errors))
+}
+
 // runToken handles `ft token create` and `ft token list`.
 //
 // Plaintext token is printed ONCE on creation. Only the sha256 hash is
@@ -467,5 +530,28 @@ func must(what string, err error) {
 	if err != nil {
 		slog.Error(what, "err", err)
 		os.Exit(1)
+	}
+}
+
+// scheduleAt runs `fn` once at the next HH:MM UTC then every 24h after,
+// for the lifetime of `ctx`. Spec 9f D2 daily ingest uses this for 22:00
+// UTC. (refresh.ScheduleDailyJob already exists for 04:00 UTC but it's
+// hardcoded; keeping a small generic helper here for additional cron
+// slots.)
+func scheduleAt(ctx context.Context, hour, minute int, fn func()) {
+	for {
+		now := time.Now().UTC()
+		next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
+		if !next.After(now) {
+			next = next.Add(24 * time.Hour)
+		}
+		wait := next.Sub(now)
+		slog.Info("scheduled job", "fireAt", next.Format(time.RFC3339), "in", wait.Round(time.Second))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		fn()
 	}
 }

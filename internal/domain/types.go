@@ -151,6 +151,10 @@ type StockHolding struct {
 	// (everything stays USD-denominated); pure metadata for display.
 	Currency *string `json:"currency,omitempty"`
 
+	// Spec 9f D1 — sector taxonomy linkage. Nullable; backfilled from
+	// Sector_Holdings_Mapping_v1.md at migration 0019. User can re-tag.
+	SectorUniverseID *int64 `json:"sectorUniverseId,omitempty"`
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -291,6 +295,10 @@ type WatchlistEntry struct {
 	ForecastMean      *float64   `json:"forecastMean,omitempty"`
 	ForecastHigh      *float64   `json:"forecastHigh,omitempty"`
 	ForecastFetchedAt *time.Time `json:"forecastFetchedAt,omitempty"`
+
+	// Spec 9f D1 — sector taxonomy linkage. Carries through to holding
+	// on promote (Spec 4 D6 atomic tx).
+	SectorUniverseID *int64 `json:"sectorUniverseId,omitempty"`
 
 	UpdatedAt          time.Time  `json:"updatedAt"`
 }

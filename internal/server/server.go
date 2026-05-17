@@ -173,6 +173,15 @@ func (s *Server) routes() {
 	// browser-driven; no bot use case.
 	s.mux.HandleFunc("GET /api/lookup/ticker", s.requireUser(s.handleLookupTicker))
 
+	// Spec 9f: Sector Rotation Tracker. Cookie-or-token throughout.
+	s.mux.HandleFunc("GET /api/sector-rotation/metrics", s.requireUserOrToken(s.handleSectorMetrics))
+	s.mux.HandleFunc("GET /api/sector-rotation/sectors", s.requireUserOrToken(s.handleSectorUniverse))
+	s.mux.HandleFunc("POST /api/sector-rotation/ordering", s.requireUser(s.handleSectorOrdering))
+	s.mux.HandleFunc("DELETE /api/sector-rotation/ordering", s.requireUser(s.handleSectorOrderingReset))
+	s.mux.HandleFunc("POST /api/sector-rotation/refresh", s.requireUserOrToken(s.handleSectorRefresh))
+	s.mux.HandleFunc("GET /api/sector-rotation/digests", s.requireUserOrToken(s.handleSectorDigests))
+	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}/sector", s.requireUser(s.handleUpdateStockSector))
+
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
 

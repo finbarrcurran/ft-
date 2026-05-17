@@ -15,6 +15,7 @@ const watchlistCols = `id, user_id, ticker, kind, company_name, sector,
         support_1, support_2, resistance_1, resistance_2,
         atr_weekly, vol_tier_auto, setup_type,
         forecast_low, forecast_mean, forecast_high, forecast_fetched_at,
+        sector_universe_id,
         updated_at`
 
 // ListWatchlist returns active (non-deleted) entries for a user, newest first.
@@ -136,6 +137,8 @@ func scanWatchlist(r scanner) (*domain.WatchlistEntry, error) {
 		// Spec 12 D4a
 		fLow, fMean, fHigh sql.NullFloat64
 		fFetched           sql.NullInt64
+		// Spec 9f D1
+		sectorUniverseID sql.NullInt64
 	)
 	err := r.Scan(
 		&e.ID, &e.UserID, &e.Ticker, &e.Kind, &e.CompanyName, &e.Sector,
@@ -143,6 +146,7 @@ func scanWatchlist(r scanner) (*domain.WatchlistEntry, error) {
 		&e.ThesisLink, &e.Note, &addedAt, &promotedID, &deletedAt,
 		&s1, &s2, &r1, &r2, &atrW, &volAuto, &setup,
 		&fLow, &fMean, &fHigh, &fFetched,
+		&sectorUniverseID,
 		&updatedAt,
 	)
 	if err != nil {
@@ -203,6 +207,11 @@ func scanWatchlist(r scanner) (*domain.WatchlistEntry, error) {
 	if fFetched.Valid {
 		t := time.Unix(fFetched.Int64, 0).UTC()
 		e.ForecastFetchedAt = &t
+	}
+	// Spec 9f D1
+	if sectorUniverseID.Valid {
+		v := sectorUniverseID.Int64
+		e.SectorUniverseID = &v
 	}
 	return &e, nil
 }
