@@ -2640,7 +2640,10 @@ function renderTaxLotsSection(lots) {
   }).join('');
   return `
     <section class="settings-block">
-      <h3 class="settings-h3">Tax lots <span class="dim" style="font-size:0.78rem; font-weight:normal">(FIFO; ${lots.length} open; "LT" = held ≥365 days)</span></h3>
+      <h3 class="settings-h3" style="display:flex; justify-content:space-between; align-items:center">
+        <span>Tax lots <span class="dim" style="font-size:0.78rem; font-weight:normal">(FIFO; ${lots.length} open; "LT" = held ≥365 days)</span></span>
+        <button class="btn-ghost" id="txn-import-btn">Import historical CSV…</button>
+      </h3>
       <div class="tablewrap"><table class="holdings"><thead><tr>
         <th>Ticker</th><th>Opened</th><th class="num">Held</th>
         <th class="num">Qty open</th><th class="num">Cost / unit</th>
@@ -2648,6 +2651,73 @@ function renderTaxLotsSection(lots) {
       </tr></thead><tbody>${rows}</tbody></table></div>
     </section>
   `;
+}
+
+// Spec 10 D10 — Import historical transactions CSV.
+function openTxnImportModal() {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Import historical transactions</div>
+            <div class="desc">CSV with header: ticker, holding_kind, executed_at, txn_type, quantity, price_usd, [fees_usd, venue, note]</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <p class="dim" style="font-size:0.85rem">
+            Rows matched to existing holdings by <strong>ticker</strong> (case-insensitive).
+            Rows with no matching holding are skipped. Re-importing the same file
+            duplicates rows — use this once per data source.
+          </p>
+          <input id="ti-file" type="file" accept=".csv" />
+          <div class="error" id="ti-err"></div>
+          <div id="ti-result" style="margin-top:0.8rem; font-size:0.85rem"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="ti-cancel">Close</button>
+          <button class="btn-primary" id="ti-upload">Upload</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#ti-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#ti-upload').addEventListener('click', async () => {
+    const err = $('#ti-err'); err.textContent = '';
+    const result = $('#ti-result'); result.innerHTML = '';
+    const file = $('#ti-file').files[0];
+    if (!file) { err.textContent = 'pick a file first'; return; }
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const resp = await fetch('/api/transactions/import', { method: 'POST', credentials: 'same-origin', body: fd });
+      if (!resp.ok) {
+        const text = await resp.text();
+        err.textContent = `HTTP ${resp.status}: ${text}`;
+        return;
+      }
+      const d = await resp.json();
+      const s = d.summary || {};
+      result.innerHTML = `
+        <div class="gain">✓ Imported ${s.imported} of ${s.total} rows</div>
+        ${s.skipped ? `<div class="amber-text">↪ Skipped ${s.skipped} (no matching holding)</div>` : ''}
+        ${s.errored ? `<div class="loss">✗ Errored ${s.errored}</div>` : ''}
+        <details style="margin-top:0.5rem">
+          <summary class="dim" style="cursor:pointer">Show per-row results</summary>
+          <pre style="max-height:240px; overflow:auto; font-size:0.75rem">${escapeHTML(JSON.stringify(d.rows, null, 2))}</pre>
+        </details>
+      `;
+    } catch (e) {
+      err.textContent = e.message;
+    }
+  });
 }
 
 // Spec 9c.1 D7 — LLM Spend dashboard section. Renders monthly + daily
@@ -3089,6 +3159,9 @@ async function renderSettings() {
       }
     });
   }
+
+  // Spec 10 D10 — Import historical transactions from CSV.
+  document.querySelector('#txn-import-btn')?.addEventListener('click', openTxnImportModal);
 
   // Spec 9c.1 — LLM Spend section action buttons.
   document.querySelector('#llm-adjust-btn')?.addEventListener('click', openLLMBudgetModal);

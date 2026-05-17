@@ -155,6 +155,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/holdings/crypto/{id}/taxlots", s.requireUser(s.handleCryptoTaxLots))
 	s.mux.HandleFunc("GET /api/dividends", s.requireUser(s.handleListDividends))
 	s.mux.HandleFunc("POST /api/dividends", s.requireUser(s.handleCreateDividend))
+	s.mux.HandleFunc("POST /api/transactions/import", s.requireUser(s.handleImportTransactions))
 
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
