@@ -1959,6 +1959,84 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   line-height: 1.45;
 }
 
+/* ----- Spec 7: diagnostics panel ---------------------------------------- */
+.diag-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+@media (max-width: 800px) {
+  .diag-grid { grid-template-columns: 1fr; }
+}
+.diag-card {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+}
+.diag-card h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  color: rgb(var(--color-text));
+}
+.diag-kv {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+.diag-kv li { font-family: var(--font-mono); }
+.diag-h4 {
+  margin: 1rem 0 0.5rem 0;
+  font-size: 0.9rem;
+}
+.diag-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.diag-chip {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius2);
+  background: rgb(var(--color-surface-raised));
+  border: 1px solid rgb(var(--color-border));
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.diag-chip.loss {
+  background: rgb(var(--color-loss) / 0.12);
+  border-color: rgb(var(--color-loss) / 0.4);
+  color: rgb(var(--color-loss));
+}
+.diag-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.diag-table td {
+  padding: 0.2rem 0.3rem;
+  border-bottom: 1px dashed rgb(var(--color-border));
+}
+.diag-err {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: rgb(var(--color-loss));
+  margin-top: 0.2rem;
+  word-break: break-word;
+}
+.diag-warn {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  background: rgb(var(--color-amber) / 0.12);
+  border: 1px solid rgb(var(--color-amber) / 0.35);
+  border-radius: var(--radius2);
+  font-size: 0.82rem;
+}
+
 /* ----- Spec 11: thesis notes ------------------------------------------- */
 .notes-list {
   list-style: none;

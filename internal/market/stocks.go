@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"ft/internal/health"
 	"io"
 	"log/slog"
 	"net/http"
@@ -101,7 +102,8 @@ func FetchStockQuotes(ctx context.Context, tickers []string) []*StockQuote {
 
 const finnhubBase = "https://finnhub.io/api/v1"
 
-func fetchFinnhub(ctx context.Context, ticker string) (*StockQuote, error) {
+func fetchFinnhub(ctx context.Context, ticker string) (q *StockQuote, err error) {
+	defer func() { health.Record(ctx, "finnhub", err) }()
 	key := os.Getenv("FT_FINNHUB_API_KEY")
 	if key == "" {
 		return nil, errors.New("FT_FINNHUB_API_KEY not set")
@@ -114,11 +116,12 @@ func fetchFinnhub(ctx context.Context, ticker string) (*StockQuote, error) {
 	}
 	u := fmt.Sprintf("%s/quote?symbol=%s&token=%s",
 		finnhubBase, url.QueryEscape(ticker), url.QueryEscape(key))
-	if err := httpGetJSON(ctx, u, &res); err != nil {
+	if err = httpGetJSON(ctx, u, &res); err != nil {
 		return nil, err
 	}
 	if res.C == 0 {
-		return nil, fmt.Errorf("finnhub: zero price (unknown symbol?)")
+		err = fmt.Errorf("finnhub: zero price (unknown symbol?)")
+		return nil, err
 	}
 	return &StockQuote{
 		Ticker:    ticker,
@@ -137,7 +140,9 @@ func fetchFinnhub(ctx context.Context, ticker string) (*StockQuote, error) {
 
 const twelveDataBase = "https://api.twelvedata.com"
 
-func fetchTwelveData(ctx context.Context, ticker string) (*StockQuote, error) {
+func fetchTwelveData(ctx context.Context, ticker string) (result *StockQuote, retErr error) {
+	defer func() { health.Record(ctx, "twelvedata", retErr) }()
+	var err error
 	key := os.Getenv("FT_TWELVEDATA_API_KEY")
 	if key == "" {
 		return nil, errors.New("FT_TWELVEDATA_API_KEY not set")
@@ -154,21 +159,24 @@ func fetchTwelveData(ctx context.Context, ticker string) (*StockQuote, error) {
 	}
 	u := fmt.Sprintf("%s/quote?symbol=%s&apikey=%s",
 		twelveDataBase, url.QueryEscape(ticker), url.QueryEscape(key))
-	if err := httpGetJSON(ctx, u, &res); err != nil {
+	if err = httpGetJSON(ctx, u, &res); err != nil {
 		return nil, err
 	}
 	if res.Status == "error" || res.Code != 0 || res.Close == "" {
 		if res.Message != "" {
-			return nil, fmt.Errorf("twelvedata: %s", res.Message)
+			err = fmt.Errorf("twelvedata: %s", res.Message)
+			return nil, err
 		}
-		return nil, fmt.Errorf("twelvedata: empty result")
+		err = fmt.Errorf("twelvedata: empty result")
+		return nil, err
 	}
-	price, err := strconv.ParseFloat(res.Close, 64)
-	if err != nil {
-		return nil, fmt.Errorf("twelvedata: parse close: %w", err)
+	price, perr := strconv.ParseFloat(res.Close, 64)
+	if perr != nil {
+		err = fmt.Errorf("twelvedata: parse close: %w", perr)
+		return nil, err
 	}
 	var changePct float64
-	if v, err := strconv.ParseFloat(res.PercentChange, 64); err == nil {
+	if v, e2 := strconv.ParseFloat(res.PercentChange, 64); e2 == nil {
 		changePct = v
 	}
 	name := res.Name

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"ft/internal/health"
 	"io"
 	"net/http"
 	"net/url"
@@ -30,7 +31,13 @@ var (
 // FetchMarketNews pulls top business headlines from NewsAPI. If the API key
 // is missing the function returns (nil, nil) — the caller decides what to do
 // (fall back to seed / cache).
-func FetchMarketNews(ctx context.Context) ([]Article, error) {
+func FetchMarketNews(ctx context.Context) (articles []Article, retErr error) {
+	defer func() {
+		// Only record if we actually attempted a call (key present).
+		if os.Getenv("NEWSAPI_API_KEY") != "" {
+			health.Record(ctx, "newsapi", retErr)
+		}
+	}()
 	key := os.Getenv("NEWSAPI_API_KEY")
 	if key == "" {
 		return nil, nil

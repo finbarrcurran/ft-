@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"fmt"
+	"ft/internal/health"
 	"time"
 )
 
@@ -29,7 +30,8 @@ import (
 //
 // Some snapshots use `fear_and_greed.now.value` instead of `fear_and_greed.score`
 // — we tolerate both.
-func FetchStockFearGreed(ctx context.Context) (*FearGreed, error) {
+func FetchStockFearGreed(ctx context.Context) (fg *FearGreed, retErr error) {
+	defer func() { health.Record(ctx, "cnn_feargreed", retErr) }()
 	var resp struct {
 		FearAndGreed struct {
 			Score  *float64 `json:"score"`

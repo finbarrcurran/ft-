@@ -2762,6 +2762,134 @@ function renderPortfolioRiskSection(r) {
   `;
 }
 
+// Spec 7 — Diagnostics & provider-health section.
+function renderDiagnosticsSection(d) {
+  const fmtAgo = (sec) => {
+    if (sec == null) return '—';
+    if (sec < 60) return `${sec}s ago`;
+    if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+    if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
+    return `${Math.round(sec / 86400)}d ago`;
+  };
+  const fmtBytes = (n) => {
+    if (n == null) return '—';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MiB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GiB`;
+  };
+  const now = new Date();
+  const since = (iso) => {
+    if (!iso) return null;
+    const t = new Date(iso);
+    return Math.max(0, Math.round((now - t) / 1000));
+  };
+
+  // Provider health rows. Color-coded by consecutive_failures + last_success age.
+  const providers = (d.providers || []).slice().sort((a, b) => a.provider.localeCompare(b.provider));
+  const provRows = providers.map(p => {
+    const successAgo = p.lastSuccessAt ? since(p.lastSuccessAt) : null;
+    let tone = 'dim';
+    let pill = 'never';
+    if (p.consecutiveFailures >= 3) { tone = 'loss'; pill = `❌ ${p.consecutiveFailures}× fail`; }
+    else if (p.consecutiveFailures > 0) { tone = 'amber-text'; pill = `⚠ ${p.consecutiveFailures}× recent fail`; }
+    else if (successAgo != null) { tone = 'gain'; pill = `✓ ok ${fmtAgo(successAgo)}`; }
+    const lastErr = p.lastError ? `<div class="diag-err">${escapeHTML(p.lastError)}</div>` : '';
+    return `
+      <tr>
+        <td><strong>${escapeHTML(p.provider)}</strong></td>
+        <td><span class="${tone}">${pill}</span></td>
+        <td class="num dim">${p.successCount}</td>
+        <td class="num ${p.failureCount > 0 ? 'amber-text' : 'dim'}">${p.failureCount}</td>
+        <td class="dim" style="font-size:0.78rem">${p.lastSuccessAt ? new Date(p.lastSuccessAt).toLocaleString() : '—'}${lastErr}</td>
+      </tr>
+    `;
+  }).join('') || `<tr><td colspan="5" class="dim" style="text-align:center">No provider calls recorded yet. Trigger a refresh.</td></tr>`;
+
+  // API keys table.
+  const keyRows = (d.apiKeys || []).map(k => `
+    <tr>
+      <td><code style="font-family:var(--font-mono)">${escapeHTML(k.key)}</code></td>
+      <td>${k.set ? '<span class="gain">✓ set</span>' : '<span class="dim">— missing</span>'}</td>
+    </tr>
+  `).join('');
+
+  // System / backups / migrations.
+  const sys = d.system || {};
+  const backups = d.backups || [];
+  const backupRow = backups[0]
+    ? `${escapeHTML(backups[0].name)} <span class="dim">(${fmtBytes(backups[0].sizeBytes)}, ${backups[0].ageHours}h ago)</span>`
+    : '<span class="dim">no backups found in /var/backups/ft</span>';
+  const refreshLine = sys.lastRefreshAt
+    ? `${new Date(sys.lastRefreshAt).toLocaleString()} <span class="dim">(${fmtAgo(sys.lastRefreshAgoSec)})</span>`
+    : '<span class="dim">never</span>';
+  const dailyLine = sys.lastDailyJobAt
+    ? `${new Date(sys.lastDailyJobAt).toLocaleString()} <span class="dim">(${fmtAgo(sys.lastDailyJobAgoSec)})</span>`
+    : '<span class="dim">never (runs at 04:00 UTC daily)</span>';
+  const failLine = sys.lastPartialFailureAt
+    ? `<span class="amber-text">⚠ ${new Date(sys.lastPartialFailureAt).toLocaleString()}</span>`
+    : '<span class="dim">none</span>';
+
+  // Frameworks.
+  const fws = d.frameworks || [];
+  const fwLine = fws.length === 0
+    ? '<span class="loss">⚠ no frameworks loaded</span>'
+    : fws.map(f => `<span class="diag-chip">${escapeHTML(f.id)} (${f.questions}Q, ${f.appliesTo})</span>`).join(' ');
+
+  // Holidays.
+  const hols = d.holidays || [];
+  const holLine = hols.map(h => {
+    const tone = h.count === 0 ? 'loss' : 'dim';
+    return `<span class="diag-chip ${tone}">${escapeHTML(h.exchange)}: ${h.count}</span>`;
+  }).join(' ');
+  const missing = hols.filter(h => h.count === 0);
+  const holWarn = missing.length > 0
+    ? `<div class="diag-warn">⚠ ${missing.length} exchange${missing.length === 1 ? '' : 's'} have no holidays defined for ${hols[0]?.year}. Refresh JSON files in <code>internal/marketdata/holidays/</code>.</div>`
+    : '';
+
+  return `
+    <section class="settings-block">
+      <h3 class="settings-h3" style="display:flex; justify-content:space-between; align-items:center">
+        <span>Diagnostics</span>
+        <button class="btn-ghost" id="diag-refresh-btn" title="Reload diagnostics">↻</button>
+      </h3>
+
+      <div class="diag-grid">
+        <div class="diag-card">
+          <h4>System</h4>
+          <ul class="diag-kv">
+            <li><span class="dim">Last refresh:</span> ${refreshLine}</li>
+            <li><span class="dim">Last daily job:</span> ${dailyLine}</li>
+            <li><span class="dim">Last partial failure:</span> ${failLine}</li>
+            <li><span class="dim">Latest migration:</span> ${escapeHTML(sys.latestMigration || '—')} ${sys.latestMigrationAt ? `<span class="dim">(${new Date(sys.latestMigrationAt).toLocaleDateString()})</span>` : ''}</li>
+            <li><span class="dim">DB size:</span> ${fmtBytes(sys.dbSizeBytes)} <span class="dim">(${escapeHTML(sys.dbPath || '')})</span></li>
+            <li><span class="dim">Latest backup:</span> ${backupRow}</li>
+          </ul>
+        </div>
+
+        <div class="diag-card">
+          <h4>API keys</h4>
+          <table class="diag-table">
+            <tbody>${keyRows}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <h4 class="diag-h4">Provider health</h4>
+      <div class="tablewrap"><table class="holdings"><thead><tr>
+        <th>Provider</th><th>Status</th><th class="num">OK</th><th class="num">Fail</th><th>Last success / error</th>
+      </tr></thead><tbody>${provRows}</tbody></table></div>
+
+      <h4 class="diag-h4">Frameworks</h4>
+      <div class="diag-line">${fwLine}</div>
+
+      <h4 class="diag-h4">Exchange holidays <span class="dim" style="font-size:0.78rem; font-weight:normal">(current year)</span></h4>
+      <div class="diag-line">${holLine}</div>
+      ${holWarn}
+    </section>
+  `;
+}
+
 // Spec 10 D9 — aggregated Tax Lots section.
 function renderTaxLotsSection(lots) {
   if (lots.length === 0) return '';
@@ -3117,7 +3245,7 @@ async function renderSettings() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading…</div>';
 
-  const [delStocks, delCrypto, audit, regimeHist, risk, llmSpend, stocksForLots, cryptoForLots] = await Promise.all([
+  const [delStocks, delCrypto, audit, regimeHist, risk, llmSpend, stocksForLots, cryptoForLots, diag] = await Promise.all([
     api('/api/holdings/stocks/deleted').catch(() => ({ holdings: [] })),
     api('/api/holdings/crypto/deleted').catch(() => ({ holdings: [] })),
     api('/api/audit?limit=100').catch(() => ({ audit: [] })),
@@ -3126,6 +3254,8 @@ async function renderSettings() {
     api('/api/llm/spend').catch(() => null),
     api('/api/holdings/stocks').catch(() => ({ holdings: [] })),
     api('/api/holdings/crypto').catch(() => ({ holdings: [] })),
+    // Spec 7 — diagnostics payload.
+    api('/api/diagnostics').catch(() => null),
   ]);
 
   // Spec 10 D9 — gather all open tax lots across all holdings for the
@@ -3237,11 +3367,15 @@ async function renderSettings() {
     `;
   }).join('') || `<tr><td colspan="6" class="dim" style="text-align:center; padding:0.7rem">No audit entries yet. Audit log fills as you create / edit / delete / restore holdings.</td></tr>`;
 
+  // Spec 7 — diagnostics panel. Conditionally rendered if endpoint responded.
+  const diagnosticsHTML = diag ? renderDiagnosticsSection(diag) : '';
+
   content.innerHTML = `
     <h2 class="settings-h">Settings</h2>
 
     ${portfolioRiskHTML}
     ${llmSpendHTML}
+    ${diagnosticsHTML}
     ${taxLotsHTML}
     ${regimeHistoryHTML}
 
@@ -3303,6 +3437,9 @@ async function renderSettings() {
 
   // Spec 10 D10 — Import historical transactions from CSV.
   document.querySelector('#txn-import-btn')?.addEventListener('click', openTxnImportModal);
+
+  // Spec 7 — Diagnostics manual refresh.
+  document.querySelector('#diag-refresh-btn')?.addEventListener('click', () => renderSettings());
 
   // Spec 9c.1 — LLM Spend section action buttons.
   document.querySelector('#llm-adjust-btn')?.addEventListener('click', openLLMBudgetModal);

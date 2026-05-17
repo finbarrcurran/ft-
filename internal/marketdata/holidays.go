@@ -86,6 +86,26 @@ func LoadHolidays() error {
 	return nil
 }
 
+// HolidayCountForYear counts how many holiday dates this exchange has
+// defined for the given year. Used by the Spec 7 diagnostics panel to
+// flag missing annual rollovers (December reminder territory).
+func HolidayCountForYear(exchange string, year int) int {
+	holidayMu.RLock()
+	defer holidayMu.RUnlock()
+	m := holidaySet[strings.ToUpper(exchange)]
+	if m == nil {
+		return 0
+	}
+	prefix := fmt.Sprintf("%04d-", year)
+	n := 0
+	for date := range m {
+		if strings.HasPrefix(date, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
 // IsHoliday returns true (and the human name) if the date is a market closure
 // for the given exchange. Date is "YYYY-MM-DD". Case-insensitive on exchange.
 func IsHoliday(exchange, date string) (string, bool) {

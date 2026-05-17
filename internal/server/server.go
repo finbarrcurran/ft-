@@ -166,6 +166,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/notes/contradictions", s.requireUserOrToken(s.handleNoteContradictions))
 	s.mux.HandleFunc("GET /api/notes/resolve", s.requireUserOrToken(s.handleResolveNoteTarget))
 
+	// Spec 7: diagnostics + provider health.
+	s.mux.HandleFunc("GET /api/diagnostics", s.requireUserOrToken(s.handleDiagnostics))
+
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
 

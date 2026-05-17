@@ -21,6 +21,7 @@ import (
 	"ft/internal/store"
 	"ft/internal/technicals"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -214,6 +215,8 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 	}
 
 	r.FinishedAt = time.Now().UTC()
+	// Spec 7 — stamp completion time for the diagnostics panel.
+	_ = s.Store.SetMeta(ctx, "last_daily_job_at", strconv.FormatInt(r.FinishedAt.Unix(), 10))
 	slog.Info("daily job done",
 		"stocks_history", fmt.Sprintf("%d/%d", r.StocksHistoryOK, r.StocksProcessed),
 		"crypto_history", fmt.Sprintf("%d/%d", r.CryptoHistoryOK, r.CryptoProcessed),

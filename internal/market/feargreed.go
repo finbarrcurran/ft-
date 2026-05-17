@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"fmt"
+	"ft/internal/health"
 	"strconv"
 	"time"
 )
@@ -18,7 +19,8 @@ import (
 //	    { "value": "42", "value_classification": "Fear", "timestamp": "...", "time_until_update": "..." }
 //	  ]
 //	}
-func FetchFearGreed(ctx context.Context) (*FearGreed, error) {
+func FetchFearGreed(ctx context.Context) (fg *FearGreed, retErr error) {
+	defer func() { health.Record(ctx, "alternative_me", retErr) }()
 	var resp struct {
 		Data []struct {
 			Value          string `json:"value"`

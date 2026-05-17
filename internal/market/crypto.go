@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"fmt"
+	"ft/internal/health"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -64,7 +65,9 @@ func FetchCryptoQuotes(ctx context.Context, symbols []string) []*CryptoQuote {
 	u.RawQuery = q.Encode()
 
 	var prices map[string]priceEntry
-	if err := httpGetJSON(ctx, u.String(), &prices); err != nil {
+	err := httpGetJSON(ctx, u.String(), &prices)
+	health.Record(ctx, "coingecko", err)
+	if err != nil {
 		slog.Warn("coingecko simple/price failed", "err", err)
 		return nil
 	}

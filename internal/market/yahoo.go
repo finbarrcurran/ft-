@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"ft/internal/health"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -144,7 +145,10 @@ func (y *yahooClient) yahooGet(ctx context.Context, baseURL string) (json.RawMes
 
 // ----- public Yahoo fetcher used by the chain in stocks.go ----------------
 
-func fetchYahoo(ctx context.Context, ticker string) (*StockQuote, error) {
+// Named returns let the deferred health.Record see the final error after
+// Go's return-statement assigns to retErr.
+func fetchYahoo(ctx context.Context, ticker string) (result *StockQuote, retErr error) {
+	defer func() { health.Record(ctx, "yahoo", retErr) }()
 	// Quote endpoint
 	u := fmt.Sprintf("https://query1.finance.yahoo.com/v7/finance/quote?symbols=%s",
 		url.QueryEscape(ticker))

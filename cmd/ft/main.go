@@ -17,6 +17,7 @@ import (
 	"ft/internal/auth"
 	"ft/internal/config"
 	"ft/internal/frameworks"
+	"ft/internal/health"
 	"ft/internal/llm"
 	"ft/internal/macro"
 	"ft/internal/market"
@@ -173,6 +174,12 @@ func runServe() {
 	// call rejects with ErrAPIKeyMissing). Add the key when the first
 	// LLM-flavored feature ships.
 	llmSvc := llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY"))
+
+	// Spec 7: provider-health tracking. Wires the store as the recorder so
+	// internal/market and internal/news can call health.Record without
+	// importing internal/store.
+	health.Init(st)
+
 	srv := server.New(cfg, st, llmSvc)
 
 	httpSrv := &http.Server{

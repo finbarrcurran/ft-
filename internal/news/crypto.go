@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"ft/internal/health"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,7 +18,12 @@ import (
 //
 // CryptoPanic's votes block gives us native sentiment: more positives than
 // negatives → positive; opposite → negative; otherwise neutral.
-func FetchCryptoNews(ctx context.Context) ([]Article, error) {
+func FetchCryptoNews(ctx context.Context) (articles []Article, retErr error) {
+	defer func() {
+		if os.Getenv("CRYPTOPANIC_API_KEY") != "" {
+			health.Record(ctx, "cryptopanic", retErr)
+		}
+	}()
 	key := os.Getenv("CRYPTOPANIC_API_KEY")
 	if key == "" {
 		return nil, nil
