@@ -1254,6 +1254,53 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   color: rgb(var(--color-text-muted));
   margin-top: 0.3rem;
 }
+/* Spec 9f — Sector Rotation tab. */
+.sector-macro-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.9rem;
+}
+.sm-regime { font-family: var(--font-mono); }
+.sm-jordi { flex: 1; margin-left: 1.2rem; }
+.sm-jordi-text {
+  display: inline-block;
+  min-width: 200px;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius2);
+  outline: none;
+}
+.sm-jordi-text:focus,
+.sm-jordi-text:hover {
+  background: rgb(var(--color-surface-raised));
+  cursor: text;
+}
+.sm-jordi-save {
+  font-size: 0.74rem;
+  margin-left: 0.4rem;
+}
+.sector-rotation .sr-handle {
+  width: 1.2rem;
+  cursor: grab;
+  color: rgb(var(--color-text-muted));
+  user-select: none;
+  text-align: center;
+}
+.sector-rotation .sr-handle:active { cursor: grabbing; }
+.sector-rotation tr.dragging { opacity: 0.55; }
+.sector-rotation .sr-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.sector-rotation .sr-sortable.active { color: rgb(var(--color-text)); }
+.sector-rotation .sr-name { min-width: 220px; }
+svg.sector-spark { display: block; }
+
 /* Spec 12 D7 — autofilled-field flash on holding modal. */
 input.autofilled, select.autofilled {
   background: rgb(var(--color-accent) / 0.12) !important;

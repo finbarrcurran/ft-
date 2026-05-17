@@ -307,6 +307,8 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'crypto' ? 'active' : ''}" data-tab="crypto">Crypto</button>
         <button class="tab ${state.tab === 'performance' ? 'active' : ''}" data-tab="performance">Performance</button>
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
+        <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Sector Rotation</button>
+        <button class="tab ${state.tab === 'scorecards' ? 'active' : ''}" data-tab="scorecards">Scorecards</button>
         <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
         <button class="tab ${state.tab === 'news' ? 'active' : ''}" data-tab="news">News</button>
@@ -1286,6 +1288,10 @@ async function loadActiveTab() {
       await renderPerformance();
     } else if (state.tab === 'screener') {
       await renderScreener();
+    } else if (state.tab === 'sector-rotation') {
+      await renderSectorRotation();
+    } else if (state.tab === 'scorecards') {
+      await renderScorecards();
     } else if (state.tab === 'watchlist') {
       await renderWatchlist();
     } else if (state.tab === 'heatmap') {
@@ -5966,6 +5972,293 @@ function installCommandPaletteShortcut() {
       }
     }
   });
+}
+
+// ============================================================================
+// Spec 9f — Sector Rotation tab
+// ============================================================================
+
+// Tag styling
+function sectorTagPill(tag) {
+  if (tag === 'rotating_in') return '<span class="tag-pill gain">↑ rotating in</span>';
+  if (tag === 'rotating_out') return '<span class="tag-pill loss">↓ rotating out</span>';
+  if (tag === 'no_data') return '<span class="tag-pill dim">no data</span>';
+  return '<span class="tag-pill">neutral</span>';
+}
+
+// Inline sparkline SVG (26 weekly closes). Color tied to overall direction.
+function sectorSparkSvg(points, tag) {
+  if (!points || points.length < 2) return '<span class="dim">—</span>';
+  const w = 80, h = 24;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const rng = max - min || 1;
+  const stepX = w / (points.length - 1);
+  const coords = points.map((p, i) => {
+    const x = i * stepX;
+    const y = h - ((p - min) / rng) * h;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const stroke = tag === 'rotating_in' ? 'rgb(16,200,124)' :
+                 tag === 'rotating_out' ? 'rgb(245,80,110)' : 'rgb(150,155,165)';
+  return `<svg class="sector-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${coords}" fill="none" stroke="${stroke}" stroke-width="1.5"/></svg>`;
+}
+
+// Format pct return as +/−x.x%, "—" when nil.
+function pctReturn(v, digits) {
+  if (v == null) return '<span class="dim">—</span>';
+  const x = v * 100;
+  const cls = x > 0.5 ? 'gain' : x < -0.5 ? 'loss' : 'dim';
+  return `<span class="${cls}">${x >= 0 ? '+' : ''}${x.toFixed(digits != null ? digits : 1)}%</span>`;
+}
+
+let _sectorSort = { key: 'return3m', dir: 'desc' };
+
+async function renderSectorRotation() {
+  const content = $('#content');
+  content.innerHTML = '<div class="empty">loading sector rotation…</div>';
+
+  let data, regime;
+  try {
+    [data, regime] = await Promise.all([
+      api('/api/sector-rotation/metrics'),
+      api('/api/regime').catch(() => null),
+    ]);
+  } catch (e) {
+    content.innerHTML = `<div class="empty"><div class="loss">sector rotation failed: ${escapeHTML(e.message)}</div></div>`;
+    return;
+  }
+
+  let sectors = data.sectors || [];
+  const hasUserOrder = sectors.some(s => s.displayOrderUser != null);
+  // If user has saved an order, server already sorted; otherwise apply
+  // local column sort (defaults to 3M desc per spec).
+  if (!hasUserOrder) {
+    sectors = sortSectors(sectors, _sectorSort.key, _sectorSort.dir);
+  }
+
+  // Spec 9f D7 — Macro strip.
+  const effective = regime?.effective || 'unclassified';
+  const regimeTone = effective === 'stable' ? 'gain' : effective === 'shifting' ? 'amber-text' : effective === 'defensive' ? 'loss' : 'dim';
+  const jordiRead = await loadJordiSectorRead();
+  const macroStrip = `
+    <div class="sector-macro-strip">
+      <div class="sm-regime">
+        <span class="dim">Regime:</span>
+        <span class="${regimeTone}"><strong>${escapeHTML(effective.toUpperCase())}</strong></span>
+      </div>
+      <div class="sm-jordi">
+        <span class="dim">Jordi's read:</span>
+        <span class="sm-jordi-text" id="sm-jordi-text" contenteditable="true" spellcheck="true" title="Click to edit">${escapeHTML(jordiRead)}</span>
+        <span class="dim sm-jordi-save" id="sm-jordi-save" style="display:none">(saving…)</span>
+      </div>
+    </div>
+  `;
+
+  // Sortable header helper.
+  const hdr = (key, label, extra) => {
+    const active = _sectorSort.key === key;
+    const arrow = active ? (_sectorSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    const cls = ['sr-sortable'];
+    if (active) cls.push('active');
+    if (extra) cls.push(extra);
+    const lockHint = hasUserOrder ? ' title="Manual order active — Reset to sort by columns"' : '';
+    return `<th class="${cls.join(' ')}" data-sort-key="${key}"${lockHint}>${label}${arrow}</th>`;
+  };
+
+  const rows = sectors.map((s) => `
+    <tr data-sector-id="${s.sectorId}">
+      <td class="sr-handle" draggable="true" title="Drag to reorder">⋮⋮</td>
+      <td class="sr-name">
+        <div><strong>${escapeHTML(s.displayName)}</strong></div>
+        <div class="dim" style="font-size:0.72rem">${escapeHTML(s.parentGics)} · ${escapeHTML(s.etfTickerPrimary)}${s.jordiStage != null ? ' · stage ' + s.jordiStage : ''}</div>
+      </td>
+      <td class="num">${pctReturn(s.return1w, 1)}</td>
+      <td class="num">${pctReturn(s.return1m, 1)}</td>
+      <td class="num"><strong>${s.return3m != null ? pctReturn(s.return3m, 1) : '<span class="dim">—</span>'}</strong></td>
+      <td class="num">${pctReturn(s.return6m, 1)}</td>
+      <td class="num">${pctReturn(s.returnYtd, 1)}</td>
+      <td class="num">${s.rsVsSpy3m != null ? `<span class="${s.rsVsSpy3m >= 1.05 ? 'gain' : s.rsVsSpy3m <= 0.95 ? 'loss' : 'dim'}">${s.rsVsSpy3m.toFixed(2)}×</span>` : '<span class="dim">—</span>'}</td>
+      <td>${sectorTagPill(s.tag)}</td>
+      <td>${sectorSparkSvg(s.sparkline, s.tag)}</td>
+      <td class="num">${(s.holdingsCount || 0) + (s.watchlistCount || 0) === 0
+        ? '<span class="dim">—</span>'
+        : `<span class="${s.holdingsCount > 0 ? '' : 'dim'}">${s.holdingsCount || 0}h${s.watchlistCount > 0 ? ` · ${s.watchlistCount}w` : ''}</span>`}</td>
+    </tr>
+  `).join('');
+
+  // Reset-to-auto button only useful when user has an order saved.
+  const resetBtn = hasUserOrder
+    ? `<button class="btn-ghost" id="sr-reset">↻ Reset to auto-ranking</button>`
+    : '';
+  const saveBtn = `<button class="btn-ghost" id="sr-save" disabled>Save order</button>`;
+
+  content.innerHTML = `
+    ${macroStrip}
+    <div class="table-toolbar">
+      ${saveBtn}
+      ${resetBtn}
+      <span class="dim" id="sr-saved-stamp" style="margin-left:0.5rem;font-size:0.78rem">
+        ${hasUserOrder ? 'Manual order active.' : 'Auto-ranking (3M descending). Drag rows to reorder.'}
+      </span>
+    </div>
+    <div class="tablewrap">
+      <table class="holdings sector-rotation">
+        <thead>
+          <tr>
+            <th title="Drag to reorder"></th>
+            <th>Sub-sector / GICS / ETF</th>
+            ${hdr('return1w', '1W', 'num')}
+            ${hdr('return1m', '1M', 'num')}
+            ${hdr('return3m', '3M ★', 'num')}
+            ${hdr('return6m', '6M', 'num')}
+            ${hdr('returnYtd','YTD','num')}
+            ${hdr('rsVsSpy3m','RS vs SPY (3M)','num')}
+            <th title="rotating_in if RS ≥ 1.05; rotating_out if ≤ 0.95">Tag</th>
+            <th title="26-week weekly closes">Spark</th>
+            <th class="num" title="Holdings (h) + Watchlist (w) tagged to this sector">In portfolio</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="dim" style="font-size:0.78rem; margin-top:1rem">
+      <span style="color:rgb(var(--color-gain))">↑ rotating in</span> = sector's 3M return ≥ 1.05× SPY's.
+      <span style="color:rgb(var(--color-loss))">↓ rotating out</span> = ≤ 0.95×.
+      Daily ETF ingest runs at 22:00 UTC after US close.
+    </p>
+  `;
+
+  // Wire column sort (only effective when no user order — otherwise
+  // sorting fights the saved order).
+  for (const th of content.querySelectorAll('.sr-sortable')) {
+    th.addEventListener('click', () => {
+      if (hasUserOrder) return; // disabled while manual order active
+      const k = th.dataset.sortKey;
+      if (_sectorSort.key === k) {
+        _sectorSort.dir = _sectorSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        _sectorSort = { key: k, dir: 'desc' };
+      }
+      renderSectorRotation();
+    });
+  }
+
+  // Spec 9f D7 — Jordi read editable.
+  const jt = $('#sm-jordi-text');
+  if (jt) {
+    let saveTimer = null;
+    jt.addEventListener('input', () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      $('#sm-jordi-save').style.display = 'inline';
+      saveTimer = setTimeout(async () => {
+        try {
+          await api('/api/preferences/jordi_current_sector_read', {
+            method: 'PUT',
+            body: JSON.stringify({ value: jt.textContent.trim() }),
+          });
+          $('#sm-jordi-save').textContent = '(saved)';
+          setTimeout(() => { $('#sm-jordi-save').style.display = 'none'; $('#sm-jordi-save').textContent = '(saving…)'; }, 1200);
+        } catch (e) {
+          $('#sm-jordi-save').textContent = '(save failed)';
+        }
+      }, 900);
+    });
+  }
+
+  // D5 — drag-and-drop reorder.
+  installSectorDragReorder(content, hasUserOrder);
+
+  // Reset button.
+  $('#sr-reset')?.addEventListener('click', async () => {
+    if (!confirm('Remove your custom order and revert to data-driven 3M-descending ranking?')) return;
+    try {
+      await api('/api/sector-rotation/ordering', { method: 'DELETE' });
+      renderSectorRotation();
+    } catch (e) { alert('Reset failed: ' + e.message); }
+  });
+}
+
+// D5 — drag-and-drop reorder. HTML5 native, no library.
+function installSectorDragReorder(scope, hasUserOrder) {
+  let dragging = null;
+  const tbody = scope.querySelector('tbody');
+  const saveBtn = scope.querySelector('#sr-save');
+  let dirty = false;
+
+  for (const handle of scope.querySelectorAll('.sr-handle')) {
+    handle.addEventListener('dragstart', (ev) => {
+      dragging = handle.closest('tr');
+      dragging.classList.add('dragging');
+      ev.dataTransfer.effectAllowed = 'move';
+    });
+    handle.addEventListener('dragend', () => {
+      if (dragging) dragging.classList.remove('dragging');
+      dragging = null;
+    });
+  }
+  tbody.addEventListener('dragover', (ev) => {
+    ev.preventDefault();
+    const target = ev.target.closest('tr');
+    if (!target || !dragging || target === dragging) return;
+    const rect = target.getBoundingClientRect();
+    const before = (ev.clientY - rect.top) < rect.height / 2;
+    if (before) target.parentNode.insertBefore(dragging, target);
+    else target.parentNode.insertBefore(dragging, target.nextSibling);
+    dirty = true;
+    if (saveBtn) saveBtn.disabled = false;
+  });
+
+  saveBtn?.addEventListener('click', async () => {
+    if (!dirty) return;
+    const pairs = [];
+    let pos = 1;
+    for (const tr of tbody.querySelectorAll('tr[data-sector-id]')) {
+      pairs.push({ id: parseInt(tr.dataset.sectorId, 10), position: pos++ });
+    }
+    try {
+      await api('/api/sector-rotation/ordering', {
+        method: 'POST',
+        body: JSON.stringify(pairs),
+      });
+      dirty = false;
+      saveBtn.disabled = true;
+      $('#sr-saved-stamp').textContent = `Saved ${new Date().toLocaleTimeString()} — manual order active.`;
+      renderSectorRotation(); // re-render so reset button appears
+    } catch (e) { alert('Save failed: ' + e.message); }
+  });
+}
+
+function sortSectors(rows, key, dir) {
+  const mult = dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const av = a[key], bv = b[key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1; // nils last
+    if (bv == null) return -1;
+    return (av - bv) * mult;
+  });
+}
+
+async function loadJordiSectorRead() {
+  try {
+    const r = await api('/api/preferences/jordi_current_sector_read');
+    return r.value || '';
+  } catch (_) {
+    return '';
+  }
+}
+
+// ============================================================================
+// Spec 9g — Scorecards tab (placeholder; full UI lands in 9g-B)
+// ============================================================================
+async function renderScorecards() {
+  $('#content').innerHTML = `
+    <div class="empty">
+      <div>Scorecards tab coming in 9g-B.</div>
+      <div class="hint">Schema + service + seeded markdown (Philosophy, Energy, Hydrocarbons) live in 9g-A. UI lands next.</div>
+    </div>
+  `;
 }
 
 installCommandPaletteShortcut();
