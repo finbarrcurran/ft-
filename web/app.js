@@ -2682,6 +2682,14 @@ function renderLLMSpendSection(s) {
           : '<button class="btn-ghost" id="llm-pause-btn">⏸ Pause LLM features</button>'}
         ${s.override && s.override.extraUsd > 0 ? '<button class="btn-ghost" id="llm-override-clear-btn">Clear override</button>' : ''}
       </div>
+
+      <h4 class="rh-side" style="margin-top:1rem">Per-feature kill switches (Spec 9c.1 D13)</h4>
+      <div class="check-col" id="llm-feature-toggles" style="font-size:0.85rem">
+        <label><input type="checkbox" data-llm-feature="sunday_digest" /> Sunday digest summarisation</label>
+        <label><input type="checkbox" data-llm-feature="rescoring" /> Framework re-scoring on news</label>
+        <label><input type="checkbox" data-llm-feature="alert_text" /> LLM-generated alert text</label>
+        <label><input type="checkbox" data-llm-feature="jarvis_query" /> Jarvis natural-language queries</label>
+      </div>
     </section>
   `;
 }
@@ -3015,6 +3023,27 @@ async function renderSettings() {
       await api('/api/llm/override/clear', { method: 'POST' });
       renderSettings();
     } catch (e) { alert('Clear failed: ' + e.message); }
+  });
+  // Spec 9c.1 D13 — per-feature kill switches. Read current state into
+  // checkboxes, then wire change handlers that PUT to user_preferences.
+  document.querySelectorAll('[data-llm-feature]').forEach(async (cb) => {
+    const feature = cb.dataset.llmFeature;
+    const key = `llm_feature_${feature}`;
+    try {
+      const r = await api('/api/preferences/' + key);
+      cb.checked = r.value !== 'false'; // default on; 'false' switches off
+    } catch (_) { cb.checked = true; }
+    cb.addEventListener('change', async () => {
+      try {
+        await api('/api/preferences/' + key, {
+          method: 'PUT',
+          body: JSON.stringify({ value: cb.checked ? 'true' : 'false' }),
+        });
+      } catch (e) {
+        alert(`${feature} toggle failed: ${e.message}`);
+        cb.checked = !cb.checked;
+      }
+    });
   });
 }
 
