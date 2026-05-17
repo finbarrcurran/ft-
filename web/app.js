@@ -2593,21 +2593,269 @@ function renderPortfolioRiskSection(r) {
   `;
 }
 
+// Spec 9c.1 D7 — LLM Spend dashboard section. Renders monthly + daily
+// progress bars, per-feature + per-model breakdown, status pills, and
+// action buttons (Adjust budgets / Emergency override / Pause toggle /
+// View log).
+function renderLLMSpendSection(s) {
+  const monthly = s.caps.effectiveMonthly || s.caps.monthlyUsd || 5;
+  const daily = s.caps.dailyUsd || 0.5;
+  const monthPct = monthly > 0 ? Math.min(100, (s.month / monthly) * 100) : 0;
+  const dayPct = daily > 0 ? Math.min(100, (s.today / daily) * 100) : 0;
+  const monthTone = monthPct >= 90 ? 'risk-bar-over' : 'risk-bar-ok';
+  const dayTone = dayPct >= 90 ? 'risk-bar-over' : 'risk-bar-ok';
+
+  const pauseStatus = s.caps.globallyPaused
+    ? '<span class="loss">⏸ PAUSED</span>'
+    : '<span class="gain">🟢 ACTIVE</span>';
+  const hardStop = s.caps.hardStopEnabled
+    ? '<span class="gain">Hard stop on</span>'
+    : '<span class="amber-text">Hard stop OFF</span>';
+
+  const overrideStr = s.override && s.override.extraUsd > 0
+    ? `<div class="dim" style="font-size:0.78rem">Override: +$${fmtNum2.format(s.override.extraUsd)} until ${escapeHTML(s.override.until)} — "${escapeHTML(s.override.reason || '')}"</div>`
+    : '';
+
+  const featureRows = Object.entries(s.byFeature || {}).sort((a, b) => b[1] - a[1])
+    .map(([f, v]) => `<li><span>${escapeHTML(f)}</span><span class="num">$${fmtNum2.format(v)}</span></li>`).join('');
+  const modelRows = Object.entries(s.byModel || {}).sort((a, b) => b[1] - a[1])
+    .map(([m, v]) => `<li><span>${escapeHTML(m)}</span><span class="num">$${fmtNum2.format(v)}</span></li>`).join('');
+
+  // Tiny 30-day sparkline (vertical bars). Each day = max(daily total, 0).
+  const daily30 = (s.daily || []).slice(0, 30).reverse(); // oldest-first
+  const maxDay = daily30.reduce((m, d) => Math.max(m, d.totalCostUsd || 0), 0.01);
+  const sparkBars = daily30.map((d) => {
+    const h = Math.max(1, ((d.totalCostUsd || 0) / maxDay) * 30);
+    return `<div class="llm-spark-bar" title="${escapeHTML(d.date)}: $${fmtNum2.format(d.totalCostUsd || 0)}" style="height:${h}px"></div>`;
+  }).join('');
+
+  return `
+    <section class="settings-block">
+      <h3 class="settings-h3">LLM spend <span class="dim" style="font-size:0.78rem; font-weight:normal">(Spec 9c.1 — preventive)</span></h3>
+
+      <div class="risk-summary">
+        <div class="risk-stat">
+          <div class="risk-stat-label">This month</div>
+          <div class="risk-stat-value num">$${fmtNum2.format(s.month)} of $${fmtNum2.format(monthly)}</div>
+          <div class="risk-bar-track" style="margin-top:0.3rem">
+            <div class="risk-bar ${monthTone}" style="width:${monthPct.toFixed(1)}%"></div>
+          </div>
+          <div class="risk-stat-sub dim">${monthPct.toFixed(0)}% · ${s.counts.month || 0} calls${s.counts.blocked ? ` · ${s.counts.blocked} blocked` : ''}</div>
+        </div>
+        <div class="risk-stat">
+          <div class="risk-stat-label">Today</div>
+          <div class="risk-stat-value num">$${fmtNum2.format(s.today)} of $${fmtNum2.format(daily)}</div>
+          <div class="risk-bar-track" style="margin-top:0.3rem">
+            <div class="risk-bar ${dayTone}" style="width:${dayPct.toFixed(1)}%"></div>
+          </div>
+          <div class="risk-stat-sub dim">${dayPct.toFixed(0)}%</div>
+        </div>
+        <div class="risk-stat">
+          <div class="risk-stat-label">Status</div>
+          <div class="risk-stat-value">${pauseStatus}</div>
+          <div class="risk-stat-sub">${hardStop} · default ${escapeHTML(s.caps.defaultModel || '—')}</div>
+        </div>
+        <div class="risk-stat">
+          <div class="risk-stat-label">Last 30 days</div>
+          <div class="llm-spark">${sparkBars || '<span class="dim">no data yet</span>'}</div>
+        </div>
+      </div>
+
+      ${overrideStr}
+
+      <div class="llm-grid" style="margin-top:0.8rem">
+        <div>
+          <h4 class="rh-side">By feature (month)</h4>
+          <ul class="llm-breakdown">${featureRows || '<li class="dim">No calls yet.</li>'}</ul>
+        </div>
+        <div>
+          <h4 class="rh-side">By model (month)</h4>
+          <ul class="llm-breakdown">${modelRows || '<li class="dim">No calls yet.</li>'}</ul>
+        </div>
+      </div>
+
+      <div style="margin-top:0.8rem; display:flex; gap:0.4rem; flex-wrap:wrap">
+        <button class="btn-ghost" id="llm-adjust-btn">Adjust budgets</button>
+        <button class="btn-ghost" id="llm-override-btn">Emergency override</button>
+        ${s.caps.globallyPaused
+          ? '<button class="btn-ghost" id="llm-pause-btn">▶ Resume LLM features</button>'
+          : '<button class="btn-ghost" id="llm-pause-btn">⏸ Pause LLM features</button>'}
+        ${s.override && s.override.extraUsd > 0 ? '<button class="btn-ghost" id="llm-override-clear-btn">Clear override</button>' : ''}
+      </div>
+    </section>
+  `;
+}
+
+// Spec 9c.1 D8 — Adjust Budgets modal.
+async function openLLMBudgetModal() {
+  // Read current values from preferences (one round-trip each — could
+  // batch later if perf matters; for now: 5 calls, ~50ms).
+  const keys = ['llm_budget_monthly_usd', 'llm_budget_daily_usd', 'llm_default_model',
+                'llm_alert_threshold_50_pct', 'llm_alert_threshold_75_pct',
+                'llm_alert_threshold_90_pct', 'llm_alert_threshold_100_pct'];
+  const values = {};
+  for (const k of keys) {
+    try { const r = await api('/api/preferences/' + k); values[k] = r.value; }
+    catch (_) { values[k] = ''; }
+  }
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Adjust LLM budgets</div>
+            <div class="desc">Hard caps the system cannot exceed.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="lb-form" class="holding-form">
+            <div class="form-row">
+              <label for="lb-monthly">Monthly cap ($)</label>
+              <input id="lb-monthly" type="number" step="0.10" min="0.10" value="${escapeHTML(values.llm_budget_monthly_usd || '5.00')}" />
+            </div>
+            <div class="form-row">
+              <label for="lb-daily">Daily cap ($)</label>
+              <input id="lb-daily" type="number" step="0.10" min="0.05" value="${escapeHTML(values.llm_budget_daily_usd || '0.50')}" />
+            </div>
+            <div class="form-row">
+              <label for="lb-model">Default model</label>
+              <select id="lb-model">
+                ${['claude-haiku-4-5','claude-sonnet-4-6','claude-opus-4-7'].map(m =>
+                  `<option value="${m}" ${m === (values.llm_default_model || 'claude-haiku-4-5') ? 'selected' : ''}>${m}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Alert thresholds (Telegram)</label>
+              <div class="check-col">
+                <label><input type="checkbox" id="lb-t50" ${values.llm_alert_threshold_50_pct !== 'false' ? 'checked' : ''} /> 50%</label>
+                <label><input type="checkbox" id="lb-t75" ${values.llm_alert_threshold_75_pct !== 'false' ? 'checked' : ''} /> 75%</label>
+                <label><input type="checkbox" id="lb-t90" ${values.llm_alert_threshold_90_pct !== 'false' ? 'checked' : ''} /> 90%</label>
+                <label><input type="checkbox" id="lb-t100" ${values.llm_alert_threshold_100_pct !== 'false' ? 'checked' : ''} /> 100%</label>
+              </div>
+            </div>
+            <div class="error" id="lb-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="lb-cancel">Cancel</button>
+          <button class="btn-primary" id="lb-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#lb-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#lb-save').addEventListener('click', async () => {
+    const err = $('#lb-err'); err.textContent = '';
+    const payload = [
+      ['llm_budget_monthly_usd',       $('#lb-monthly').value],
+      ['llm_budget_daily_usd',         $('#lb-daily').value],
+      ['llm_default_model',            $('#lb-model').value],
+      ['llm_alert_threshold_50_pct',   $('#lb-t50').checked ? 'true' : 'false'],
+      ['llm_alert_threshold_75_pct',   $('#lb-t75').checked ? 'true' : 'false'],
+      ['llm_alert_threshold_90_pct',   $('#lb-t90').checked ? 'true' : 'false'],
+      ['llm_alert_threshold_100_pct',  $('#lb-t100').checked ? 'true' : 'false'],
+    ];
+    try {
+      for (const [k, v] of payload) {
+        await api('/api/preferences/' + k, { method: 'PUT', body: JSON.stringify({ value: String(v) }) });
+      }
+      closeImportModal();
+      renderSettings();
+    } catch (e) {
+      err.textContent = e.message;
+    }
+  });
+}
+
+// Spec 9c.1 D9 — Emergency override modal.
+function openLLMOverrideModal() {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Emergency override</div>
+            <div class="desc">⚠ Temporarily raises the monthly cap. Time-bound + audited.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="lo-form" class="holding-form">
+            <div class="form-row">
+              <label for="lo-cap">Extra budget ($)</label>
+              <input id="lo-cap" type="number" step="0.10" min="0.10" value="5.00" />
+            </div>
+            <div class="form-row">
+              <label for="lo-hours">Active for (hours, max 168)</label>
+              <input id="lo-hours" type="number" step="1" min="1" max="168" value="24" />
+            </div>
+            <div class="form-row">
+              <label for="lo-reason">Reason (required)</label>
+              <input id="lo-reason" type="text" placeholder="e.g. one-off thesis analysis on VST" required />
+            </div>
+            <div class="error" id="lo-err"></div>
+          </form>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="lo-cancel">Cancel</button>
+          <button class="btn-primary" id="lo-save">Activate override</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#lo-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  $('#lo-save').addEventListener('click', async () => {
+    const err = $('#lo-err'); err.textContent = '';
+    const capUsd = parseFloat($('#lo-cap').value);
+    const durationHours = parseInt($('#lo-hours').value, 10);
+    const reason = $('#lo-reason').value.trim();
+    if (!Number.isFinite(capUsd) || capUsd <= 0) { err.textContent = 'capUsd must be > 0'; return; }
+    if (!Number.isFinite(durationHours) || durationHours <= 0 || durationHours > 168) {
+      err.textContent = 'durationHours 1..168'; return;
+    }
+    if (reason.length < 3) { err.textContent = 'reason required (min 3 chars)'; return; }
+    try {
+      await api('/api/llm/override', { method: 'POST', body: JSON.stringify({ capUsd, durationHours, reason }) });
+      closeImportModal();
+      renderSettings();
+    } catch (e) {
+      err.textContent = e.message;
+    }
+  });
+}
+
 async function renderSettings() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading…</div>';
 
-  const [delStocks, delCrypto, audit, regimeHist, risk] = await Promise.all([
+  const [delStocks, delCrypto, audit, regimeHist, risk, llmSpend] = await Promise.all([
     api('/api/holdings/stocks/deleted').catch(() => ({ holdings: [] })),
     api('/api/holdings/crypto/deleted').catch(() => ({ holdings: [] })),
     api('/api/audit?limit=100').catch(() => ({ audit: [] })),
     api('/api/regime/history?limit=50').catch(() => ({ history: [] })),
     api('/api/risk/dashboard').catch(() => null),
+    api('/api/llm/spend').catch(() => null),
   ]);
 
   // Spec 9c D16 — Portfolio Risk Dashboard. Renders first so it's the
   // most prominent thing on the Settings page (above regime history).
   const portfolioRiskHTML = risk ? renderPortfolioRiskSection(risk) : '';
+  // Spec 9c.1 D7 — LLM Spend Dashboard. Renders between portfolio risk
+  // and regime history.
+  const llmSpendHTML = llmSpend ? renderLLMSpendSection(llmSpend) : '';
 
   // Regime history table — Spec 9b D13. Two columns (Jordi / Cowen).
   const hist = regimeHist.history || [];
@@ -2692,6 +2940,7 @@ async function renderSettings() {
     <h2 class="settings-h">Settings</h2>
 
     ${portfolioRiskHTML}
+    ${llmSpendHTML}
     ${regimeHistoryHTML}
 
     <section class="settings-block">
@@ -2749,6 +2998,24 @@ async function renderSettings() {
       }
     });
   }
+
+  // Spec 9c.1 — LLM Spend section action buttons.
+  document.querySelector('#llm-adjust-btn')?.addEventListener('click', openLLMBudgetModal);
+  document.querySelector('#llm-override-btn')?.addEventListener('click', openLLMOverrideModal);
+  document.querySelector('#llm-pause-btn')?.addEventListener('click', async () => {
+    const cur = (llmSpend && llmSpend.caps && llmSpend.caps.globallyPaused) || false;
+    try {
+      await api('/api/llm/pause', { method: 'POST', body: JSON.stringify({ paused: !cur }) });
+      renderSettings();
+    } catch (e) { alert('Pause toggle failed: ' + e.message); }
+  });
+  document.querySelector('#llm-override-clear-btn')?.addEventListener('click', async () => {
+    if (!confirm('Clear active LLM override?')) return;
+    try {
+      await api('/api/llm/override/clear', { method: 'POST' });
+      renderSettings();
+    } catch (e) { alert('Clear failed: ' + e.message); }
+  });
 }
 
 // ---------- boot ----------------------------------------------------------

@@ -609,6 +609,39 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   gap: 0.4rem;
   cursor: pointer;
 }
+/* Spec 9c.1 — LLM Spend Dashboard */
+.llm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.llm-breakdown {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+.llm-breakdown li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.2rem 0;
+  border-bottom: 1px dashed rgb(var(--color-border));
+}
+.llm-breakdown li:last-child { border-bottom: none; }
+.llm-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 32px;
+  padding-top: 0.2rem;
+}
+.llm-spark-bar {
+  width: 6px;
+  background: rgb(var(--color-accent) / 0.6);
+  border-radius: 1px;
+}
+
 /* Spec 9c D16 — Portfolio Risk Dashboard */
 .risk-summary {
   display: grid;
