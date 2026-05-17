@@ -157,6 +157,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/dividends", s.requireUser(s.handleCreateDividend))
 	s.mux.HandleFunc("POST /api/transactions/import", s.requireUser(s.handleImportTransactions))
 
+	// Spec 11: Thesis notes (cookie-or-token so bot's /note works).
+	s.mux.HandleFunc("GET /api/notes", s.requireUserOrToken(s.handleListNotes))
+	s.mux.HandleFunc("POST /api/notes", s.requireUserOrToken(s.handleCreateNote))
+	s.mux.HandleFunc("PUT /api/notes/{id}", s.requireUserOrToken(s.handleUpdateNote))
+	s.mux.HandleFunc("DELETE /api/notes/{id}", s.requireUserOrToken(s.handleDeleteNote))
+	s.mux.HandleFunc("GET /api/notes/stale", s.requireUserOrToken(s.handleStaleNotes))
+	s.mux.HandleFunc("GET /api/notes/contradictions", s.requireUserOrToken(s.handleNoteContradictions))
+
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
 
