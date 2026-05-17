@@ -246,6 +246,12 @@ func scoreVolBand(in AutoScoreInputs) (int, string) {
 }
 
 func scoreDistanceToSR(in AutoScoreInputs) (int, string) {
+	// Support1 unset OR ATR unavailable → no data, score 0 with a
+	// rationale that reflects reality (don't claim "within 0.5 ATR" when
+	// we never computed a distance).
+	if in.Support1 <= 0 || in.ATRWeekly <= 0 {
+		return 0, "support level not set"
+	}
 	if in.DistanceToSupport <= 0.5 {
 		return 2, "entry within 0.5 ATR of support"
 	}
