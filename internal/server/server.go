@@ -13,6 +13,7 @@ import (
 	"ft/internal/domain"
 	"ft/internal/llm"
 	"ft/internal/refresh"
+	"ft/internal/scorecards"
 	"ft/internal/store"
 	"ft/internal/web"
 	"log/slog"
@@ -25,20 +26,22 @@ import (
 const sessionCookieName = "ft_session"
 
 type Server struct {
-	cfg     *config.Config
-	store   *store.Store
-	refresh *refresh.Service
-	llm     *llm.Service // Spec 9c.1; nil-safe — handlers guard
-	mux     *http.ServeMux
+	cfg        *config.Config
+	store      *store.Store
+	refresh    *refresh.Service
+	llm        *llm.Service        // Spec 9c.1; nil-safe — handlers guard
+	scorecards *scorecards.Service // Spec 9g
+	mux        *http.ServeMux
 }
 
 func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 	s := &Server{
-		cfg:     cfg,
-		store:   st,
-		refresh: refresh.New(st),
-		llm:     llmSvc,
-		mux:     http.NewServeMux(),
+		cfg:        cfg,
+		store:      st,
+		refresh:    refresh.New(st),
+		llm:        llmSvc,
+		scorecards: scorecards.New(st.DB),
+		mux:        http.NewServeMux(),
 	}
 	s.routes()
 	return s
@@ -181,6 +184,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/sector-rotation/refresh", s.requireUserOrToken(s.handleSectorRefresh))
 	s.mux.HandleFunc("GET /api/sector-rotation/digests", s.requireUserOrToken(s.handleSectorDigests))
 	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}/sector", s.requireUser(s.handleUpdateStockSector))
+
+	// Spec 9g: Scorecard Repository.
+	s.mux.HandleFunc("GET /api/scorecards", s.requireUserOrToken(s.handleScorecardsList))
+	s.mux.HandleFunc("GET /api/scorecards/{code}", s.requireUserOrToken(s.handleScorecardGet))
+	s.mux.HandleFunc("PUT /api/scorecards/{code}", s.requireUser(s.handleScorecardUpdate))
+	s.mux.HandleFunc("POST /api/scorecards/preview", s.requireUser(s.handleScorecardPreview))
+	s.mux.HandleFunc("GET /api/scorecards/{code}/versions", s.requireUserOrToken(s.handleScorecardVersions))
+	s.mux.HandleFunc("PUT /api/scorecards/{code}/status", s.requireUser(s.handleScorecardStatus))
 
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))

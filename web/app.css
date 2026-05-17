@@ -1300,6 +1300,193 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
 .sector-rotation .sr-sortable.active { color: rgb(var(--color-text)); }
 .sector-rotation .sr-name { min-width: 220px; }
 svg.sector-spark { display: block; }
+/* Spec 9g — Scorecard Repository tab. */
+.scorecards-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 1rem;
+  min-height: 400px;
+}
+@media (max-width: 900px) {
+  .scorecards-layout { grid-template-columns: 1fr; }
+}
+.sc-left {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.6rem;
+}
+.sc-pane-head { margin: 0 0 0.5rem 0; font-size: 0.85rem; }
+.sc-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.sc-row {
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius2);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.sc-row:hover, .sc-row:focus {
+  background: rgb(var(--color-surface-raised));
+  outline: none;
+}
+.sc-row.active {
+  background: rgb(var(--color-surface-raised));
+  border-left-color: rgb(var(--color-accent));
+}
+.sc-row-title { font-weight: 500; font-size: 0.88rem; }
+.sc-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  margin-top: 0.2rem;
+  color: rgb(var(--color-text-muted));
+}
+.sc-version { font-family: var(--font-mono); }
+.sc-right {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  overflow-y: auto;
+  max-height: 80vh;
+}
+.sc-viewer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid rgb(var(--color-border));
+}
+.sc-title { margin: 0; font-size: 1.3rem; }
+.sc-doctrine-tag {
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius2);
+  background: rgb(var(--color-accent) / 0.12);
+  border: 1px solid rgb(var(--color-accent) / 0.35);
+  font-size: 0.78rem;
+}
+.btn-mini {
+  padding: 0.15rem 0.4rem !important;
+  font-size: 0.72rem !important;
+}
+.sc-md-rendered { line-height: 1.6; font-size: 0.93rem; }
+.sc-md-rendered h1, .sc-md-rendered h2, .sc-md-rendered h3 {
+  margin-top: 1.2rem;
+  margin-bottom: 0.5rem;
+}
+.sc-md-rendered h1 { font-size: 1.4rem; }
+.sc-md-rendered h2 { font-size: 1.15rem; }
+.sc-md-rendered h3 { font-size: 1rem; }
+.sc-md-rendered code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: rgb(var(--color-surface-raised));
+  padding: 0.1rem 0.3rem;
+  border-radius: var(--radius2);
+}
+.sc-md-rendered pre {
+  background: rgb(var(--color-surface-raised));
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-size: 0.82rem;
+}
+.sc-md-rendered pre code { background: transparent; padding: 0; }
+.sc-md-rendered table {
+  border-collapse: collapse;
+  margin: 0.8rem 0;
+  font-size: 0.85rem;
+}
+.sc-md-rendered th, .sc-md-rendered td {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgb(var(--color-border));
+}
+.sc-md-rendered th { background: rgb(var(--color-surface-raised)); }
+.sc-md-rendered blockquote {
+  border-left: 3px solid rgb(var(--color-accent));
+  padding: 0.4rem 0.8rem;
+  margin: 0.7rem 0;
+  color: rgb(var(--color-text-muted));
+  background: rgb(var(--color-surface-raised));
+  border-radius: var(--radius2);
+}
+.sc-holdings-block {
+  margin-top: 1.5rem;
+  padding-top: 0.8rem;
+  border-top: 1px dashed rgb(var(--color-border));
+}
+.sc-holdings-block h4 { margin: 0 0 0.5rem 0; }
+.sc-chip-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.sc-holding-chip {
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius2);
+  background: rgb(var(--color-surface-raised));
+  border: 1px solid rgb(var(--color-border));
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  text-decoration: none;
+  color: rgb(var(--color-text));
+}
+.sc-holding-chip:hover {
+  border-color: rgb(var(--color-accent));
+}
+
+/* Editor modal. */
+.sc-editor-modal { max-width: 95vw; width: 1200px; }
+.sc-editor-body { padding: 0; }
+.sc-editor-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  min-height: 60vh;
+}
+.sc-md-textarea {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  padding: 1rem;
+  border: none;
+  border-right: 1px solid rgb(var(--color-border));
+  background: rgb(var(--color-surface-sunken));
+  color: rgb(var(--color-text));
+  resize: vertical;
+  outline: none;
+  min-height: 60vh;
+}
+.sc-md-preview {
+  padding: 1rem 1.2rem;
+  overflow-y: auto;
+  max-height: 70vh;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.sc-md-preview h1, .sc-md-preview h2, .sc-md-preview h3 {
+  margin-top: 0.8rem;
+}
+.sc-md-preview code, .sc-md-preview pre {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  background: rgb(var(--color-surface-raised));
+}
+.sc-version-row {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px dashed rgb(var(--color-border));
+}
+
+/* 📋 button on Sector Rotation rows. */
+.sr-sc-btn {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0 0.3rem;
+  font-size: 0.95rem;
+  vertical-align: middle;
+}
+.sr-sc-btn:hover { opacity: 0.7; }
+.sr-sc-btn.dim { opacity: 0.4; }
+.sr-sc-btn.dim:hover { opacity: 0.8; }
+
 /* Spec 9f D6 — small sector-flow pill on Stocks/Watchlist rows. */
 .sector-flow-pill {
   display: inline-block;

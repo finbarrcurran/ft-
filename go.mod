@@ -3,14 +3,18 @@ module ft
 go 1.24.0
 
 require (
+	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/xuri/excelize/v2 v2.10.1
+	github.com/yuin/goldmark v1.8.2
 	golang.org/x/crypto v0.48.0
 	modernc.org/sqlite v1.34.1
 )
 
 require (
+	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/css v1.0.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect

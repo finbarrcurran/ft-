@@ -6109,11 +6109,20 @@ async function renderSectorRotation() {
     return `<th class="${cls.join(' ')}" data-sort-key="${key}"${lockHint}>${label}${arrow}</th>`;
   };
 
-  const rows = sectors.map((s) => `
+  // Build a map from sector code → scorecard.code so we know which 📋
+  // button to render (jumps to existing scorecard or "Add scorecard").
+  const scorecardMap = await loadScorecardCoverage();
+
+  const rows = sectors.map((s) => {
+    const sc = scorecardMap.get(s.code);
+    const scBtn = sc
+      ? `<button class="sr-sc-btn" title="View scorecard: ${escapeHTML(sc.displayName)}" data-sc-jump="${escapeHTML(sc.code)}">📋</button>`
+      : `<button class="sr-sc-btn dim" title="No scorecard yet — opens Scorecards tab" data-sc-jump="">📋</button>`;
+    return `
     <tr data-sector-id="${s.sectorId}">
       <td class="sr-handle" draggable="true" title="Drag to reorder">⋮⋮</td>
       <td class="sr-name">
-        <div><strong>${escapeHTML(s.displayName)}</strong></div>
+        <div><strong>${escapeHTML(s.displayName)}</strong> ${scBtn}</div>
         <div class="dim" style="font-size:0.72rem">${escapeHTML(s.parentGics)} · ${escapeHTML(s.etfTickerPrimary)}${s.jordiStage != null ? ' · stage ' + s.jordiStage : ''}</div>
       </td>
       <td class="num">${pctReturn(s.return1w, 1)}</td>
@@ -6128,7 +6137,8 @@ async function renderSectorRotation() {
         ? '<span class="dim">—</span>'
         : `<span class="${s.holdingsCount > 0 ? '' : 'dim'}">${s.holdingsCount || 0}h${s.watchlistCount > 0 ? ` · ${s.watchlistCount}w` : ''}</span>`}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   // Reset-to-auto button only useful when user has an order saved.
   const resetBtn = hasUserOrder
@@ -6175,6 +6185,16 @@ async function renderSectorRotation() {
       <div id="sr-digest-list" class="dim">loading…</div>
     </details>
   `;
+
+  // Spec 9g D4 — wire 📋 Scorecard buttons.
+  for (const btn of content.querySelectorAll('.sr-sc-btn[data-sc-jump]')) {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const code = btn.dataset.scJump;
+      if (code) state.selectedScorecard = code;
+      switchTab('scorecards');
+    });
+  }
 
   // Wire column sort (only effective when no user order — otherwise
   // sorting fights the saved order).
@@ -6312,6 +6332,24 @@ function sortSectors(rows, key, dir) {
   });
 }
 
+// Spec 9g D4 — sector code → scorecard map. Cached for the page lifetime
+// since scorecards rarely change. Returns Map<sectorCode, {code, displayName}>.
+let _scorecardCoverageCache = null;
+async function loadScorecardCoverage() {
+  if (_scorecardCoverageCache) return _scorecardCoverageCache;
+  const map = new Map();
+  try {
+    const r = await api('/api/scorecards');
+    for (const sc of (r.scorecards || [])) {
+      for (const code of (sc.appliesToSectors || [])) {
+        if (!map.has(code)) map.set(code, { code: sc.code, displayName: sc.displayName });
+      }
+    }
+  } catch (_) { /* empty map */ }
+  _scorecardCoverageCache = map;
+  return map;
+}
+
 async function loadJordiSectorRead() {
   try {
     const r = await api('/api/preferences/jordi_current_sector_read');
@@ -6322,15 +6360,315 @@ async function loadJordiSectorRead() {
 }
 
 // ============================================================================
-// Spec 9g — Scorecards tab (placeholder; full UI lands in 9g-B)
+// Spec 9g — Scorecard Repository tab
 // ============================================================================
+//
+// Two-pane layout: scorecard list left, viewer/editor right. URL hash (or
+// state.selectedScorecard) determines which scorecard is open. Linked nav
+// from the Sector Rotation tab routes here with a code preselected.
+
+if (state.selectedScorecard == null) state.selectedScorecard = null;
+let _scorecardListCache = null;
+
 async function renderScorecards() {
-  $('#content').innerHTML = `
-    <div class="empty">
-      <div>Scorecards tab coming in 9g-B.</div>
-      <div class="hint">Schema + service + seeded markdown (Philosophy, Energy, Hydrocarbons) live in 9g-A. UI lands next.</div>
+  const content = $('#content');
+  content.innerHTML = '<div class="empty">loading scorecards…</div>';
+
+  let list;
+  try {
+    const r = await api('/api/scorecards');
+    list = r.scorecards || [];
+    _scorecardListCache = list;
+  } catch (e) {
+    content.innerHTML = `<div class="empty"><div class="loss">scorecards failed: ${escapeHTML(e.message)}</div></div>`;
+    return;
+  }
+
+  // Pre-select: state.selectedScorecard → first locked → first row.
+  let selected = state.selectedScorecard
+    || list.find(s => s.status === 'locked' && !s.isDoctrine)?.code
+    || list.find(s => s.status === 'locked')?.code
+    || list[0]?.code
+    || null;
+  state.selectedScorecard = selected;
+
+  const statusIcon = (s) => {
+    if (s.isDoctrine) return '📖';
+    if (s.status === 'locked') return '🔒';
+    if (s.status === 'needs-review') return '🔄';
+    return '⚠';
+  };
+  const statusLabel = (s) => {
+    if (s.isDoctrine) return 'doctrine';
+    return s.status;
+  };
+
+  const leftPane = list.map(s => {
+    const cls = ['sc-row'];
+    if (s.code === selected) cls.push('active');
+    const hcount = s.holdingsCount || 0;
+    return `
+      <div class="${cls.join(' ')}" data-sc-code="${escapeHTML(s.code)}" tabindex="0">
+        <div class="sc-row-title">${escapeHTML(s.displayName)}</div>
+        <div class="sc-row-meta">
+          <span class="sc-version">v${escapeHTML(s.currentVersion)}</span>
+          <span class="sc-status">${statusIcon(s)} ${escapeHTML(statusLabel(s))}</span>
+          ${hcount > 0 ? `<span class="sc-holdings">${hcount} holding${hcount === 1 ? '' : 's'}</span>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  content.innerHTML = `
+    <div class="scorecards-layout">
+      <aside class="sc-left">
+        <h3 class="sc-pane-head">Scorecards <span class="dim" style="font-size:0.72rem; font-weight:normal">(${list.length})</span></h3>
+        <div class="sc-list">${leftPane || '<p class="dim">No scorecards seeded.</p>'}</div>
+      </aside>
+      <section class="sc-right" id="sc-right">
+        <div class="empty">loading…</div>
+      </section>
     </div>
   `;
+
+  // Wire left-pane clicks.
+  for (const row of content.querySelectorAll('.sc-row[data-sc-code]')) {
+    const open = () => {
+      state.selectedScorecard = row.dataset.scCode;
+      renderScorecards();
+    };
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
+    });
+  }
+
+  if (selected) {
+    await loadScorecardRightPane(selected);
+  }
+}
+
+async function loadScorecardRightPane(code) {
+  const right = $('#sc-right');
+  if (!right) return;
+  right.innerHTML = '<div class="empty">loading…</div>';
+  let data;
+  try {
+    data = await api(`/api/scorecards/${encodeURIComponent(code)}`);
+  } catch (e) {
+    right.innerHTML = `<div class="empty"><div class="loss">load failed: ${escapeHTML(e.message)}</div></div>`;
+    return;
+  }
+  const sc = data.scorecard;
+  const html = data.html;
+
+  // Holdings-using-this-adapter section (9g D5).
+  let holdingsBlock = '';
+  if (sc.appliesToSectors && sc.appliesToSectors.length > 0) {
+    try {
+      const r = await api('/api/holdings/stocks');
+      const sectorMap = await getSectorTagMap();
+      const idsByCode = new Map();
+      for (const [id, info] of sectorMap.entries()) idsByCode.set(info.code, id);
+      const matchedSectorIds = new Set(sc.appliesToSectors.map(c => idsByCode.get(c)).filter(Boolean));
+      const matched = (r.holdings || []).filter(h => h.sectorUniverseId != null && matchedSectorIds.has(h.sectorUniverseId));
+      if (matched.length > 0) {
+        const chips = matched.map(h => `
+          <a class="sc-holding-chip" href="#" data-sc-jump-holding-kind="stock" data-sc-jump-holding-id="${h.id}">
+            ${escapeHTML(h.ticker || h.name)} <span class="dim">${escapeHTML(h.name)}</span>
+          </a>
+        `).join('');
+        holdingsBlock = `
+          <div class="sc-holdings-block">
+            <h4>Holdings using this adapter</h4>
+            <div class="sc-chip-row">${chips}</div>
+          </div>
+        `;
+      } else {
+        holdingsBlock = `
+          <div class="sc-holdings-block">
+            <h4>Holdings using this adapter</h4>
+            <p class="dim">No current holdings mapped to this adapter.</p>
+          </div>
+        `;
+      }
+    } catch (_) { /* silent */ }
+  }
+
+  const editBtn = sc.isDoctrine
+    ? '<span class="sc-doctrine-tag">📖 doctrine — read-only</span>'
+    : `<button class="btn-ghost" id="sc-edit-btn">✎ Edit</button>`;
+  const versionsBtn = `<button class="btn-ghost" id="sc-versions-btn">View versions</button>`;
+  const statusBtns = sc.isDoctrine ? '' : `
+    <span class="dim" style="margin:0 0.4rem">·</span>
+    <span class="dim" style="font-size:0.78rem">Mark as</span>
+    ${['draft','locked','needs-review'].filter(x => x !== sc.status).map(x =>
+      `<button class="btn-ghost btn-mini" data-sc-status="${x}">${x}</button>`
+    ).join('')}
+  `;
+
+  right.innerHTML = `
+    <div class="sc-viewer-head">
+      <div>
+        <h2 class="sc-title">${escapeHTML(sc.displayName)}</h2>
+        <div class="dim">${escapeHTML(sc.shortDescription)}</div>
+        <div class="dim" style="font-size:0.78rem; margin-top:0.3rem">
+          v${escapeHTML(sc.currentVersion)} · status: <strong>${escapeHTML(sc.status)}</strong> · updated ${new Date(sc.updatedAt).toLocaleDateString()}
+        </div>
+      </div>
+      <div class="sc-actions">${editBtn} ${versionsBtn}${statusBtns}</div>
+    </div>
+    <div class="sc-md-rendered" id="sc-md-rendered">${html}</div>
+    ${holdingsBlock}
+  `;
+
+  // Wire actions.
+  if (!sc.isDoctrine) {
+    $('#sc-edit-btn')?.addEventListener('click', () => openScorecardEditor(sc));
+    for (const btn of right.querySelectorAll('[data-sc-status]')) {
+      btn.addEventListener('click', async () => {
+        try {
+          await api(`/api/scorecards/${encodeURIComponent(sc.code)}/status`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: btn.dataset.scStatus }),
+          });
+          renderScorecards();
+        } catch (e) { alert('Status update failed: ' + e.message); }
+      });
+    }
+  }
+  $('#sc-versions-btn')?.addEventListener('click', () => openScorecardVersions(sc.code));
+  // Holding chips — open detail page.
+  for (const ch of right.querySelectorAll('[data-sc-jump-holding-kind]')) {
+    ch.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      openHoldingDetail(ch.dataset.scJumpHoldingKind, parseInt(ch.dataset.scJumpHoldingId, 10));
+    });
+  }
+}
+
+// Edit mode: textarea + live preview split view.
+function openScorecardEditor(sc) {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal sc-editor-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Edit — ${escapeHTML(sc.displayName)}</div>
+            <div class="desc">Current v${escapeHTML(sc.currentVersion)}. Save (no bump) or Save as new version.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body sc-editor-body">
+          <div class="sc-editor-split">
+            <textarea id="sc-md-text" class="sc-md-textarea" spellcheck="false">${escapeHTML(sc.markdownCurrent)}</textarea>
+            <div id="sc-md-preview" class="sc-md-preview"></div>
+          </div>
+          <div class="error" id="sc-edit-err"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="sc-cancel">Cancel</button>
+          <button class="btn-ghost" id="sc-save-version">Save as new version…</button>
+          <button class="btn-primary" id="sc-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#sc-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+
+  const ta = $('#sc-md-text');
+  const pv = $('#sc-md-preview');
+  let previewTimer = null;
+  const refreshPreview = async () => {
+    try {
+      const res = await fetch('/api/scorecards/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: ta.value,
+      });
+      pv.innerHTML = await res.text();
+    } catch (_) { /* keep last preview */ }
+  };
+  refreshPreview();
+  ta.addEventListener('input', () => {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(refreshPreview, 300);
+  });
+
+  $('#sc-save').addEventListener('click', async () => {
+    const err = $('#sc-edit-err'); err.textContent = '';
+    try {
+      await api(`/api/scorecards/${encodeURIComponent(sc.code)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ markdown: ta.value }),
+      });
+      closeImportModal();
+      renderScorecards();
+    } catch (e) { err.textContent = e.message; }
+  });
+  $('#sc-save-version').addEventListener('click', async () => {
+    const err = $('#sc-edit-err'); err.textContent = '';
+    const version = prompt('New version string?', '');
+    if (!version) return;
+    const note = prompt('Changelog note (one line)?', '') || '';
+    try {
+      await api(`/api/scorecards/${encodeURIComponent(sc.code)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          markdown: ta.value,
+          asNewVersion: { version, changelogNote: note },
+        }),
+      });
+      closeImportModal();
+      renderScorecards();
+    } catch (e) { err.textContent = e.message; }
+  });
+}
+
+async function openScorecardVersions(code) {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Version history — ${escapeHTML(code)}</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div id="sc-versions-list">loading…</div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  try {
+    const r = await api(`/api/scorecards/${encodeURIComponent(code)}/versions`);
+    const versions = r.versions || [];
+    if (versions.length === 0) {
+      $('#sc-versions-list').innerHTML = '<p class="dim">No version history yet.</p>';
+      return;
+    }
+    $('#sc-versions-list').innerHTML = versions.map(v => `
+      <div class="sc-version-row">
+        <div><strong>v${escapeHTML(v.version)}</strong> <span class="dim">${new Date(v.createdAt).toLocaleString()}</span></div>
+        ${v.changelogNote ? `<div class="dim" style="font-size:0.85rem">${escapeHTML(v.changelogNote)}</div>` : ''}
+      </div>
+    `).join('');
+  } catch (e) {
+    $('#sc-versions-list').innerHTML = `<p class="loss">load failed: ${escapeHTML(e.message)}</p>`;
+  }
 }
 
 installCommandPaletteShortcut();

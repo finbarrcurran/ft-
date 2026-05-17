@@ -24,6 +24,7 @@ import (
 	"ft/internal/marketdata"
 	"ft/internal/performance"
 	"ft/internal/refresh"
+	"ft/internal/scorecards"
 	"ft/internal/sector_rotation"
 	"ft/internal/server"
 	"ft/internal/store"
@@ -187,6 +188,17 @@ func runServe() {
 	// internal/market and internal/news can call health.Record without
 	// importing internal/store.
 	health.Init(st)
+
+	// Spec 9g D7: seed Philosophy + Energy + Hydrocarbons scorecards on
+	// first run. Idempotent — checks per-code before inserting. Uses a
+	// short-lived context here since bgCtx isn't created yet.
+	{
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := scorecards.New(st.DB).SeedIfEmpty(seedCtx); err != nil {
+			slog.Warn("scorecards seed failed (continuing)", "err", err)
+		}
+		seedCancel()
+	}
 
 	srv := server.New(cfg, st, llmSvc)
 
