@@ -140,6 +140,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/llm/override", s.requireUserOrToken(s.handleLLMOverride))
 	s.mux.HandleFunc("POST /api/llm/override/clear", s.requireUserOrToken(s.handleLLMOverrideClear))
 
+	// Spec 9d: Performance & retrospective endpoints.
+	s.mux.HandleFunc("GET /api/performance/overview", s.requireUserOrToken(s.handlePerformanceOverview))
+	s.mux.HandleFunc("GET /api/performance/cohorts", s.requireUserOrToken(s.handlePerformanceCohorts))
+	s.mux.HandleFunc("GET /api/performance/calibration", s.requireUserOrToken(s.handlePerformanceCalibration))
+	s.mux.HandleFunc("GET /api/performance/cohort/{key}", s.requireUserOrToken(s.handlePerformanceCohortDrill))
+	s.mux.HandleFunc("GET /api/performance/export.csv", s.requireUserOrToken(s.handlePerformanceExport))
+
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))
 

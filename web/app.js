@@ -255,6 +255,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'summary' ? 'active' : ''}" data-tab="summary">Summary</button>
         <button class="tab ${state.tab === 'stocks' ? 'active' : ''}" data-tab="stocks">Stocks &amp; ETFs</button>
         <button class="tab ${state.tab === 'crypto' ? 'active' : ''}" data-tab="crypto">Crypto</button>
+        <button class="tab ${state.tab === 'performance' ? 'active' : ''}" data-tab="performance">Performance</button>
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
         <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
@@ -1134,6 +1135,8 @@ async function loadActiveTab() {
         state.crypto = res.holdings || [];
       }
       renderCrypto();
+    } else if (state.tab === 'performance') {
+      await renderPerformance();
     } else if (state.tab === 'screener') {
       await renderScreener();
     } else if (state.tab === 'watchlist') {
@@ -3764,6 +3767,259 @@ async function submitPromote(entry, isStock) {
   } catch (e) {
     err.textContent = e.message;
   }
+}
+
+// ============================================================================
+// Spec 9d — Performance tab
+// ============================================================================
+
+if (state.perfWindow == null) state.perfWindow = 'all';
+
+async function renderPerformance() {
+  const content = $('#content');
+  content.innerHTML = '<div class="empty">loading performance…</div>';
+
+  let overview, cohorts, calib;
+  try {
+    [overview, cohorts, calib] = await Promise.all([
+      api(`/api/performance/overview?window=${state.perfWindow}`),
+      api(`/api/performance/cohorts?window=${state.perfWindow}`),
+      api('/api/performance/calibration'),
+    ]);
+  } catch (err) {
+    content.innerHTML = `<div class="empty"><div class="loss">performance failed: ${escapeHTML(err.message)}</div></div>`;
+    return;
+  }
+
+  const m = overview.metrics || {};
+  const isEmpty = (m.count || 0) === 0;
+
+  // Window selector + export button at top.
+  const windows = [['all','All-time'],['365d','Last 365 days'],['90d','Last 90 days'],['30d','Last 30 days']];
+  const windowSel = windows.map(([v,l]) =>
+    `<button class="ct-btn ${v === state.perfWindow ? 'active' : ''}" data-pwin="${v}">${escapeHTML(l)}</button>`).join('');
+
+  // Headline KPIs.
+  const kpiCard = (label, value, sub, tone) => `
+    <div class="kpi-card">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value num ${tone || ''}">${value}</div>
+      <div class="kpi-sub num ${tone === 'gain' ? 'gain' : tone === 'loss' ? 'loss' : 'dim'}">${sub || '&nbsp;'}</div>
+    </div>
+  `;
+  const winRatePct = isEmpty ? '—' : `${(m.winRate * 100).toFixed(1)}%`;
+  const expectancyStr = isEmpty ? '—' : `${m.expectancy >= 0 ? '+' : ''}${m.expectancy.toFixed(2)}R`;
+  const expectancyTone = isEmpty ? '' : m.expectancy >= 0.5 ? 'gain' : m.expectancy >= 0 ? '' : 'loss';
+  const pnlStr = isEmpty ? '—' : `${m.totalPnlUsd >= 0 ? '+' : '-'}$${fmtNum0.format(Math.abs(m.totalPnlUsd))}`;
+  const pnlTone = isEmpty ? '' : m.totalPnlUsd > 0 ? 'gain' : m.totalPnlUsd < 0 ? 'loss' : '';
+
+  const kpiRow = `
+    <div class="kpi-row">
+      ${kpiCard('Trades', isEmpty ? '—' : String(m.count), isEmpty ? '' : `${m.winCount} winners · ${m.lossCount} losers`, '')}
+      ${kpiCard('Win rate', winRatePct, isEmpty ? '' : `avg winner +${m.avgWinnerR.toFixed(2)}R · avg loser ${m.avgLoserR.toFixed(2)}R`, '')}
+      ${kpiCard('Expectancy', expectancyStr, 'per trade', expectancyTone)}
+      ${kpiCard('Realized P&L', pnlStr, isEmpty ? '' : `avg hold ${m.avgHoldDays.toFixed(0)}d`, pnlTone)}
+    </div>
+  `;
+
+  // R-multiple histogram.
+  const histMax = (overview.histogram || []).reduce((mx, b) => Math.max(mx, b.count), 0);
+  const histBars = (overview.histogram || []).map(b => {
+    const h = histMax > 0 ? (b.count / histMax) * 70 : 0;
+    const tone = b.label.startsWith('+') || b.label.startsWith('≥+') ? 'gain' : b.label.startsWith('0') ? 'dim' : 'loss';
+    return `
+      <div class="hist-col">
+        <div class="hist-bar-wrap"><div class="hist-bar ${tone}" style="height:${h}px"></div></div>
+        <div class="hist-count num">${b.count || ''}</div>
+        <div class="hist-label dim">${escapeHTML(b.label)}</div>
+      </div>
+    `;
+  }).join('');
+
+  // Equity curve (SVG line).
+  const equity = overview.equity || [];
+  let equityHTML = '';
+  if (equity.length >= 2) {
+    const W = 800, H = 200, P = 20;
+    const minV = Math.min(...equity.map(e => e.portfolioValue));
+    const maxV = Math.max(...equity.map(e => e.portfolioValue));
+    const rng = Math.max(1, maxV - minV);
+    const pts = equity.map((e, i) => {
+      const x = P + (i / (equity.length - 1)) * (W - 2 * P);
+      const y = H - P - ((e.portfolioValue - minV) / rng) * (H - 2 * P);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const peak = equity.reduce((mx, e) => e.portfolioValue > mx.portfolioValue ? e : mx, equity[0]);
+    const cur = equity[equity.length - 1];
+    const maxDd = equity.reduce((mn, e) => e.drawdownFromPeak < mn.drawdownFromPeak ? e : mn, equity[0]);
+    equityHTML = `
+      <h4 class="rh-side" style="margin-top:1rem">Equity curve · ${equity.length} days</h4>
+      <div class="equity-wrap">
+        <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%; height:200px; background:rgb(var(--color-surface-sunken)); border-radius:var(--radius); border:1px solid rgb(var(--color-border))">
+          <polyline fill="none" stroke="rgb(var(--color-accent))" stroke-width="1.6" points="${pts}"/>
+        </svg>
+        <div class="equity-summary dim">
+          Start $${fmtNum0.format(equity[0].portfolioValue)}
+          · Peak $${fmtNum0.format(peak.portfolioValue)} (${escapeHTML(peak.date)})
+          · Current $${fmtNum0.format(cur.portfolioValue)}
+          · Max DD ${maxDd.drawdownFromPeak.toFixed(2)}%
+          · Time underwater ${overview.underwaterPct.toFixed(0)}%
+        </div>
+      </div>
+    `;
+  }
+
+  // Cohort breakdown table — group cohorts by family.
+  const byFamily = {};
+  for (const c of cohorts.cohorts || []) {
+    const fam = c.key.includes(':') ? c.key.split(':')[0] : 'all';
+    (byFamily[fam] = byFamily[fam] || []).push(c);
+  }
+  const familyOrder = ['all', 'kind', 'setup', 'regime', 'percoco', 'jordi', 'cowen', 'hold', 'exit'];
+  const familyLabels = {
+    all: 'Overall', kind: 'By kind', setup: 'By setup type', regime: 'By regime',
+    percoco: 'By Percoco score', jordi: 'By Jordi score', cowen: 'By Cowen score',
+    hold: 'By holding period', exit: 'By exit reason',
+  };
+  const cohortSections = familyOrder.filter(f => byFamily[f]).map(fam => {
+    const rows = byFamily[fam].map(c => {
+      const expTone = c.expectancy >= 0.5 ? 'gain' : c.expectancy < 0 ? 'loss' : 'dim';
+      const lowConfTag = c.lowConfidence ? '<span class="dim" style="font-size:0.7rem"> (n&lt;5)</span>' : '';
+      return `
+        <tr data-cohort="${escapeHTML(c.key)}">
+          <td>${escapeHTML(c.label)}${lowConfTag}</td>
+          <td class="num">${c.tradeCount}</td>
+          <td class="num">${(c.winRate * 100).toFixed(0)}%</td>
+          <td class="num">${c.avgWinR ? c.avgWinR.toFixed(2) : '—'}R / ${c.avgLossR ? c.avgLossR.toFixed(2) : '—'}R</td>
+          <td class="num ${expTone}">${c.expectancy >= 0 ? '+' : ''}${c.expectancy.toFixed(2)}R</td>
+          <td class="num ${c.totalPnlUsd > 0 ? 'gain' : c.totalPnlUsd < 0 ? 'loss' : ''}">
+            ${c.totalPnlUsd >= 0 ? '+' : '-'}$${fmtNum0.format(Math.abs(c.totalPnlUsd))}
+          </td>
+        </tr>
+      `;
+    }).join('');
+    return `
+      <h4 class="rh-side" style="margin-top:1rem">${escapeHTML(familyLabels[fam] || fam)}</h4>
+      <div class="tablewrap"><table class="holdings perf-cohort"><thead><tr>
+        <th>Cohort</th><th class="num">N</th><th class="num">Win%</th>
+        <th class="num">Avg win / loss R</th><th class="num">Expectancy</th><th class="num">$ P&L</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    `;
+  }).join('');
+
+  // Calibration panel.
+  const calibBlocks = (calib.frameworks || []).map(fw => {
+    const buckets = ['le-8','9-12','13-16'];
+    const rows = buckets.map(b => {
+      const v = fw.buckets[b] || 0;
+      const n = fw.counts[b] || 0;
+      const tone = v >= 0.5 ? 'gain' : v >= 0 ? '' : 'loss';
+      const icon = v >= 0.5 ? '✓' : v >= 0 ? '⚠' : '✗';
+      return `<li><span>${escapeHTML(b)}</span> → <span class="num ${tone}">${v >= 0 ? '+' : ''}${v.toFixed(2)}R</span> <span class="dim">${icon} n=${n}</span></li>`;
+    }).join('');
+    let banner = '';
+    if (!fw.sufficient) {
+      banner = '<div class="dim" style="font-size:0.78rem; font-style:italic">Insufficient data (need ≥5 trades per bucket) — treat as informational only.</div>';
+    } else if (!fw.monotonic) {
+      banner = `<div class="loss" style="font-size:0.8rem">⚠ Non-monotonic: ${escapeHTML(fw.warning)}</div>`;
+    } else {
+      banner = '<div class="gain" style="font-size:0.8rem">✓ Monotonic — framework is well-calibrated.</div>';
+    }
+    return `
+      <div class="calib-fw">
+        <h4 class="rh-side">${escapeHTML(fw.framework)}</h4>
+        <ul class="calib-list">${rows}</ul>
+        ${banner}
+      </div>
+    `;
+  }).join('');
+
+  // Empty state guidance.
+  const emptyBanner = isEmpty ? `
+    <div class="stale-banner">
+      ⚠ No closed trades yet. The Performance tab fills in once positions
+      open + close (via soft-delete on the holdings table). Run
+      <code>sudo -u ft /opt/ft/bin/ft perf-derive</code> if you've
+      already had closures and want to re-derive.
+    </div>
+  ` : '';
+
+  content.innerHTML = `
+    <div class="perf-toolbar">
+      <div class="currency-toggle" role="tablist">${windowSel}</div>
+      <a class="btn-ghost" href="/api/performance/export.csv" download>Export CSV</a>
+    </div>
+    ${emptyBanner}
+    ${kpiRow}
+    <h4 class="rh-side" style="margin-top:1rem">R-multiple distribution</h4>
+    <div class="hist-row">${histBars}</div>
+    ${equityHTML}
+    <h4 class="rh-side" style="margin-top:1.2rem">Methodology calibration <span class="dim" style="font-size:0.78rem; font-weight:normal">(does scoring trades higher produce better outcomes?)</span></h4>
+    <div class="calib-row">${calibBlocks}</div>
+    <h4 class="rh-side" style="margin-top:1.2rem">Cohort breakdown</h4>
+    ${cohortSections || '<div class="dim">No cohort data yet.</div>'}
+  `;
+
+  // Window selector clicks.
+  document.querySelectorAll('[data-pwin]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.perfWindow = btn.dataset.pwin;
+      renderPerformance();
+    });
+  });
+  // Cohort row click → drill-down (alert for v1 since the modal would be huge)
+  document.querySelectorAll('tr[data-cohort]').forEach(row => {
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', () => openPerfCohortDrill(row.dataset.cohort));
+  });
+}
+
+async function openPerfCohortDrill(key) {
+  let d;
+  try {
+    d = await api(`/api/performance/cohort/${encodeURIComponent(key)}?window=${state.perfWindow}`);
+  } catch (e) {
+    alert('drill-down failed: ' + e.message);
+    return;
+  }
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  const tradeRows = (d.trades || []).map(t => `
+    <tr>
+      <td>${escapeHTML(new Date(t.openedAt).toLocaleDateString())} → ${escapeHTML(new Date(t.closedAt).toLocaleDateString())}</td>
+      <td><strong>${escapeHTML(t.ticker)}</strong> <span class="dim">${escapeHTML(t.kind)}</span></td>
+      <td>${escapeHTML(t.setupType || '—')}</td>
+      <td>${escapeHTML(t.exitReason)}</td>
+      <td class="num">$${fmtNum2.format(t.entryPrice)}</td>
+      <td class="num">$${fmtNum2.format(t.exitPriceAvg)}</td>
+      <td class="num ${t.realizedRMultiple > 0 ? 'gain' : 'loss'}">${t.realizedRMultiple >= 0 ? '+' : ''}${t.realizedRMultiple.toFixed(2)}R</td>
+      <td class="num ${t.realizedPnlUsd > 0 ? 'gain' : 'loss'}">${t.realizedPnlUsd >= 0 ? '+' : '-'}$${fmtNum0.format(Math.abs(t.realizedPnlUsd))}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="8" class="dim" style="text-align:center">No trades.</td></tr>';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" style="max-width:900px" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">${escapeHTML(d.label)}</div>
+            <div class="desc dim">${d.trades.length} trade${d.trades.length === 1 ? '' : 's'} · window: ${escapeHTML(d.window)}</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="tablewrap"><table class="holdings"><thead><tr>
+            <th>Opened → Closed</th><th>Ticker</th><th>Setup</th><th>Exit</th>
+            <th class="num">Entry</th><th class="num">Exit</th>
+            <th class="num">R</th><th class="num">P&L</th>
+          </tr></thead><tbody>${tradeRows}</tbody></table></div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
 }
 
 boot();
