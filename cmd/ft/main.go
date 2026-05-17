@@ -282,6 +282,10 @@ func runServe() {
 		})
 	}()
 
+	// Spec 9f D8 — Friday 22:00 UTC weekly digest. ScheduleWeeklyDigest
+	// has its own next-Friday loop; we just kick it off in a goroutine.
+	go sector_rotation.ScheduleWeeklyDigest(bgCtx, st)
+
 	go func() {
 		slog.Info("listening", "addr", cfg.Addr, "cookie_secure", cfg.CookieSecure)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

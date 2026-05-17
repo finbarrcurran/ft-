@@ -1300,6 +1300,55 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
 .sector-rotation .sr-sortable.active { color: rgb(var(--color-text)); }
 .sector-rotation .sr-name { min-width: 220px; }
 svg.sector-spark { display: block; }
+/* Spec 9f D6 — small sector-flow pill on Stocks/Watchlist rows. */
+.sector-flow-pill {
+  display: inline-block;
+  margin-top: 0.2rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  border-radius: var(--radius2);
+  border: 1px solid rgb(var(--color-border));
+  background: rgb(var(--color-surface));
+  white-space: nowrap;
+}
+.sector-flow-pill.gain {
+  color: rgb(var(--color-gain));
+  border-color: rgb(var(--color-gain) / 0.35);
+  background: rgb(var(--color-gain) / 0.08);
+}
+.sector-flow-pill.loss {
+  color: rgb(var(--color-loss));
+  border-color: rgb(var(--color-loss) / 0.35);
+  background: rgb(var(--color-loss) / 0.08);
+}
+/* Spec 9f D8 — Recent reads expander. */
+.sector-recent-reads {
+  margin-top: 1.5rem;
+}
+.sector-recent-reads summary {
+  cursor: pointer;
+  font-weight: 500;
+  padding: 0.4rem 0.6rem;
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+}
+.sector-recent-reads .digest-card {
+  margin-top: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.sector-recent-reads .digest-date {
+  font-family: var(--font-mono);
+  color: rgb(var(--color-text-muted));
+  font-size: 0.75rem;
+}
 
 /* Spec 12 D7 — autofilled-field flash on holding modal. */
 input.autofilled, select.autofilled {

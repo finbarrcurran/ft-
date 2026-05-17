@@ -2128,8 +2128,10 @@ function tileColor(changePct) {
 
 // ---------- stocks table --------------------------------------------------
 
-function renderStocks() {
+async function renderStocks() {
   const rows = state.stocks;
+  // Spec 9f D6 — fetch sector tag map (5-min cache).
+  const sectorTagMap = await getSectorTagMap();
   if (rows.length === 0) {
     $('#content').innerHTML = `
       <div class="empty">
@@ -2215,6 +2217,7 @@ function renderStocks() {
         <td class="holding-name-cell" data-holding-detail="stock:${r.id}" title="Open detail page">
           <div>${escapeHTML(r.name)}</div>
           <div class="ticker">${tickerCell}${r.category ? ' · <span class="dim">' + escapeHTML(r.category) + '</span>' : ''}</div>
+          ${sectorFlowPill(r.sectorUniverseId, sectorTagMap)}
         </td>
         <td class="num">${fmtUSD.format(r.investedUsd)}</td>
         <td class="num">${dash(r.avgOpenPrice, fmtNum2)}</td>
@@ -2283,7 +2286,7 @@ function renderStocks() {
 
 // ---------- crypto table --------------------------------------------------
 
-function renderCrypto() {
+async function renderCrypto() {
   const rows = state.crypto;
   if (rows.length === 0) {
     $('#content').innerHTML = `
@@ -4180,6 +4183,8 @@ if (state.watchlistSort == null) state.watchlistSort = { key: 'addedAt', dir: 'd
 async function renderWatchlist() {
   const res = await api('/api/watchlist');
   state.watchlist = res.watchlist || [];
+  // Spec 9f D6 — sector flow pill cache for watchlist rows.
+  const sectorTagMap = await getSectorTagMap();
 
   if (state.watchlist.length === 0) {
     $('#content').innerHTML = `
@@ -4240,7 +4245,7 @@ async function renderWatchlist() {
     `;
     return `
       <tr data-wid="${e.id}">
-        <td><strong>${escapeHTML(e.ticker)}</strong></td>
+        <td><strong>${escapeHTML(e.ticker)}</strong>${sectorFlowPill(e.sectorUniverseId, sectorTagMap)}</td>
         <td>${escapeHTML(e.companyName || '—')}</td>
         <td><span class="dim">${escapeHTML(e.sector || '—')}</span></td>
         <td class="num">${dash(e.currentPrice, fmtNum2)}</td>
@@ -5975,8 +5980,46 @@ function installCommandPaletteShortcut() {
 }
 
 // ============================================================================
-// Spec 9f — Sector Rotation tab
+// Spec 9f — Sector Rotation tab + helpers shared with Stocks/Watchlist
 // ============================================================================
+
+// Spec 9f D6 — cache the sector_universe_id → {name, tag} lookup so the
+// Stocks + Watchlist rows can show a small "Sector: ↑ Foo" pill without
+// re-querying per render.
+const _sectorTagCache = { byId: null, fetchedAt: 0 };
+
+async function getSectorTagMap() {
+  // 5min TTL — tags update with the 22:00 UTC daily ingest.
+  if (_sectorTagCache.byId && (Date.now() - _sectorTagCache.fetchedAt) < 5 * 60 * 1000) {
+    return _sectorTagCache.byId;
+  }
+  try {
+    const r = await api('/api/sector-rotation/metrics');
+    const m = new Map();
+    for (const s of (r.sectors || [])) {
+      m.set(s.sectorId, { name: s.displayName, tag: s.tag, code: s.code });
+    }
+    _sectorTagCache.byId = m;
+    _sectorTagCache.fetchedAt = Date.now();
+    return m;
+  } catch (_) {
+    return new Map();
+  }
+}
+
+// Spec 9f D6 — render the sector-flow pill for one holding/watchlist row.
+// Returns '' when sector is neutral / unlinked / no_data so we don't
+// clutter the table.
+function sectorFlowPill(sectorId, byId) {
+  if (sectorId == null || !byId) return '';
+  const s = byId.get(sectorId);
+  if (!s || s.tag === 'neutral' || s.tag === 'no_data') return '';
+  const arrow = s.tag === 'rotating_in' ? '↑' : '↓';
+  const tone = s.tag === 'rotating_in' ? 'gain' : 'loss';
+  return `<span class="sector-flow-pill ${tone}" title="Sector rotation tag">Sector: ${arrow} ${escapeHTML(s.name)}</span>`;
+}
+
+
 
 // Tag styling
 function sectorTagPill(tag) {
@@ -6127,6 +6170,10 @@ async function renderSectorRotation() {
       <span style="color:rgb(var(--color-loss))">↓ rotating out</span> = ≤ 0.95×.
       Daily ETF ingest runs at 22:00 UTC after US close.
     </p>
+    <details class="sector-recent-reads" id="sr-recent-reads">
+      <summary>Recent weekly reads</summary>
+      <div id="sr-digest-list" class="dim">loading…</div>
+    </details>
   `;
 
   // Wire column sort (only effective when no user order — otherwise
@@ -6176,6 +6223,31 @@ async function renderSectorRotation() {
       await api('/api/sector-rotation/ordering', { method: 'DELETE' });
       renderSectorRotation();
     } catch (e) { alert('Reset failed: ' + e.message); }
+  });
+
+  // Spec 9f D8 — populate Recent reads expander lazily on first open.
+  const recentDetails = $('#sr-recent-reads');
+  recentDetails?.addEventListener('toggle', async () => {
+    if (!recentDetails.open) return;
+    const list = $('#sr-digest-list');
+    if (!list || list.dataset.loaded) return;
+    list.dataset.loaded = '1';
+    try {
+      const r = await api('/api/sector-rotation/digests?limit=8');
+      const digests = r.digests || [];
+      if (digests.length === 0) {
+        list.innerHTML = '<p class="dim">No digests yet. They write on Fridays at 22:00 UTC.</p>';
+        return;
+      }
+      list.innerHTML = digests.map(d => `
+        <div class="digest-card">
+          <div class="digest-date">Week ending ${escapeHTML(d.weekEnding)}</div>
+          ${escapeHTML(d.markdown)}
+        </div>
+      `).join('');
+    } catch (e) {
+      list.innerHTML = `<p class="loss">load failed: ${escapeHTML(e.message)}</p>`;
+    }
   });
 }
 
