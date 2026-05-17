@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"ft/internal/domain"
 	"ft/internal/market"
+	"ft/internal/performance"
 	"ft/internal/store"
 	"ft/internal/technicals"
 	"log/slog"
@@ -199,6 +200,17 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 	// Computed AFTER history + ATR work above so live prices are current.
 	if err := s.snapshotPortfolioValue(ctx, userID, stocks, cryptos); err != nil {
 		r.Errors = append(r.Errors, fmt.Sprintf("portfolio snapshot: %s", err))
+	}
+
+	// Spec 9d D2 + D4 — derive any new closed_trades from audit log + regenerate
+	// performance_snapshots so the Performance tab has fresh aggregates by morning.
+	if dr, err := performance.DeriveAll(ctx, s.Store, userID); err == nil {
+		slog.Info("daily: closed-trades derive done", "derived", dr.Derived, "alreadyExist", dr.AlreadyExist, "skippedNoOpen", dr.SkippedNoOpen)
+	} else {
+		r.Errors = append(r.Errors, fmt.Sprintf("perf derive: %s", err))
+	}
+	if err := performance.GenerateSnapshots(ctx, s.Store); err != nil {
+		r.Errors = append(r.Errors, fmt.Sprintf("perf snapshots: %s", err))
 	}
 
 	r.FinishedAt = time.Now().UTC()

@@ -21,6 +21,7 @@ import (
 	"ft/internal/macro"
 	"ft/internal/market"
 	"ft/internal/marketdata"
+	"ft/internal/performance"
 	"ft/internal/refresh"
 	"ft/internal/server"
 	"ft/internal/store"
@@ -56,6 +57,8 @@ func main() {
 		runToken(os.Args[2:])
 	case "backfill-bars":
 		runBackfillBars(os.Args[2:])
+	case "perf-derive":
+		runPerfDerive(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 	default:
@@ -128,6 +131,7 @@ USAGE
   ft token create --user-id N --name NAME    mint a new ft_st_… service token
   ft token list [--user-id N]                list service tokens (no plaintext)
   ft backfill-bars [--user-id N] [--range 2y]  fetch 2y daily OHLC for all holdings (Spec 9c)
+  ft perf-derive [--user-id N]                  derive closed_trades + regen snapshots (Spec 9d)
   ft help                  print this usage
 
 ENVIRONMENT
@@ -349,6 +353,36 @@ func runBackfillBars(args []string) {
 	}
 	fmt.Println()
 	fmt.Printf("done. ok=%d  failed=%d  skipped=%d  S/R candidates=%d\n", okCount, failCount, skipCount, srCount)
+}
+
+// runPerfDerive walks the audit log to derive closed_trades for any
+// completed positions, then regenerates performance_snapshots. Spec 9d.
+// Idempotent; safe to re-run anytime.
+func runPerfDerive(args []string) {
+	fs := flag.NewFlagSet("perf-derive", flag.ExitOnError)
+	userID := fs.Int64("user-id", 1, "user id")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	res, err := performance.DeriveAll(ctx, st, *userID)
+	must("derive", err)
+	fmt.Printf("derive: scanned=%d  closeEvents=%d  derived=%d  alreadyExist=%d  skippedNoOpen=%d  errors=%d\n",
+		res.AuditScanned, res.CloseEvents, res.Derived, res.AlreadyExist, res.SkippedNoOpen, len(res.Errors))
+	for _, e := range res.Errors {
+		fmt.Println("  err:", e)
+	}
+
+	must("snapshots", performance.GenerateSnapshots(ctx, st))
+	fmt.Println("snapshots regenerated.")
 }
 
 // runToken handles `ft token create` and `ft token list`.
