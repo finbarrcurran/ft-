@@ -7081,11 +7081,34 @@ function setDropStatus(kind, msg) {
 
 async function handleThesisDrop(files) {
   if (!files || files.length === 0) return;
-  // Distinguish thesis vs scoring log by filename
+  // Scoring log: match by substring so browser-added " (N)" suffixes
+  // (e.g. "_scoring_log (3).md") still classify correctly.
+  const scoringLog = files.find(f => /scoring_log/i.test(f.name));
   let thesis = files.find(f => /_v\d+_locked\.md$/i.test(f.name));
-  let scoringLog = files.find(f => /_scoring_log\.md$/i.test(f.name));
-  // Fallback: if no _vN_locked.md filename, take the first file as thesis
-  if (!thesis) thesis = files.find(f => !/_scoring_log\.md$/i.test(f.name));
+  if (!thesis) thesis = files.find(f => f !== scoringLog && f.name.toLowerCase().endsWith('.md'));
+
+  // Scoring-log-only path: refresh the log on GitHub without touching any thesis.
+  if (!thesis && scoringLog) {
+    setDropStatus('info', `Refreshing scoring log (${scoringLog.name})…`);
+    const form = new FormData();
+    form.append('scoring_log', scoringLog);
+    try {
+      const resp = await fetch('/api/theses/scoring-log', { method: 'POST', credentials: 'same-origin', body: form });
+      const txt = await resp.text();
+      if (!resp.ok) {
+        let msg = txt; try { msg = JSON.parse(txt).error || txt; } catch {}
+        setDropStatus('error', `Upload failed: ${msg}`);
+        return;
+      }
+      const result = JSON.parse(txt);
+      setDropStatus('ok', `✓ Scoring log updated — commit ${result.commitSha.slice(0, 7)}.`);
+      setTimeout(() => renderTheses(), 600);
+    } catch (err) {
+      setDropStatus('error', err.message);
+    }
+    return;
+  }
+
   if (!thesis) {
     setDropStatus('error', 'Could not identify a thesis file. Expected <TICKER>_v<N>_locked.md.');
     return;

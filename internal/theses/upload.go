@@ -143,6 +143,75 @@ func (e *Engine) resetWorktree(ctx context.Context) error {
 	return exec.CommandContext(ctx, "git", "-C", e.RepoDir, "reset", "--hard", "HEAD").Run()
 }
 
+// UploadScoringLogResult is what the scoring-log-only endpoint returns.
+type ScoringLogResult struct {
+	CommitSHA string `json:"commitSha"`
+	GitHubURL string `json:"githubUrl"`
+}
+
+// UploadScoringLog replaces theses/_scoring_log.md in the local clone,
+// commits, pushes. Used when the user has updated methodology notes /
+// distribution diagram but isn't locking a new thesis at the same time.
+//
+// Same locking semantics as Upload(): pulls latest first, resets on
+// failure, rolls back local commit on push failure.
+func (e *Engine) UploadScoringLog(ctx context.Context, content []byte) (*ScoringLogResult, error) {
+	if !e.Configured() {
+		return nil, fmt.Errorf("theses engine not configured — set FT_GITHUB_TOKEN")
+	}
+	if len(content) == 0 {
+		return nil, fmt.Errorf("scoring log content is empty")
+	}
+	if err := e.EnsureClone(ctx); err != nil {
+		return nil, err
+	}
+	if err := e.gitFetchReset(ctx); err != nil {
+		return nil, err
+	}
+
+	logPath := filepath.Join(e.RepoDir, "theses", "_scoring_log.md")
+	if err := os.WriteFile(logPath, content, 0o644); err != nil {
+		return nil, fmt.Errorf("write scoring log: %w", err)
+	}
+
+	if out, err := exec.CommandContext(ctx, "git", "-C", e.RepoDir, "add", "theses/_scoring_log.md").CombinedOutput(); err != nil {
+		_ = e.resetWorktree(ctx)
+		return nil, fmt.Errorf("git add: %s: %w", out, err)
+	}
+	// Short-circuit if no real change.
+	if err := exec.CommandContext(ctx, "git", "-C", e.RepoDir, "diff", "--cached", "--quiet").Run(); err == nil {
+		_ = e.resetWorktree(ctx)
+		return nil, fmt.Errorf("no changes — scoring log is identical to what's already in the repo")
+	}
+
+	stamp := time.Now().UTC().Format("2006-01-02")
+	commitMsg := fmt.Sprintf("Scoring log refresh — uploaded via FT %s", stamp)
+	commitCmd := exec.CommandContext(ctx, "git", "-C", e.RepoDir,
+		"-c", "user.name=FT (Thesis Library)",
+		"-c", "user.email=ft-thesis-bot@local",
+		"commit", "-m", commitMsg)
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		_ = e.resetWorktree(ctx)
+		return nil, fmt.Errorf("git commit: %s: %w", out, err)
+	}
+
+	bearer := "x-access-token:" + e.GitHubToken
+	pushCmd := exec.CommandContext(ctx, "git", "-C", e.RepoDir,
+		"-c", "http.https://github.com/.extraheader=Authorization: Basic "+basicAuth(bearer),
+		"push", "origin", "main")
+	if out, err := pushCmd.CombinedOutput(); err != nil {
+		_ = exec.CommandContext(ctx, "git", "-C", e.RepoDir, "reset", "--hard", "HEAD~1").Run()
+		return nil, fmt.Errorf("git push: %s: %w", scrub(string(out), e.GitHubToken), err)
+	}
+
+	shaOut, _ := exec.CommandContext(ctx, "git", "-C", e.RepoDir, "rev-parse", "HEAD").Output()
+	sha := strings.TrimSpace(string(shaOut))
+	url := fmt.Sprintf("https://github.com/%s/%s/blob/main/theses/_scoring_log.md",
+		e.RepoOwner, e.RepoName)
+
+	return &ScoringLogResult{CommitSHA: sha, GitHubURL: url}, nil
+}
+
 // backfillThesisLink sets stock_holdings.thesis_link or watchlist.thesis_link
 // for the given ticker if (and only if) it's currently NULL/empty. We never
 // overwrite a user-set link.

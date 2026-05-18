@@ -120,6 +120,43 @@ func (s *Server) handleUploadThesis(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+// POST /api/theses/scoring-log
+//
+// multipart/form-data:
+//
+//	scoring_log — required, the new _scoring_log.md body
+//
+// Replaces theses/_scoring_log.md verbatim and pushes. Use when refreshing
+// methodology notes or distribution diagrams without locking a new thesis.
+func (s *Server) handleUploadScoringLog(w http.ResponseWriter, r *http.Request) {
+	if s.theses == nil || !s.theses.Configured() {
+		writeError(w, http.StatusServiceUnavailable,
+			"thesis library not configured — set FT_GITHUB_TOKEN on the server")
+		return
+	}
+	if err := r.ParseMultipartForm(2 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "could not parse multipart form: "+err.Error())
+		return
+	}
+	logFile, _, err := r.FormFile("scoring_log")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing 'scoring_log' file part")
+		return
+	}
+	defer logFile.Close()
+	body, err := io.ReadAll(logFile)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read scoring log upload")
+		return
+	}
+	res, err := s.theses.UploadScoringLog(r.Context(), body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // POST /api/theses/sync — force a refresh.
 func (s *Server) handleThesesSync(w http.ResponseWriter, r *http.Request) {
 	if s.theses == nil || !s.theses.Configured() {
