@@ -5151,8 +5151,8 @@ async function renderHoldingDetail({ kind, id }) {
       </h3>
       ${thesisBodyBlock}
       <div class="form-row" style="margin: 0.8rem 0 0.6rem 0">
-        <label for="dh-thesis-link">External thesis link <span class="dim" style="font-size:0.75rem">(Notion / Google Doc)</span></label>
-        <input id="dh-thesis-link" type="text" value="${escapeHTML(thesisLink)}" placeholder="https://notion.so/.../your-thesis" />
+        <label for="dh-thesis-link">External thesis link <span class="dim" style="font-size:0.75rem">(GitHub — cross_sector_research)</span></label>
+        <input id="dh-thesis-link" type="text" value="${escapeHTML(thesisLink)}" placeholder="https://github.com/finbarrcurran/cross_sector_research/blob/main/theses/&lt;adapter&gt;/&lt;TICKER&gt;_v1_locked.md" />
         <button class="btn-ghost" id="dh-thesis-save" style="margin-left:0.5rem">Save</button>
         ${thesisLink ? `<a class="btn-ghost" href="${escapeHTML(thesisLink)}" target="_blank" rel="noopener noreferrer" style="margin-left:0.4rem">Open ↗</a>` : ''}
       </div>
