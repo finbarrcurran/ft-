@@ -6877,18 +6877,35 @@ async function renderTheses() {
     .map(([k, v]) => `<option value="${k}" ${state.theses.adapterFilter === k ? 'selected' : ''}>${escapeHTML(v)}</option>`)
     .join('');
 
-  // Gap report.
+  // Gap report — split owned (holdings) from watchlist, show ALL of each.
   const gapList = (gaps.gaps || []);
+  const ownedGaps = gapList.filter(g => g.kind === 'holding');
+  const watchGaps = gapList.filter(g => g.kind === 'watchlist');
+  const renderGapPill = (g, klass) => `
+    <span class="gap-pill ${klass}" title="${escapeHTML(g.name)}${g.sector ? ' · ' + escapeHTML(g.sector) : ''}">
+      ${escapeHTML(g.ticker)}
+    </span>`;
   const gapHTML = gapList.length === 0
     ? `<div class="gap-empty">✓ Every holding and watchlist stock has a thesis on file.</div>`
-    : `<div class="gap-pills">
-         ${gapList.slice(0, 30).map(g => `
-           <span class="gap-pill ${g.kind === 'holding' ? 'holding' : 'watch'}" title="${escapeHTML(g.name)}${g.sector ? ' · ' + escapeHTML(g.sector) : ''} — ${g.kind}">
-             ${escapeHTML(g.ticker)}
-           </span>
-         `).join('')}
-         ${gapList.length > 30 ? `<span class="dim">+${gapList.length - 30} more</span>` : ''}
-       </div>`;
+    : `
+      <div class="gap-section">
+        <div class="gap-section-title">
+          <span class="gap-section-label owned">Owned</span>
+          <span class="dim">${ownedGaps.length} without thesis</span>
+        </div>
+        ${ownedGaps.length === 0
+          ? `<div class="gap-empty-sub">✓ All holdings have a thesis on file.</div>`
+          : `<div class="gap-pills">${ownedGaps.map(g => renderGapPill(g, 'holding')).join('')}</div>`}
+      </div>
+      <div class="gap-section">
+        <div class="gap-section-title">
+          <span class="gap-section-label watch">Watchlist</span>
+          <span class="dim">${watchGaps.length} without thesis</span>
+        </div>
+        ${watchGaps.length === 0
+          ? `<div class="gap-empty-sub">✓ All watchlist stocks have a thesis on file.</div>`
+          : `<div class="gap-pills">${watchGaps.map(g => renderGapPill(g, 'watch')).join('')}</div>`}
+      </div>`;
 
   // Rows.
   const rows = theses.map(t => {
@@ -6931,7 +6948,7 @@ async function renderTheses() {
 
       <!-- Gap report -->
       <div class="thesis-gaps">
-        <div class="gap-title">Stocks owned or watched without a thesis: <span class="dim">${gapList.length}</span></div>
+        <div class="gap-title">Coverage gaps <span class="dim">— ${gapList.length} stock${gapList.length === 1 ? '' : 's'} without a thesis</span></div>
         ${gapHTML}
       </div>
 

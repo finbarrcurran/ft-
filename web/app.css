@@ -2858,3 +2858,40 @@ input.autofilled, select.autofilled {
   color: rgb(var(--color-dim));
   margin: 0.5rem 0;
 }
+
+/* Spec 15 — Coverage-gap report section variants */
+
+.gap-section {
+  margin-top: 0.6rem;
+}
+.gap-section:first-of-type {
+  margin-top: 0.4rem;
+}
+.gap-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+  font-size: 0.82rem;
+}
+.gap-section-label {
+  font-weight: 600;
+  font-size: 0.78rem;
+  padding: 0.08rem 0.5rem;
+  border-radius: 10px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.gap-section-label.owned {
+  background: rgb(var(--color-gain) / 0.18);
+  color: rgb(var(--color-gain));
+}
+.gap-section-label.watch {
+  background: rgb(var(--color-accent) / 0.18);
+  color: rgb(var(--color-accent));
+}
+.gap-empty-sub {
+  color: rgb(var(--color-gain));
+  font-size: 0.82rem;
+  padding-left: 0.2rem;
+}
