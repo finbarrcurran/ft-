@@ -2689,3 +2689,172 @@ input.autofilled, select.autofilled {
   line-height: 1.4;
   border-radius: var(--radius2);
 }
+
+/* ---------- Spec 15: Theses tab ---------- */
+
+.theses-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.thesis-dropzone {
+  border: 2px dashed rgb(var(--color-border));
+  border-radius: var(--radius2);
+  padding: 1.2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgb(var(--color-bg-elev) / 0.5);
+  transition: all 0.15s ease;
+}
+.thesis-dropzone.dragging {
+  border-color: rgb(var(--color-accent));
+  background: rgb(var(--color-accent) / 0.08);
+}
+.thesis-dropzone .dz-icon { font-size: 2rem; }
+.thesis-dropzone .dz-headline { font-weight: 600; }
+.thesis-dropzone .dz-sub {
+  color: rgb(var(--color-dim));
+  font-size: 0.85rem;
+  text-align: center;
+}
+.thesis-dropzone code {
+  font-family: var(--font-mono);
+  background: rgb(var(--color-bg) / 0.4);
+  padding: 0 0.2rem;
+  border-radius: 3px;
+}
+.thesis-dropzone button {
+  margin-top: 0.4rem;
+}
+
+.thesis-gaps {
+  padding: 0.6rem 0.8rem;
+  background: rgb(var(--color-bg-elev) / 0.5);
+  border-radius: var(--radius2);
+}
+.gap-title {
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+}
+.gap-empty {
+  color: rgb(var(--color-gain));
+  font-size: 0.85rem;
+}
+.gap-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.gap-pill {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  cursor: default;
+}
+.gap-pill.holding {
+  background: rgb(var(--color-accent) / 0.18);
+  color: rgb(var(--color-text));
+}
+.gap-pill.watch {
+  background: rgb(var(--color-dim) / 0.18);
+  color: rgb(var(--color-dim));
+}
+
+.theses-toolbar {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.theses-toolbar label {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.85rem;
+  color: rgb(var(--color-dim));
+}
+.theses-toolbar select {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.85rem;
+}
+
+.theses-table .th-sort {
+  cursor: pointer;
+  user-select: none;
+}
+.theses-table .th-sort.active {
+  color: rgb(var(--color-accent));
+}
+.theses-table .thesis-row {
+  cursor: pointer;
+}
+.theses-table .thesis-row:hover {
+  background: rgb(var(--color-accent) / 0.06);
+}
+.theses-table .thesis-row.selected {
+  background: rgb(var(--color-accent) / 0.12);
+}
+
+.urgency-badge {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 10px;
+  display: inline-block;
+}
+.urgency-badge.amber {
+  background: rgb(255 191 0 / 0.18);
+  color: rgb(255 191 0);
+}
+.urgency-badge.red {
+  background: rgb(var(--color-loss) / 0.18);
+  color: rgb(var(--color-loss));
+}
+.urgency-badge.revision {
+  background: rgb(255 140 0 / 0.18);
+  color: rgb(255 140 0);
+}
+
+.thesis-viewer {
+  margin-top: 1rem;
+  padding: 1rem 1.2rem;
+  background: rgb(var(--color-bg-elev) / 0.4);
+  border: 1px solid rgb(var(--color-border) / 0.4);
+  border-radius: var(--radius2);
+}
+.thesis-viewer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid rgb(var(--color-border) / 0.3);
+  margin-bottom: 0.8rem;
+}
+.thesis-md {
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+.thesis-md table {
+  border-collapse: collapse;
+  margin: 0.6rem 0;
+}
+.thesis-md table th,
+.thesis-md table td {
+  border: 1px solid rgb(var(--color-border) / 0.5);
+  padding: 0.3rem 0.6rem;
+  text-align: left;
+}
+.thesis-md h1, .thesis-md h2, .thesis-md h3 {
+  margin-top: 1rem;
+}
+.thesis-md blockquote {
+  border-left: 3px solid rgb(var(--color-accent) / 0.5);
+  padding: 0.2rem 0.8rem;
+  color: rgb(var(--color-dim));
+  margin: 0.5rem 0;
+}

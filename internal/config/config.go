@@ -31,6 +31,15 @@ type Config struct {
 	TwelveDataAPIKey string
 	NewsAPIKey       string
 	CryptoPanicKey   string
+
+	// Spec 15 — Thesis Library (GitHub-backed). All four must be set for
+	// the feature to activate; otherwise the Theses tab returns an empty
+	// payload and the upload endpoint 503s with a clear message.
+	GitHubToken      string        // PAT with contents:write on ThesisRepoName
+	ThesisRepoOwner  string        // "finbarrcurran"
+	ThesisRepoName   string        // "cross_sector_research"
+	ThesisRepoDir    string        // local clone dir on jarvis, e.g. /var/lib/ft/research
+	ThesisSyncEvery  time.Duration // how often the cron pulls + reindexes
 }
 
 func Load() (*Config, error) {
@@ -46,6 +55,12 @@ func Load() (*Config, error) {
 		TwelveDataAPIKey: envStr("FT_TWELVEDATA_API_KEY", ""),
 		NewsAPIKey:       envStr("NEWSAPI_API_KEY", ""),
 		CryptoPanicKey:   envStr("CRYPTOPANIC_API_KEY", ""),
+		// Spec 15
+		GitHubToken:     envStr("FT_GITHUB_TOKEN", ""),
+		ThesisRepoOwner: envStr("FT_THESIS_REPO_OWNER", "finbarrcurran"),
+		ThesisRepoName:  envStr("FT_THESIS_REPO_NAME", "cross_sector_research"),
+		ThesisRepoDir:   envStr("FT_THESIS_REPO_DIR", "/var/lib/ft/research"),
+		ThesisSyncEvery: envDuration("FT_THESIS_SYNC_EVERY", 5*time.Minute),
 	}
 	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir db dir: %w", err)

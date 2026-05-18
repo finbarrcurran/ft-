@@ -89,6 +89,8 @@ Top bar: brand · market pill (clickable for all 7 exchanges, click-to-focus) ·
 
 **Import/export:** `POST /api/import/{preview,apply}`, `GET /api/export.xlsx`, `GET /api/export.csv?tab=stocks|crypto|watchlist` (v1.5)
 
+**Spec 15 — Thesis Library:** `GET /api/theses{,/gaps,/{id}}`, `POST /api/theses/{upload,sync}` (v1.6). GitHub repo `finbarrcurran/cross_sector_research` is the source of truth; FT keeps a local clone at `/var/lib/ft/research/` synced every 5 min.
+
 **Heatmap:** `GET /api/heatmap.svg?mode={market_cap|my_holdings|pnl}&sector=`
 
 **News + F&G:** `GET /api/news/{market,crypto}`, `GET /api/feargreed{,/stocks}`
@@ -220,6 +222,7 @@ ft token list                            list tokens (no plaintext)
 | 1.3 | 2026-05-17 | Pharma adapter v1 (draft) added to Scorecards repo. Applies to pharma_metabolic + pharma_immunology + gics_healthcare. Status `needs-review` (5 open decisions in §7 of the source MD). LLY + ABBV worked examples both calibrate to 13/16. |
 | 1.4 | 2026-05-18 | Spec 13 — Test coverage on alert / technicals / portfolio_risk / performance / sector_rotation packages. ~95 test funcs, `go test ./...` clean. Spec 12 D5g — `$ / €` toggle on stocks P&L column. `pnl_currency` preference; converts via FX snapshot. |
 | 1.5 | 2026-05-18 | **5 new sector adapters** (Defense / Mining & Metals / Industrial Electrical / AI Infra & Semis / Cloud Infra) — all v1 drafts, status `needs-review`, with open decisions in §7 of each source MD. Applies-to-sector wiring drives the 📋 button across the Sector Rotation tab. **Watchlist Market column** — per-row open/closed badge resolved by ticker suffix (matches Stocks tab behaviour). **Per-tab CSV export** — `GET /api/export.csv?tab=stocks\|crypto\|watchlist` + ⬇ Download CSV button on each tab toolbar. Flat column shape; no FX denormalization needed (Crypto rows already carry both EUR & USD columns). |
+| 1.6 | 2026-05-18 | **Spec 15 — Thesis Library** shipped. New top-level **Theses** tab (between Scorecards and Watchlist) backed by the user's private GitHub repo `cross_sector_research`. Drop-zone accepts `<TICKER>_v<N>_locked.md` + optional `_scoring_log.md` and pushes both in one commit via stored fine-grained PAT (`FT_GITHUB_TOKEN` in `/etc/ft/env`, scoped to one repo, Contents:write only). Sortable/filterable index of every locked thesis with score / version / locked-date / next-earnings columns. Earnings-revision trigger: 🟡 amber ≤14d, 🔴 red ≤3d, 📝 revision_needed post-earnings if earnings > locked_date. "Stocks owned with no thesis" gap report. Inline goldmark+bluemonday MD renderer. Background sync cron pulls every 5 min. Endpoints: `GET /api/theses`, `GET /api/theses/{id}`, `GET /api/theses/gaps`, `POST /api/theses/upload`, `POST /api/theses/sync`. Migration 0023 creates `theses_index` table (cache; GitHub remains source of truth). Re-labels the Spec 14 holding-detail external-thesis-link field from "Notion / Google Doc" → "GitHub — cross_sector_research". |
 
 ---
 

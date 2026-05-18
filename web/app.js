@@ -326,6 +326,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
         <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Sector Rotation</button>
         <button class="tab ${state.tab === 'scorecards' ? 'active' : ''}" data-tab="scorecards">Scorecards</button>
+        <button class="tab ${state.tab === 'theses' ? 'active' : ''}" data-tab="theses">Theses</button>
         <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
         <button class="tab ${state.tab === 'news' ? 'active' : ''}" data-tab="news">News</button>
@@ -1309,6 +1310,8 @@ async function loadActiveTab() {
       await renderSectorRotation();
     } else if (state.tab === 'scorecards') {
       await renderScorecards();
+    } else if (state.tab === 'theses') {
+      await renderTheses();
     } else if (state.tab === 'watchlist') {
       await renderWatchlist();
     } else if (state.tab === 'heatmap') {
@@ -6780,6 +6783,345 @@ async function renderScorecards() {
 
   if (selected) {
     await loadScorecardRightPane(selected);
+  }
+}
+
+// ---------- Spec 15: Theses tab (GitHub-backed thesis library) ---------
+
+// state.theses { adapterFilter, urgencyFilter, sortKey, sortDir, selectedId }
+if (!state.theses) {
+  state.theses = { adapterFilter: '', urgencyFilter: '', sortKey: 'score', sortDir: 'desc', selectedId: null };
+}
+
+const ADAPTER_LABEL = {
+  pharma: 'Pharma',
+  ai_infra_semi: 'AI-Infra/Semi',
+  hydrocarbons: 'Hydrocarbons',
+  energy_power: 'Energy-Power',
+  defense: 'Defense',
+  mining_metals: 'Mining & Metals',
+  industrial_electrical: 'Industrial-Electrical',
+  cloud_infra: 'Cloud-Infra',
+};
+
+function urgencyBadge(u, dateStr) {
+  // u ∈ {none, amber, red, revision_needed}
+  if (!u || u === 'none') {
+    return dateStr ? `<span class="dim">${escapeHTML(dateStr)}</span>` : '<span class="dim">—</span>';
+  }
+  if (u === 'revision_needed') {
+    return `<span class="urgency-badge revision" title="Earnings has passed since the thesis was locked — re-score recommended">📝 revision</span>`;
+  }
+  if (u === 'red') {
+    return `<span class="urgency-badge red" title="Earnings in ≤3 days">🔴 ${escapeHTML(dateStr || '')}</span>`;
+  }
+  if (u === 'amber') {
+    return `<span class="urgency-badge amber" title="Earnings in ≤14 days">🟡 ${escapeHTML(dateStr || '')}</span>`;
+  }
+  return escapeHTML(dateStr || '—');
+}
+
+function scoreCellTheses(score, max) {
+  if (score == null) return '<span class="dim">—</span>';
+  const passed = score >= (max - 4);
+  return `<span class="score-badge ${passed ? 'pass' : 'fail'}">${score}/${max}${passed ? ' ✓' : ''}</span>`;
+}
+
+async function renderTheses() {
+  const content = $('#content');
+  content.innerHTML = `<div class="empty"><div>Loading thesis library…</div></div>`;
+  let payload, gaps;
+  try {
+    [payload, gaps] = await Promise.all([
+      api('/api/theses' + (state.theses.adapterFilter ? `?adapter=${encodeURIComponent(state.theses.adapterFilter)}` : '')),
+      api('/api/theses/gaps').catch(() => ({ gaps: [] })),
+    ]);
+  } catch (err) {
+    content.innerHTML = `<div class="empty"><div class="loss">error loading theses: ${escapeHTML(err.message)}</div></div>`;
+    return;
+  }
+
+  if (!payload.configured) {
+    content.innerHTML = `
+      <div class="empty">
+        <div>Thesis Library is not configured on this server.</div>
+        <div class="hint">Server admin needs to set <code>FT_GITHUB_TOKEN</code> (a fine-grained PAT with Contents:write on <code>cross_sector_research</code>) in <code>/etc/ft/env</code> and restart FT.</div>
+      </div>`;
+    return;
+  }
+
+  let theses = payload.theses || [];
+  // Client-side urgency filter (server only filters adapter).
+  if (state.theses.urgencyFilter) {
+    theses = theses.filter(t => t.earningsUrgency === state.theses.urgencyFilter);
+  }
+  // Client-side sort.
+  const { sortKey, sortDir } = state.theses;
+  theses.sort((a, b) => {
+    let av, bv;
+    switch (sortKey) {
+      case 'ticker':     av = a.ticker; bv = b.ticker; break;
+      case 'adapter':    av = a.adapter; bv = b.adapter; break;
+      case 'lockedDate': av = a.lockedDate || ''; bv = b.lockedDate || ''; break;
+      case 'nextEarnings': av = a.nextEarningsDate || '9999'; bv = b.nextEarningsDate || '9999'; break;
+      case 'score':
+      default: av = a.score == null ? -1 : a.score; bv = b.score == null ? -1 : b.score; break;
+    }
+    if (av < bv) return sortDir === 'asc' ? -1 : 1;
+    if (av > bv) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  // Adapter filter options.
+  const adapterOpts = Object.entries(ADAPTER_LABEL)
+    .map(([k, v]) => `<option value="${k}" ${state.theses.adapterFilter === k ? 'selected' : ''}>${escapeHTML(v)}</option>`)
+    .join('');
+
+  // Gap report.
+  const gapList = (gaps.gaps || []);
+  const gapHTML = gapList.length === 0
+    ? `<div class="gap-empty">✓ Every holding and watchlist stock has a thesis on file.</div>`
+    : `<div class="gap-pills">
+         ${gapList.slice(0, 30).map(g => `
+           <span class="gap-pill ${g.kind === 'holding' ? 'holding' : 'watch'}" title="${escapeHTML(g.name)}${g.sector ? ' · ' + escapeHTML(g.sector) : ''} — ${g.kind}">
+             ${escapeHTML(g.ticker)}
+           </span>
+         `).join('')}
+         ${gapList.length > 30 ? `<span class="dim">+${gapList.length - 30} more</span>` : ''}
+       </div>`;
+
+  // Rows.
+  const rows = theses.map(t => {
+    const sel = state.theses.selectedId === t.id ? 'selected' : '';
+    return `
+      <tr class="thesis-row ${sel}" data-thesis-id="${t.id}">
+        <td><strong>${escapeHTML(t.ticker)}</strong></td>
+        <td>${escapeHTML(t.companyName || '—')}</td>
+        <td><span class="dim">${escapeHTML(ADAPTER_LABEL[t.adapter] || t.adapter)}${t.subType ? ' · ' + escapeHTML(t.subType) : ''}</span></td>
+        <td>${scoreCellTheses(t.score, t.maxScore)}</td>
+        <td><span class="dim">v${t.version}</span></td>
+        <td><span class="dim">${escapeHTML(t.lockedDate || '—')}</span></td>
+        <td>${urgencyBadge(t.earningsUrgency, t.nextEarningsDate)}</td>
+        <td><a href="${escapeHTML(t.githubUrl)}" target="_blank" rel="noopener" class="dim" title="Open on GitHub">↗</a></td>
+      </tr>
+    `;
+  }).join('');
+
+  const sortHead = (key, label) => {
+    const active = state.theses.sortKey === key;
+    const arrow = active ? (state.theses.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th class="th-sort ${active ? 'active' : ''}" data-sort-key="${key}">${label}${arrow}</th>`;
+  };
+
+  content.innerHTML = `
+    <div class="theses-tab">
+      <!-- Drop zone -->
+      <div class="thesis-dropzone" id="thesis-dropzone">
+        <div class="dz-icon">📄</div>
+        <div class="dz-headline">Drop a locked thesis .md here</div>
+        <div class="dz-sub">
+          Auto-detects ticker · adapter · score · version.
+          Optional: drop the updated <code>_scoring_log.md</code> alongside.
+        </div>
+        <input type="file" id="dz-file-input" accept=".md,text/markdown" multiple hidden />
+        <button class="btn-ghost" id="dz-browse">Choose file(s)…</button>
+        <button class="btn-ghost" id="dz-refresh" title="Re-pull from GitHub now">⟳ Refresh</button>
+      </div>
+      <div id="dz-status"></div>
+
+      <!-- Gap report -->
+      <div class="thesis-gaps">
+        <div class="gap-title">Stocks owned or watched without a thesis: <span class="dim">${gapList.length}</span></div>
+        ${gapHTML}
+      </div>
+
+      <!-- Filters -->
+      <div class="theses-toolbar">
+        <label>Adapter
+          <select id="th-adapter-filter">
+            <option value="">All adapters</option>
+            ${adapterOpts}
+          </select>
+        </label>
+        <label>Urgency
+          <select id="th-urgency-filter">
+            <option value="" ${!state.theses.urgencyFilter ? 'selected' : ''}>All</option>
+            <option value="red" ${state.theses.urgencyFilter === 'red' ? 'selected' : ''}>🔴 ≤3 days</option>
+            <option value="amber" ${state.theses.urgencyFilter === 'amber' ? 'selected' : ''}>🟡 ≤14 days</option>
+            <option value="revision_needed" ${state.theses.urgencyFilter === 'revision_needed' ? 'selected' : ''}>📝 revision needed</option>
+            <option value="none" ${state.theses.urgencyFilter === 'none' ? 'selected' : ''}>No flag</option>
+          </select>
+        </label>
+        <span class="dim" style="margin-left:auto">${theses.length} thesis${theses.length === 1 ? '' : 'es'} on file</span>
+      </div>
+
+      <!-- Index table -->
+      <div class="tablewrap">
+        <table class="holdings theses-table">
+          <thead>
+            <tr>
+              ${sortHead('ticker', 'Ticker')}
+              <th>Company</th>
+              ${sortHead('adapter', 'Adapter · sub-type')}
+              ${sortHead('score', 'Score')}
+              <th>Ver</th>
+              ${sortHead('lockedDate', 'Locked')}
+              ${sortHead('nextEarnings', 'Next earnings')}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="8"><div class="empty"><div>No theses on file. Drop your first .md above.</div></div></td></tr>'}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Inline viewer -->
+      <div class="thesis-viewer" id="thesis-viewer">
+        <div class="dim">Click any row above to read the thesis here.</div>
+      </div>
+    </div>
+  `;
+
+  wireThesesEvents();
+  if (state.theses.selectedId) {
+    loadThesisIntoViewer(state.theses.selectedId);
+  }
+}
+
+function wireThesesEvents() {
+  const dz = $('#thesis-dropzone');
+  const fi = $('#dz-file-input');
+  if (!dz || !fi) return;
+
+  $('#dz-browse')?.addEventListener('click', () => fi.click());
+  fi.addEventListener('change', () => handleThesisDrop([...fi.files]));
+
+  ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation(); dz.classList.add('dragging');
+  }));
+  ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragging');
+  }));
+  dz.addEventListener('drop', e => {
+    const files = [...(e.dataTransfer?.files || [])].filter(f => f.name.endsWith('.md'));
+    if (files.length === 0) {
+      setDropStatus('error', 'No .md files in the drop — ignoring.');
+      return;
+    }
+    handleThesisDrop(files);
+  });
+
+  $('#dz-refresh')?.addEventListener('click', async () => {
+    setDropStatus('info', 'Pulling latest from GitHub…');
+    try {
+      await api('/api/theses/sync', { method: 'POST' });
+      setDropStatus('ok', 'Synced — refreshing.');
+      setTimeout(() => renderTheses(), 400);
+    } catch (err) {
+      setDropStatus('error', err.message);
+    }
+  });
+
+  $('#th-adapter-filter')?.addEventListener('change', e => {
+    state.theses.adapterFilter = e.target.value;
+    renderTheses();
+  });
+  $('#th-urgency-filter')?.addEventListener('change', e => {
+    state.theses.urgencyFilter = e.target.value;
+    renderTheses();
+  });
+  for (const th of document.querySelectorAll('.theses-table .th-sort')) {
+    th.addEventListener('click', () => {
+      const k = th.dataset.sortKey;
+      if (state.theses.sortKey === k) {
+        state.theses.sortDir = state.theses.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.theses.sortKey = k;
+        state.theses.sortDir = k === 'score' ? 'desc' : 'asc';
+      }
+      renderTheses();
+    });
+  }
+  for (const tr of document.querySelectorAll('.thesis-row')) {
+    tr.addEventListener('click', () => {
+      const id = parseInt(tr.dataset.thesisId, 10);
+      state.theses.selectedId = id;
+      // Toggle .selected row styling without full re-render
+      document.querySelectorAll('.thesis-row.selected').forEach(r => r.classList.remove('selected'));
+      tr.classList.add('selected');
+      loadThesisIntoViewer(id);
+    });
+  }
+}
+
+function setDropStatus(kind, msg) {
+  const el = $('#dz-status');
+  if (!el) return;
+  const cls = kind === 'error' ? 'loss' : kind === 'ok' ? 'gain' : 'dim';
+  el.innerHTML = `<div class="${cls}" style="padding:0.5rem 0">${escapeHTML(msg)}</div>`;
+}
+
+async function handleThesisDrop(files) {
+  if (!files || files.length === 0) return;
+  // Distinguish thesis vs scoring log by filename
+  let thesis = files.find(f => /_v\d+_locked\.md$/i.test(f.name));
+  let scoringLog = files.find(f => /_scoring_log\.md$/i.test(f.name));
+  // Fallback: if no _vN_locked.md filename, take the first file as thesis
+  if (!thesis) thesis = files.find(f => !/_scoring_log\.md$/i.test(f.name));
+  if (!thesis) {
+    setDropStatus('error', 'Could not identify a thesis file. Expected <TICKER>_v<N>_locked.md.');
+    return;
+  }
+
+  setDropStatus('info', `Uploading ${thesis.name}${scoringLog ? ' + ' + scoringLog.name : ''}…`);
+
+  const form = new FormData();
+  form.append('thesis', thesis);
+  if (scoringLog) form.append('scoring_log', scoringLog);
+
+  try {
+    const resp = await fetch('/api/theses/upload', { method: 'POST', credentials: 'same-origin', body: form });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      let msg = txt;
+      try { msg = JSON.parse(txt).error || txt; } catch {}
+      setDropStatus('error', `Upload failed: ${msg}`);
+      return;
+    }
+    const result = await resp.json();
+    const scorePart = result.score != null ? ` ${result.score}/${result.maxScore}` : '';
+    setDropStatus('ok',
+      `✓ Pushed ${result.ticker} v${result.version} (${result.adapter}${scorePart}) — commit ${result.commitSha.slice(0, 7)}. View on GitHub: ${result.githubUrl}`);
+    setTimeout(() => renderTheses(), 600);
+  } catch (err) {
+    setDropStatus('error', err.message);
+  }
+}
+
+async function loadThesisIntoViewer(id) {
+  const viewer = $('#thesis-viewer');
+  if (!viewer) return;
+  viewer.innerHTML = `<div class="dim">Loading…</div>`;
+  try {
+    const t = await api('/api/theses/' + id);
+    const head = `
+      <div class="thesis-viewer-head">
+        <div>
+          <strong>${escapeHTML(t.ticker)}</strong>
+          <span class="dim"> — ${escapeHTML(t.companyName || '')}</span>
+          <span class="dim"> · ${escapeHTML(ADAPTER_LABEL[t.adapter] || t.adapter)}</span>
+          ${t.subType ? `<span class="dim"> · ${escapeHTML(t.subType)}</span>` : ''}
+          <span style="margin-left:0.6rem">${scoreCellTheses(t.score, t.maxScore)}</span>
+          <span class="dim" style="margin-left:0.6rem">v${t.version} · locked ${escapeHTML(t.lockedDate || '—')}</span>
+        </div>
+        <a class="btn-ghost" href="${escapeHTML(t.githubUrl)}" target="_blank" rel="noopener">Open on GitHub ↗</a>
+      </div>
+      <div class="thesis-md md-body">${t.renderedHtml}</div>
+    `;
+    viewer.innerHTML = head;
+  } catch (err) {
+    viewer.innerHTML = `<div class="loss">Could not load thesis: ${escapeHTML(err.message)}</div>`;
   }
 }
 

@@ -26,6 +26,7 @@ import (
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
 	"ft/internal/sector_rotation"
+	"ft/internal/theses"
 	"ft/internal/server"
 	"ft/internal/store"
 	"ft/internal/technicals"
@@ -297,6 +298,36 @@ func runServe() {
 	// Spec 9f D8 — Friday 22:00 UTC weekly digest. ScheduleWeeklyDigest
 	// has its own next-Friday loop; we just kick it off in a goroutine.
 	go sector_rotation.ScheduleWeeklyDigest(bgCtx, st)
+
+	// Spec 15 — Thesis Library sync. Periodically `git pull` the
+	// cross_sector_research clone and re-index. No-op if FT_GITHUB_TOKEN
+	// isn't set (graceful degradation in dev).
+	if cfg.GitHubToken != "" {
+		go func() {
+			eng := theses.New(st.DB, cfg.ThesisRepoDir, cfg.ThesisRepoOwner,
+				cfg.ThesisRepoName, cfg.GitHubToken)
+			// Initial sync — clones if needed.
+			initCtx, initCancel := context.WithTimeout(bgCtx, 2*time.Minute)
+			if err := eng.Sync(initCtx); err != nil {
+				slog.Warn("theses: initial sync failed", "err", err)
+			}
+			initCancel()
+			t := time.NewTicker(cfg.ThesisSyncEvery)
+			defer t.Stop()
+			for {
+				select {
+				case <-bgCtx.Done():
+					return
+				case <-t.C:
+					tickCtx, tickCancel := context.WithTimeout(bgCtx, 90*time.Second)
+					if err := eng.Sync(tickCtx); err != nil {
+						slog.Warn("theses: sync tick failed", "err", err)
+					}
+					tickCancel()
+				}
+			}
+		}()
+	}
 
 	go func() {
 		slog.Info("listening", "addr", cfg.Addr, "cookie_secure", cfg.CookieSecure)

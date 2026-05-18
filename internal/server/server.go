@@ -15,6 +15,7 @@ import (
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
 	"ft/internal/store"
+	"ft/internal/theses"
 	"ft/internal/web"
 	"log/slog"
 	"net/http"
@@ -31,6 +32,7 @@ type Server struct {
 	refresh    *refresh.Service
 	llm        *llm.Service        // Spec 9c.1; nil-safe — handlers guard
 	scorecards *scorecards.Service // Spec 9g
+	theses     *theses.Engine      // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
 	mux        *http.ServeMux
 }
 
@@ -41,7 +43,9 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		refresh:    refresh.New(st),
 		llm:        llmSvc,
 		scorecards: scorecards.New(st.DB),
-		mux:        http.NewServeMux(),
+		theses: theses.New(st.DB, cfg.ThesisRepoDir, cfg.ThesisRepoOwner,
+			cfg.ThesisRepoName, cfg.GitHubToken),
+		mux: http.NewServeMux(),
 	}
 	s.routes()
 	return s
@@ -193,6 +197,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis/versions", s.requireUser(s.handleHoldingThesisVersions))
 	s.mux.HandleFunc("PUT /api/holdings/{kind}/{id}/thesis/status", s.requireUser(s.handleHoldingThesisStatus))
 	s.mux.HandleFunc("POST /api/holdings/{kind}/{id}/thesis/preview", s.requireUser(s.handleHoldingThesisPreview))
+
+	// Spec 15: Thesis Library (GitHub-backed).
+	s.mux.HandleFunc("GET /api/theses", s.requireUser(s.handleListTheses))
+	s.mux.HandleFunc("GET /api/theses/gaps", s.requireUser(s.handleThesesGaps))
+	s.mux.HandleFunc("GET /api/theses/{id}", s.requireUser(s.handleGetThesisLibrary))
+	s.mux.HandleFunc("POST /api/theses/upload", s.requireUser(s.handleUploadThesis))
+	s.mux.HandleFunc("POST /api/theses/sync", s.requireUser(s.handleThesesSync))
 
 	// Spec 9g: Scorecard Repository.
 	s.mux.HandleFunc("GET /api/scorecards", s.requireUserOrToken(s.handleScorecardsList))
