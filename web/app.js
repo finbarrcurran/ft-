@@ -6802,6 +6802,7 @@ const ADAPTER_LABEL = {
   mining_metals: 'Mining & Metals',
   industrial_electrical: 'Industrial-Electrical',
   cloud_infra: 'Cloud-Infra',
+  asset_hedge: 'Asset-Hedge',  // Spec 9i 4-pillar /8 framework
 };
 
 function urgencyBadge(u, dateStr) {
@@ -6823,7 +6824,15 @@ function urgencyBadge(u, dateStr) {
 
 function scoreCellTheses(score, max) {
   if (score == null) return '<span class="dim">—</span>';
-  const passed = score >= (max - 4);
+  // Pass thresholds differ per framework per Spec 9i calibration ladders:
+  //   /16 operating stock: 12+ = strong (passes screen)
+  //   /8  asset hedge:     5+  = strong (core allocation)
+  //   default fallback:    >= 75% of max
+  let threshold;
+  if (max === 16) threshold = 12;
+  else if (max === 8) threshold = 5;
+  else threshold = Math.ceil(max * 0.75);
+  const passed = score >= threshold;
   return `<span class="score-badge ${passed ? 'pass' : 'fail'}">${score}/${max}${passed ? ' ✓' : ''}</span>`;
 }
 

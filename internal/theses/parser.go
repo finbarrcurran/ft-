@@ -52,7 +52,16 @@ var (
 	// "> **Primary Adapter:** Energy-Power Infrastructure (`gen-disp` sub-type)"
 	//   ↑ multi-segment names use the "Primary Adapter:" form per the
 	//   doctrine note established 2026-05-18 via RR.L.
-	reAdapter = regexp.MustCompile(`(?m)^>\s*\*\*(?:Primary\s+)?Adapter:\*\*\s+([A-Za-z0-9\-\/\s&]+?)(?:\s*\(|$)`)
+	// "> **Framework:** Asset-Hedge Scorecard (4-pillar /8)"
+	//   ↑ asset-hedge theses (GLD, SLV, etc.) use Framework: not Adapter:
+	//   per the Spec 9i three-framework architecture (2026-05-18 via GLD).
+	reAdapter = regexp.MustCompile(`(?m)^>\s*\*\*(?:Primary\s+)?(?:Adapter|Framework):\*\*\s+([A-Za-z0-9\-\/\s&]+?)(?:\s*\(|$)`)
+
+	// "> **Instrument Type:** Physical-gold-backed ETF — price-tracking ..."
+	//   For asset-hedge theses without a backtick sub-type on the
+	//   Framework: line, fall back to Instrument Type for the sub-type
+	//   column on the Theses tab.
+	reInstrumentType = regexp.MustCompile(`(?m)^>\s*\*\*Instrument Type:\*\*\s+([^—\n]+?)(?:\s*[—\-]|$)`)
 	// Within the adapter line, optional sub-type in backticks: `metabolic-obesity`
 	reSubTypeBacktick = regexp.MustCompile("`([a-z0-9\\-]+)`")
 	// Or "sub-type: hyperscaler hardware ODM"
@@ -88,6 +97,13 @@ var adapterAliases = map[string]string{
 	"industrial electrical": "industrial_electrical",
 	"cloud-infra":           "cloud_infra",
 	"cloud infra":           "cloud_infra",
+	// Spec 9i — 4-pillar Asset-Hedge framework (GLD, SLV, IAU, future
+	// commodity hedge ETFs). Header line uses `Framework:` not `Adapter:`.
+	"asset-hedge":            "asset_hedge",
+	"asset hedge":            "asset_hedge",
+	"asset-hedge scorecard":  "asset_hedge",
+	"asset hedge scorecard":  "asset_hedge",
+	"hedge":                  "asset_hedge",
 }
 
 // NormaliseAdapter maps a free-form adapter name from the MD header to one
@@ -132,17 +148,32 @@ func ParseHeader(md string) Header {
 	if m := reAdapter.FindStringSubmatch(md); len(m) == 2 {
 		h.Adapter = NormaliseAdapter(m[1])
 	}
-	// Look for sub-type on the adapter line (greedy match the full adapter line first)
-	if idx := strings.Index(md, "**Adapter:**"); idx >= 0 {
-		// take to next \n
+	// Look for sub-type on the adapter line (greedy match the full adapter line first).
+	// Try Adapter: first, then Framework: (asset-hedge theses).
+	for _, marker := range []string{"**Adapter:**", "**Framework:**"} {
+		idx := strings.Index(md, marker)
+		if idx < 0 {
+			continue
+		}
 		end := strings.IndexByte(md[idx:], '\n')
-		if end > 0 {
-			line := md[idx : idx+end]
-			if m := reSubTypeBacktick.FindStringSubmatch(line); len(m) == 2 {
-				h.SubType = m[1]
-			} else if m := reSubTypeColon.FindStringSubmatch(line); len(m) == 2 {
-				h.SubType = strings.TrimSpace(m[1])
-			}
+		if end <= 0 {
+			continue
+		}
+		line := md[idx : idx+end]
+		if m := reSubTypeBacktick.FindStringSubmatch(line); len(m) == 2 {
+			h.SubType = m[1]
+			break
+		} else if m := reSubTypeColon.FindStringSubmatch(line); len(m) == 2 {
+			h.SubType = strings.TrimSpace(m[1])
+			break
+		}
+	}
+	// Asset-hedge fallback: when no sub-type came from the Framework: line,
+	// use the Instrument Type: line so the table column shows something
+	// meaningful (e.g. "Physical-gold-backed ETF").
+	if h.SubType == "" {
+		if m := reInstrumentType.FindStringSubmatch(md); len(m) == 2 {
+			h.SubType = strings.TrimSpace(m[1])
 		}
 	}
 
@@ -173,7 +204,7 @@ func (h Header) Validate() error {
 		return fmt.Errorf("could not parse ticker from MD header (expected '# TICKER — Company — Locked Thesis vN')")
 	}
 	if h.Adapter == "" {
-		return fmt.Errorf("could not parse adapter from MD header (expected '> **Adapter:** <name>'); see cross_sector_research/theses/ for valid folder names")
+		return fmt.Errorf("could not parse adapter from MD header (expected '> **Adapter:** <name>' for operating stocks, or '> **Framework:** <name>' for asset hedges); see cross_sector_research/theses/ for valid folder names")
 	}
 	if h.Version < 1 {
 		return fmt.Errorf("version must be ≥ 1 (got %d)", h.Version)
