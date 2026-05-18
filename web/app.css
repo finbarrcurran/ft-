@@ -2895,3 +2895,43 @@ input.autofilled, select.autofilled {
   font-size: 0.82rem;
   padding-left: 0.2rem;
 }
+
+/* Spec 15 — Theses table grouped by ownership (Owned / Watchlist / Other) */
+
+.theses-section {
+  margin-top: 1rem;
+}
+.theses-section:first-of-type {
+  margin-top: 0;
+}
+.theses-section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+  padding-left: 0.1rem;
+}
+.theses-section-label {
+  font-weight: 600;
+  font-size: 0.78rem;
+  padding: 0.1rem 0.55rem;
+  border-radius: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.theses-section-label.owned {
+  background: rgb(var(--color-gain) / 0.18);
+  color: rgb(var(--color-gain));
+}
+.theses-section-label.watch {
+  background: rgb(var(--color-accent) / 0.18);
+  color: rgb(var(--color-accent));
+}
+.theses-section-label.other {
+  background: rgb(var(--color-dim) / 0.18);
+  color: rgb(var(--color-dim));
+}
+.theses-section-empty {
+  padding: 0.6rem 0.4rem;
+  font-size: 0.85rem;
+}

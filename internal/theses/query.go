@@ -21,7 +21,13 @@ type Row struct {
 	GitHubURL        string  `json:"githubUrl"`
 	NextEarningsDate *string `json:"nextEarningsDate,omitempty"`
 	EarningsUrgency  string  `json:"earningsUrgency"` // none|amber|red|revision_needed
-	UpdatedAt        int64   `json:"updatedAt"`
+	// Ownership — derived at query time by joining to stock_holdings and
+	// watchlist. Drives the Theses tab section grouping (Owned / Watchlist
+	// / Other). Priority: owned > watchlist; if a ticker is in both,
+	// classify as "owned" because monitoring takes precedence over
+	// candidate-tracking.
+	Ownership string `json:"ownership"` // owned|watchlist|other
+	UpdatedAt int64  `json:"updatedAt"`
 }
 
 // Full extends Row with markdown + HTML for the inline viewer.
@@ -43,19 +49,33 @@ type GapRow struct {
 
 // List returns all rows in the index, ordered by (score desc, ticker asc).
 // Optional adapter filter narrows to one folder.
+//
+// Joins to stock_holdings and watchlist (both with deleted_at filters) so
+// every row carries an Ownership tag. Watchlist-only rows render in their
+// own section on the Theses tab.
 func (e *Engine) List(ctx context.Context, adapter string) ([]Row, error) {
 	q := `
-		SELECT id, ticker, company_name, adapter, sub_type, score, max_score,
-		       version, status, locked_date, github_url,
-		       next_earnings_date, earnings_urgency, updated_at
-		  FROM theses_index`
+		SELECT t.id, t.ticker, t.company_name, t.adapter, t.sub_type,
+		       t.score, t.max_score, t.version, t.status, t.locked_date,
+		       t.github_url, t.next_earnings_date, t.earnings_urgency,
+		       t.updated_at,
+		       CASE
+		         WHEN EXISTS (SELECT 1 FROM stock_holdings s
+		                       WHERE s.ticker = t.ticker AND s.deleted_at IS NULL)
+		           THEN 'owned'
+		         WHEN EXISTS (SELECT 1 FROM watchlist w
+		                       WHERE w.ticker = t.ticker AND w.deleted_at IS NULL)
+		           THEN 'watchlist'
+		         ELSE 'other'
+		       END AS ownership
+		  FROM theses_index t`
 	args := []any{}
 	if adapter != "" {
-		q += ` WHERE adapter = ?`
+		q += ` WHERE t.adapter = ?`
 		args = append(args, adapter)
 	}
 	q += `
-		 ORDER BY CASE WHEN score IS NULL THEN 1 ELSE 0 END, score DESC, ticker ASC`
+		 ORDER BY CASE WHEN t.score IS NULL THEN 1 ELSE 0 END, t.score DESC, t.ticker ASC`
 
 	rows, err := e.DB.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -70,7 +90,7 @@ func (e *Engine) List(ctx context.Context, adapter string) ([]Row, error) {
 		var score sql.NullInt64
 		if err := rows.Scan(&r.ID, &r.Ticker, &company, &r.Adapter, &sub,
 			&score, &r.MaxScore, &r.Version, &r.Status, &locked, &r.GitHubURL,
-			&earn, &r.EarningsUrgency, &r.UpdatedAt); err != nil {
+			&earn, &r.EarningsUrgency, &r.UpdatedAt, &r.Ownership); err != nil {
 			return nil, err
 		}
 		if company.Valid {

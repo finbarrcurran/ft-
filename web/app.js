@@ -6916,8 +6916,18 @@ async function renderTheses() {
           : `<div class="gap-pills">${watchGaps.map(g => renderGapPill(g, 'watch')).join('')}</div>`}
       </div>`;
 
-  // Rows.
-  const rows = theses.map(t => {
+  // Group sorted theses by ownership (owned > watchlist > other).
+  const owned     = theses.filter(t => t.ownership === 'owned');
+  const watchlist = theses.filter(t => t.ownership === 'watchlist');
+  const other     = theses.filter(t => t.ownership === 'other' || !t.ownership);
+
+  const sortHead = (key, label) => {
+    const active = state.theses.sortKey === key;
+    const arrow = active ? (state.theses.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th class="th-sort ${active ? 'active' : ''}" data-sort-key="${key}">${label}${arrow}</th>`;
+  };
+
+  const rowHTML = (t) => {
     const sel = state.theses.selectedId === t.id ? 'selected' : '';
     return `
       <tr class="thesis-row ${sel}" data-thesis-id="${t.id}">
@@ -6931,13 +6941,37 @@ async function renderTheses() {
         <td><a href="${escapeHTML(t.githubUrl)}" target="_blank" rel="noopener" class="dim" title="Open on GitHub">↗</a></td>
       </tr>
     `;
-  }).join('');
-
-  const sortHead = (key, label) => {
-    const active = state.theses.sortKey === key;
-    const arrow = active ? (state.theses.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-    return `<th class="th-sort ${active ? 'active' : ''}" data-sort-key="${key}">${label}${arrow}</th>`;
   };
+
+  const tableSection = (label, klass, rows, emptyMsg) => `
+    <div class="theses-section">
+      <div class="theses-section-head">
+        <span class="theses-section-label ${klass}">${label}</span>
+        <span class="dim">${rows.length} thesis${rows.length === 1 ? '' : 'es'}</span>
+      </div>
+      <div class="tablewrap">
+        <table class="holdings theses-table">
+          <thead>
+            <tr>
+              ${sortHead('ticker', 'Ticker')}
+              <th>Company</th>
+              ${sortHead('adapter', 'Adapter · sub-type')}
+              ${sortHead('score', 'Score')}
+              <th>Ver</th>
+              ${sortHead('lockedDate', 'Locked')}
+              ${sortHead('nextEarnings', 'Next earnings')}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.length > 0
+              ? rows.map(rowHTML).join('')
+              : `<tr><td colspan="8"><div class="theses-section-empty dim">${emptyMsg}</div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 
   content.innerHTML = `
     <div class="theses-tab">
@@ -6981,26 +7015,14 @@ async function renderTheses() {
         <span class="dim" style="margin-left:auto">${theses.length} thesis${theses.length === 1 ? '' : 'es'} on file</span>
       </div>
 
-      <!-- Index table -->
-      <div class="tablewrap">
-        <table class="holdings theses-table">
-          <thead>
-            <tr>
-              ${sortHead('ticker', 'Ticker')}
-              <th>Company</th>
-              ${sortHead('adapter', 'Adapter · sub-type')}
-              ${sortHead('score', 'Score')}
-              <th>Ver</th>
-              ${sortHead('lockedDate', 'Locked')}
-              ${sortHead('nextEarnings', 'Next earnings')}
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="8"><div class="empty"><div>No theses on file. Drop your first .md above.</div></div></td></tr>'}
-          </tbody>
-        </table>
-      </div>
+      <!-- Index tables — grouped by ownership -->
+      ${theses.length === 0
+        ? '<div class="empty"><div>No theses on file. Drop your first .md above.</div></div>'
+        : `
+          ${tableSection('OWNED', 'owned', owned, 'No theses for stocks you currently hold.')}
+          ${tableSection('WATCHLIST', 'watch', watchlist, 'No theses for watchlist stocks.')}
+          ${other.length > 0 ? tableSection('OTHER', 'other', other, '') : ''}
+        `}
 
       <!-- Inline viewer -->
       <div class="thesis-viewer" id="thesis-viewer">
