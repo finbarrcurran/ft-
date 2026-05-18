@@ -107,17 +107,60 @@ var adapterAliases = map[string]string{
 }
 
 // NormaliseAdapter maps a free-form adapter name from the MD header to one
-// of the eight canonical folder slugs. Returns "" if no mapping found.
+// of the nine canonical folder slugs. Tries three strategies in order:
+//
+//  1. Exact alias lookup (preferred — every recognised name is in the map)
+//  2. Normalised-then-canonical match (handles slash/dash/& variants)
+//  3. Keyword fallback — distinctive substrings route to the right folder
+//     even when Gemini/Claude phrases the adapter name in a new way.
+//
+// Returns "" only when none of the three strategies match.
 func NormaliseAdapter(raw string) string {
 	k := strings.ToLower(strings.TrimSpace(raw))
 	if v, ok := adapterAliases[k]; ok {
 		return v
 	}
-	// Last-resort: replace spaces and slashes with underscore
-	k = strings.NewReplacer(" ", "_", "/", "_", "-", "_", "&", "and").Replace(k)
+	// Pass 2: normalise punctuation then check canonical values.
+	norm := strings.NewReplacer(" ", "_", "/", "_", "-", "_", "&", "and").Replace(k)
 	for _, canon := range adapterAliases {
-		if k == canon {
+		if norm == canon {
 			return canon
+		}
+	}
+	// Pass 3: keyword-based fallback. Order matters — more-specific
+	// patterns come first (e.g. "industrial_electrical" before "energy"
+	// because an Industrial Electrical thesis could mention "power").
+	keywordRoutes := []struct {
+		needles   []string // ALL must appear in k for the route to fire
+		canonical string
+	}{
+		{[]string{"industrial", "electrical"}, "industrial_electrical"},
+		{[]string{"semi"}, "ai_infra_semi"},     // catches "Semiconductor", "AI-Semi", etc.
+		{[]string{"semiconductor"}, "ai_infra_semi"},
+		{[]string{"pharma"}, "pharma"},
+		{[]string{"defense"}, "defense"},
+		{[]string{"defence"}, "defense"}, // UK spelling
+		{[]string{"hydrocarbon"}, "hydrocarbons"},
+		{[]string{"oil", "gas"}, "hydrocarbons"},
+		{[]string{"mining"}, "mining_metals"},
+		{[]string{"precious", "metals"}, "mining_metals"},
+		{[]string{"cloud"}, "cloud_infra"},
+		{[]string{"hyperscaler"}, "cloud_infra"},
+		{[]string{"hedge"}, "asset_hedge"},
+		{[]string{"asset"}, "asset_hedge"}, // safer to keep last; "hedge" usually present too
+		{[]string{"energy"}, "energy_power"},
+		{[]string{"power"}, "energy_power"},
+	}
+	for _, kw := range keywordRoutes {
+		matched := true
+		for _, n := range kw.needles {
+			if !strings.Contains(k, n) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return kw.canonical
 		}
 	}
 	return ""
