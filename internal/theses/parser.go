@@ -49,7 +49,10 @@ var (
 
 	// "> **Adapter:** Pharma (`metabolic-obesity` sub-type)"
 	// "> **Adapter:** AI-Infra/Semi (sub-type: hyperscaler hardware ODM ...)"
-	reAdapter = regexp.MustCompile(`(?m)^>\s*\*\*Adapter:\*\*\s+([A-Za-z0-9\-\/\s&]+?)(?:\s*\(|$)`)
+	// "> **Primary Adapter:** Energy-Power Infrastructure (`gen-disp` sub-type)"
+	//   ↑ multi-segment names use the "Primary Adapter:" form per the
+	//   doctrine note established 2026-05-18 via RR.L.
+	reAdapter = regexp.MustCompile(`(?m)^>\s*\*\*(?:Primary\s+)?Adapter:\*\*\s+([A-Za-z0-9\-\/\s&]+?)(?:\s*\(|$)`)
 	// Within the adapter line, optional sub-type in backticks: `metabolic-obesity`
 	reSubTypeBacktick = regexp.MustCompile("`([a-z0-9\\-]+)`")
 	// Or "sub-type: hyperscaler hardware ODM"
@@ -70,9 +73,13 @@ var adapterAliases = map[string]string{
 	"ai-infra":              "ai_infra_semi",
 	"ai infra/semi":         "ai_infra_semi",
 	"ai infra semi":         "ai_infra_semi",
-	"hydrocarbons":          "hydrocarbons",
-	"energy-power":          "energy_power",
-	"energy power":          "energy_power",
+	"hydrocarbons":                 "hydrocarbons",
+	"energy-power":                 "energy_power",
+	"energy power":                 "energy_power",
+	"energy-power infrastructure":  "energy_power",
+	"energy power infrastructure":  "energy_power",
+	"power-infrastructure":         "energy_power",
+	"power infrastructure":         "energy_power",
 	"defense":               "defense",
 	"mining-metals":         "mining_metals",
 	"mining & metals":       "mining_metals",
