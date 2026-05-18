@@ -103,6 +103,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/import/preview", s.requireUser(s.handleImportPreview))
 	s.mux.HandleFunc("POST /api/import/apply", s.requireUser(s.handleImportApply))
 	s.mux.HandleFunc("GET /api/export.xlsx", s.requireUser(s.handleExport))
+	// v1.5: per-tab CSV download (stocks | crypto | watchlist).
+	s.mux.HandleFunc("GET /api/export.csv", s.requireUser(s.handleExportCSV))
 
 	// Heatmap — requires session cookie. Returns an SVG document.
 	s.mux.HandleFunc("GET /api/heatmap.svg", s.requireUser(s.handleHeatmap))

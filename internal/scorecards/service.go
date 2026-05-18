@@ -410,6 +410,60 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 			IsDoctrine: false,
 			AppliesTo: []string{"pharma_metabolic", "pharma_immunology", "gics_healthcare"},
 		},
+		{
+			Code: "defense",
+			DisplayName: "Defense",
+			ShortDescription: "Primes, munitions, air-defense, drones, military propulsion, C4ISR, shipbuilding. European rearmament tailwind.",
+			File: "seed/defense.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine: false,
+			AppliesTo: []string{"defense_sovereign", "gics_industrials"},
+		},
+		{
+			Code: "mining-metals",
+			DisplayName: "Mining & Metals",
+			ShortDescription: "Gold, silver, copper, lithium, nickel, uranium, rare earths. Streaming/royalty + tier-1/mid-tier producers.",
+			File: "seed/mining-metals.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine: false,
+			AppliesTo: []string{"precious_metals_gold", "precious_metals_silver", "battery_storage", "gics_materials"},
+		},
+		{
+			Code: "industrial-electrical",
+			DisplayName: "Industrial Electrical",
+			ShortDescription: "Diversified industrial-electrical, power management, building/industrial automation, components, electrification (SU.PA, etc).",
+			File: "seed/industrial-electrical.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine: false,
+			AppliesTo: []string{"grid_transmission", "cooling_thermal", "gics_industrials"},
+		},
+		{
+			Code: "ai-infra-semi",
+			DisplayName: "AI Infrastructure & Semis",
+			ShortDescription: "GPUs, chip design IP, optical networking, HBM/packaging, foundry, semicap, specialty chem, cooling, edge silicon.",
+			File: "seed/ai-infra-semi.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine: false,
+			AppliesTo: []string{
+				"gpus_ai_accel", "chip_design_ip", "optical_networking", "hbm_packaging",
+				"foundry", "semicap", "specialty_semi_chem", "cooling_thermal",
+				"edge_industrial_silicon", "gics_it",
+			},
+		},
+		{
+			Code: "cloud-infra",
+			DisplayName: "Cloud Infrastructure",
+			ShortDescription: "Hyperscaler pure-play / segment, neoclouds, DC REITs, sovereign cloud. Built for ORCL after v1.1 retag.",
+			File: "seed/cloud-infra.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine: false,
+			AppliesTo: []string{"data_center_reits", "gics_it"},
+		},
 	}
 
 	for _, sd := range seeds {

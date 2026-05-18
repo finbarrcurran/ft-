@@ -87,7 +87,7 @@ Top bar: brand · market pill (clickable for all 7 exchanges, click-to-focus) ·
 
 **Refresh:** `POST /api/refresh` **T**, `GET /api/refresh-status` **T**
 
-**Import/export:** `POST /api/import/{preview,apply}`, `GET /api/export.xlsx`
+**Import/export:** `POST /api/import/{preview,apply}`, `GET /api/export.xlsx`, `GET /api/export.csv?tab=stocks|crypto|watchlist` (v1.5)
 
 **Heatmap:** `GET /api/heatmap.svg?mode={market_cap|my_holdings|pnl}&sector=`
 
@@ -219,6 +219,7 @@ ft token list                            list tokens (no plaintext)
 | 1.2 | 2026-05-17 | Handoff package v2 — Spec 9f D9 Whitespace Watchlist view shipped (filter pills, "+ watchlist" affordance carrying sector pre-selection). Migration 0022 retagged ORCL → data_center_reits + WPM → precious_metals_gold per Sector_Holdings_Mapping_v1.1. Watchlist schema extension: `sectorUniverseId` accepted on create. |
 | 1.3 | 2026-05-17 | Pharma adapter v1 (draft) added to Scorecards repo. Applies to pharma_metabolic + pharma_immunology + gics_healthcare. Status `needs-review` (5 open decisions in §7 of the source MD). LLY + ABBV worked examples both calibrate to 13/16. |
 | 1.4 | 2026-05-18 | Spec 13 — Test coverage on alert / technicals / portfolio_risk / performance / sector_rotation packages. ~95 test funcs, `go test ./...` clean. Spec 12 D5g — `$ / €` toggle on stocks P&L column. `pnl_currency` preference; converts via FX snapshot. |
+| 1.5 | 2026-05-18 | **5 new sector adapters** (Defense / Mining & Metals / Industrial Electrical / AI Infra & Semis / Cloud Infra) — all v1 drafts, status `needs-review`, with open decisions in §7 of each source MD. Applies-to-sector wiring drives the 📋 button across the Sector Rotation tab. **Watchlist Market column** — per-row open/closed badge resolved by ticker suffix (matches Stocks tab behaviour). **Per-tab CSV export** — `GET /api/export.csv?tab=stocks\|crypto\|watchlist` + ⬇ Download CSV button on each tab toolbar. Flat column shape; no FX denormalization needed (Crypto rows already carry both EUR & USD columns). |
 
 ---
 

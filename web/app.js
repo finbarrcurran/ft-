@@ -2278,6 +2278,7 @@ async function renderStocks() {
   const toolbar = `
     <div class="table-toolbar">
       <button class="btn-ghost" id="add-stock">+ Add stock</button>
+      <a class="btn-ghost" href="/api/export.csv?tab=stocks" download title="Download current rows as CSV">⬇ Download CSV</a>
     </div>
   `;
 
@@ -2438,6 +2439,7 @@ async function renderCrypto() {
   const toolbar = `
     <div class="table-toolbar">
       <button class="btn-ghost" id="add-crypto">+ Add crypto</button>
+      <a class="btn-ghost" href="/api/export.csv?tab=crypto" download title="Download current rows as CSV">⬇ Download CSV</a>
     </div>
   `;
 
@@ -4345,6 +4347,7 @@ async function renderWatchlist() {
         <td><span class="${dist.cls}"${dist.title ? ` title="${escapeHTML(dist.title)}"` : ''}>${dist.label}</span></td>
         <td>${scoreCell}</td>
         <td>${tagCell}</td>
+        <td class="market-cell">${marketCell(e.market)}</td>
         <td><span class="dim">${added}</span></td>
         <td>${note}</td>
         <td class="wl-actions">
@@ -4371,6 +4374,7 @@ async function renderWatchlist() {
     <div class="table-toolbar">
       <button class="btn-ghost" id="add-watchlist-stock">+ Add stock</button>
       <button class="btn-ghost" id="add-watchlist-crypto">+ Add crypto</button>
+      <a class="btn-ghost" href="/api/export.csv?tab=watchlist" download title="Download current rows as CSV">⬇ Download CSV</a>
     </div>
     <div class="tablewrap">
       <table class="holdings watchlist">
@@ -4385,6 +4389,7 @@ async function renderWatchlist() {
             ${sortHeader('distance',    'Distance')}
             ${sortHeader('score',       'Score')}
             <th>Tag</th>
+            <th title="Exchange hours for this ticker">Market</th>
             ${sortHeader('addedAt',     'Added')}
             <th>Note</th>
             <th></th>

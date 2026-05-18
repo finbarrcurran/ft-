@@ -23,12 +23,14 @@ import (
 	"fmt"
 	"ft/internal/domain"
 	"ft/internal/frameworks"
+	"ft/internal/marketdata"
 	"ft/internal/regime"
 	"ft/internal/store"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ----- watchlist ---------------------------------------------------------
@@ -60,6 +62,11 @@ type watchlistRow struct {
 	InRange         bool `json:"inRange"`
 	AlertActive     bool `json:"alertActive"`
 	AlertSuppressed bool `json:"alertSuppressed"`
+
+	// v1.5: per-row market open/closed badge (matches Stocks tab). Resolved
+	// by ticker suffix via marketdata.ExchangeForTicker. nil for crypto and
+	// unknown exchanges.
+	Market *marketdata.MarketStatus `json:"market,omitempty"`
 }
 
 // GET /api/watchlist
@@ -78,15 +85,28 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 	eff := s.currentEffectiveRegime(r.Context())
 	alertsActive := regime.GatesWatchlistEntryZone(eff)
 
+	now := time.Now().UTC()
 	out := make([]watchlistRow, 0, len(entries))
 	for _, e := range entries {
 		inRange := isInEntryZone(e)
+		// v1.5: resolve per-row market for stock entries via ticker suffix.
+		// (Watchlist has no exchange_override column — suffix rule only.)
+		var marketPtr *marketdata.MarketStatus
+		if e.Kind == "stock" {
+			if exch := marketdata.ExchangeForTicker(e.Ticker); exch != "" {
+				st := marketdata.Status(exch, now)
+				if st.Exchange != "" {
+					marketPtr = &st
+				}
+			}
+		}
 		out = append(out, watchlistRow{
 			WatchlistEntry:  e,
 			LatestScore:     scoreByID[e.ID],
 			InRange:         inRange,
 			AlertActive:     inRange && alertsActive,
 			AlertSuppressed: inRange && !alertsActive,
+			Market:          marketPtr,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"watchlist": out})
