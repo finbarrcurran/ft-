@@ -51,6 +51,23 @@ function dashSigned(v, fmt, prefix = '', suffix = '') {
   const cls = v > 0 ? 'gain' : v < 0 ? 'loss' : '';
   return `<span class="${cls}">${prefix}${fmt.format(v)}${suffix}</span>`;
 }
+
+// Spec 12 D5g — P&L cell with currency toggle. usdValue is the
+// canonical P&L in USD; fxEURUSD is "1 EUR = N USD" from
+// /api/summary (Frankfurter snapshot). Format: "203.72 USD" /
+// "187.43 EUR" — number + currency code suffix, no symbol prefix
+// (matches the spec).
+function pnlCurrencyCell(usdValue, currency, fxEURUSD) {
+  if (usdValue == null || Number.isNaN(usdValue)) return '<span class="dim">—</span>';
+  let v = usdValue;
+  let suffix = 'USD';
+  if (currency === 'EUR' && fxEURUSD > 0) {
+    v = usdValue / fxEURUSD;
+    suffix = 'EUR';
+  }
+  const cls = v > 0 ? 'gain' : v < 0 ? 'loss' : '';
+  return `<span class="${cls}">${fmtNum2.format(v)} ${suffix}</span>`;
+}
 function pct(v, decimals = 1) {
   if (v == null || Number.isNaN(v)) return '<span class="dim">—</span>';
   const f = new Intl.NumberFormat('en-US', {
@@ -2132,6 +2149,24 @@ async function renderStocks() {
   const rows = state.stocks;
   // Spec 9f D6 — fetch sector tag map (5-min cache).
   const sectorTagMap = await getSectorTagMap();
+  // Spec 12 D5g — P&L currency toggle. Load preference once; fall back to USD.
+  if (state.pnlCurrency == null) {
+    try {
+      const r = await api('/api/preferences/pnl_currency');
+      state.pnlCurrency = r.value === 'EUR' ? 'EUR' : 'USD';
+    } catch (_) { state.pnlCurrency = 'USD'; }
+  }
+  // FX EUR→USD snapshot for the conversion. Re-uses summary's cached
+  // value when present; otherwise fetch a fresh summary in the
+  // background and re-render on completion.
+  let fxEURUSD = (state.summary && state.summary.fxEURUSD) || 0;
+  if (!fxEURUSD) {
+    try {
+      const s = await api('/api/summary');
+      state.summary = s;
+      fxEURUSD = s.fxEURUSD || 1.08;
+    } catch (_) { fxEURUSD = 1.08; }
+  }
   if (rows.length === 0) {
     $('#content').innerHTML = `
       <div class="empty">
@@ -2222,7 +2257,7 @@ async function renderStocks() {
         <td class="num">${fmtUSD.format(r.investedUsd)}</td>
         <td class="num">${dash(r.avgOpenPrice, fmtNum2)}</td>
         <td class="num" data-flash-id="stock-${r.id}-price" data-flash-value="${r.currentPrice ?? ''}">${dash(r.currentPrice, fmtNum2)}</td>
-        <td class="num" data-flash-id="stock-${r.id}-pnl" data-flash-value="${m.pnlUsd ?? ''}">${dashSigned(m.pnlUsd, fmtNum2, '$')}</td>
+        <td class="num" data-flash-id="stock-${r.id}-pnl" data-flash-value="${m.pnlUsd ?? ''}">${pnlCurrencyCell(m.pnlUsd, state.pnlCurrency, fxEURUSD)}</td>
         <td class="num">${pct(m.pnlPct, 2)}</td>
         <td class="num">${dash(r.rsi14, fmtNum2)}</td>
         <td class="num">${proposedSL}</td>
@@ -2257,7 +2292,13 @@ async function renderStocks() {
             <th class="num">Invested $</th>
             <th class="num">Avg Open</th>
             <th class="num">Current</th>
-            <th class="num" title="Profit/loss in absolute dollars from invested capital">P&amp;L $</th>
+            <th class="num" title="Profit/loss in absolute terms. Click $/€ to toggle display currency.">
+              P&amp;L
+              <span class="pnl-ccy-toggle">
+                <button class="pcy-btn ${state.pnlCurrency === 'USD' ? 'active' : ''}" data-pcy="USD">$</button>
+                <button class="pcy-btn ${state.pnlCurrency === 'EUR' ? 'active' : ''}" data-pcy="EUR">€</button>
+              </span>
+            </th>
             <th class="num" title="Profit/loss as a percentage of invested capital">P&amp;L %</th>
             <th class="num" title="Relative Strength Index over 14 periods. >70 = overbought, <30 = oversold.">RSI(14)</th>
             <th class="num" title="Recommended stop-loss level (price | % from current). Set on eToro manually.">Proposed SL</th>
@@ -2281,6 +2322,21 @@ async function renderStocks() {
   $('#add-stock').addEventListener('click', () => openHoldingModal({ kind: 'stock', mode: 'add' }));
   wireRowActions('stock');
   wireTickerHover('stock');
+  // Spec 12 D5g — P&L currency toggle.
+  for (const btn of document.querySelectorAll('.pcy-btn[data-pcy]')) {
+    btn.addEventListener('click', async () => {
+      const v = btn.dataset.pcy === 'EUR' ? 'EUR' : 'USD';
+      if (v === state.pnlCurrency) return;
+      state.pnlCurrency = v;
+      try {
+        await api('/api/preferences/pnl_currency', {
+          method: 'PUT',
+          body: JSON.stringify({ value: v }),
+        });
+      } catch (e) { console.warn('pnl_currency persist failed', e.message); }
+      renderStocks();
+    });
+  }
   flashOnRender();
 }
 

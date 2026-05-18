@@ -1614,6 +1614,31 @@ svg.sector-spark { display: block; }
   font-size: 0.75rem;
 }
 
+/* Spec 12 D5g — P&L currency toggle in the stocks table header. */
+.pnl-ccy-toggle {
+  display: inline-flex;
+  gap: 1px;
+  margin-left: 0.3rem;
+  vertical-align: middle;
+}
+.pcy-btn {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius2);
+  color: rgb(var(--color-text-muted));
+  font-size: 0.72rem;
+  padding: 0 0.35rem;
+  height: 1.3rem;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+.pcy-btn:hover { color: rgb(var(--color-text)); }
+.pcy-btn.active {
+  background: rgb(var(--color-accent) / 0.18);
+  color: rgb(var(--color-text));
+  border-color: rgb(var(--color-accent));
+}
+
 /* Spec 12 D7 — autofilled-field flash on holding modal. */
 input.autofilled, select.autofilled {
   background: rgb(var(--color-accent) / 0.12) !important;

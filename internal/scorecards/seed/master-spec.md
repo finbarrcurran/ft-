@@ -208,7 +208,7 @@ ft token list                            list tokens (no plaintext)
 | 15 | Investment strategy / allocation framework | Depends on Spec 12 D2 ✓ |
 | 16 | Alert strategy overhaul (851-alert problem) | Needs alert-noise audit first |
 | 13 (numbering collision) | "Test coverage" (v2 doc) vs "Score automation engine" (Spec 12). Rename one | Open |
-| 12 D5g | EUR toggle on stocks P&L column | Explicitly nice-to-have |
+| ~~12 D5g~~ | ~~EUR toggle on stocks P&L column~~ | ✅ Shipped 2026-05-18 — `$ / €` toggle in P&L header, persists via `pnl_currency` preference, converts via the existing FX snapshot |
 
 ## 13. Version history of this doc
 
@@ -218,6 +218,7 @@ ft token list                            list tokens (no plaintext)
 | 1.1 | 2026-05-17 | Spec 14 (per-holding theses) shipped. Added migration 0021 + thesis endpoints + Detail-page UI block. |
 | 1.2 | 2026-05-17 | Handoff package v2 — Spec 9f D9 Whitespace Watchlist view shipped (filter pills, "+ watchlist" affordance carrying sector pre-selection). Migration 0022 retagged ORCL → data_center_reits + WPM → precious_metals_gold per Sector_Holdings_Mapping_v1.1. Watchlist schema extension: `sectorUniverseId` accepted on create. |
 | 1.3 | 2026-05-17 | Pharma adapter v1 (draft) added to Scorecards repo. Applies to pharma_metabolic + pharma_immunology + gics_healthcare. Status `needs-review` (5 open decisions in §7 of the source MD). LLY + ABBV worked examples both calibrate to 13/16. |
+| 1.4 | 2026-05-18 | Spec 13 — Test coverage on alert / technicals / portfolio_risk / performance / sector_rotation packages. ~95 test funcs, `go test ./...` clean. Spec 12 D5g — `$ / €` toggle on stocks P&L column. `pnl_currency` preference; converts via FX snapshot. |
 
 ---
 
