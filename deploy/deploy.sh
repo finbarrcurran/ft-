@@ -36,11 +36,14 @@ echo "==> install binary"
 install -m 0755 "$SRC_DIR/bin/ft" "$BIN_DEST"
 chown ft:ft "$BIN_DEST"
 
-# If deploy.sh or backup-db.sh themselves changed, copy them into /opt/ft/bin
-# too. Cheap; idempotent.
-install -m 0755 "$SRC_DIR/deploy/deploy.sh"    /opt/ft/bin/deploy.sh
-install -m 0755 "$SRC_DIR/deploy/backup-db.sh" /opt/ft/bin/backup-db.sh
-chown ft:ft /opt/ft/bin/deploy.sh /opt/ft/bin/backup-db.sh
+# If deploy/backup scripts or the cron file changed, sync them. Cheap; idempotent.
+install -m 0755 "$SRC_DIR/deploy/deploy.sh"                 /opt/ft/bin/deploy.sh
+install -m 0755 "$SRC_DIR/deploy/backup-db.sh"              /opt/ft/bin/backup-db.sh
+install -m 0755 "$SRC_DIR/deploy/backup-jarvis-config.sh"   /opt/ft/bin/backup-jarvis-config.sh
+chown ft:ft /opt/ft/bin/deploy.sh /opt/ft/bin/backup-db.sh /opt/ft/bin/backup-jarvis-config.sh
+
+# Cron entries (root-owned, mode 0644 per /etc/cron.d/ convention)
+install -m 0644 -o root -g root "$SRC_DIR/deploy/ft-backup.cron" /etc/cron.d/ft-backup
 
 echo "==> restart service"
 systemctl restart "$SERVICE"
