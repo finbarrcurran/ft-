@@ -173,9 +173,11 @@ In `/etc/ft/env` (mode 0600, root:root). See `deploy/env.example` for the full l
 
 Required: `FT_FINNHUB_API_KEY` (else US quotes fail).
 
-Optional: `FT_TWELVEDATA_API_KEY`, `NEWSAPI_API_KEY`, `CRYPTOPANIC_API_KEY`, `FT_ANTHROPIC_API_KEY`, `FT_TELEGRAM_BOT_TOKEN`, `FT_TELEGRAM_CHAT_ID`.
+Optional: `FT_TWELVEDATA_API_KEY`, `NEWSAPI_API_KEY`, `CRYPTOPANIC_API_KEY`, `FT_ANTHROPIC_API_KEY`, `FT_TELEGRAM_BOT_TOKEN`, `FT_TELEGRAM_CHAT_ID`, `FT_GITHUB_TOKEN` (Spec 15 Thesis Library, fine-grained PAT scoped to cross_sector_research).
 
 Runtime: `FT_ADDR`, `FT_DB_PATH`, `FT_REFRESH_INTERVAL`, `FT_COOKIE_SECURE`.
+
+Off-site backup creds (NOT in `/etc/ft/env` — they live in rclone's own config): `/var/lib/ft/.config/rclone/rclone.conf` holds the Cloudflare R2 access key + secret + endpoint for daily DB snapshots (v1.7.3). Mode 0600, ft:ft. Bucket: `ft-backups`. 90-day retention.
 
 ## 10. Iteration loop
 
@@ -227,6 +229,7 @@ ft token list                            list tokens (no plaintext)
 | 1.7 | 2026-05-19 | **Spec 15 polish batch** — six incremental changes from the live-use shakedown of the Thesis Library: (1) **gap report split** into separate OWNED vs WATCHLIST sections (no more "+N more" truncation); (2) **multi-segment doctrine** — parser accepts `> **Primary Adapter:**` (RR.L pattern) in addition to `> **Adapter:**`; (3) **scoring-log-only uploads** — new endpoint `POST /api/theses/scoring-log` for methodology refreshes without a thesis attached, plus browser-suffix-tolerant filename matching (handles `_scoring_log (3).md` etc); (4) **Asset-Hedge framework parser support** (first piece of Spec 9i implementation, lives at `cross_sector_research/ft_specs/FT_Spec_9i_Three_Framework_Integration_v1.md` as a draft) — `> **Framework:** Asset-Hedge Scorecard` header line, `Instrument Type:` fallback for sub-type, new `asset_hedge` folder slug; (5) **per-framework score thresholds** — /16 passes at ≥12, /8 passes at ≥5 (Spec 9i calibration ladder), default ≥75% otherwise; (6) **keyword-based adapter routing fallback** — distinctive substrings (`semi`, `pharma`, `defence`, `oil`+`gas`, `precious`+`metals`, etc.) route correctly even when Gemini/Claude phrases an adapter name in a new way; (7) **Theses table grouped by ownership** — `theses_index` rows tagged `owned`/`watchlist`/`other` via JOIN to stock_holdings + watchlist; tab renders three stacked sections (OWNED green, WATCHLIST amber, OTHER dim if non-empty) so monitoring vs candidates are visually separated. Cross-sector research repo now has 9 locked theses: RHM.DE 14/16, ASML & LLY 12/16, ABBV/CLS/NVDA/RR.L/MTZ 11/16, GLD 5/8 (first Asset-Hedge). |
 | 1.7.1 | 2026-05-19 | **Process change** — Master Spec is now bumped on **every FT commit** going forward (per user request 2026-05-19). Convention added to §7. Patch (v1.7.x) for polish, minor (v1.8) for new features, major (v2.0) for breaking architecture changes. Captures one-line "what changed" rationale per commit so the spec stays an honest record of how FT got to its current shape. |
 | 1.7.2 | 2026-05-19 | **Process refined** — bump cadence relaxed from "every commit" to "every completed section / spec / sub-phase / polish batch / architectural decision." Typo fixes and single-line tweaks no longer trigger their own bump; they roll up into the next section bump. Same versioning scheme. §7 updated. |
+| 1.7.3 | 2026-05-19 | **Off-site DB backup to Cloudflare R2.** Daily backup script (`deploy/backup-db.sh`, run 03:15 UTC via `/etc/cron.d/ft-backup`) now extends past the existing 14-day local rolling snapshot to also push to R2 bucket `ft-backups` via rclone. 90-day retention on the R2 side handled by `rclone delete --min-age 90d` at the end of each run. Credentials stored at `/var/lib/ft/.config/rclone/rclone.conf` (mode 0600, ft:ft). Fine-grained R2 API token scoped to one bucket (Object Read & Write). R2 upload failures log but don't fail the cron — local backup remains the primary recovery surface. Restore path: `rclone copy r2:ft-backups/ft-YYYY-MM-DD.db /var/lib/ft/ft.db.restored` + `systemctl stop ft` + swap files + `systemctl start ft`. |
 
 ---
 
