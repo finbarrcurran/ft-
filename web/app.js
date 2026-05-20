@@ -1128,8 +1128,14 @@ function renderImportBody() {
       foot.innerHTML = `<button class="btn-primary" id="modal-done">Done</button>`;
       $('#modal-done').addEventListener('click', () => {
         closeImportModal();
-        state.stocks = null;  // invalidate cached holdings so they refetch
+        // v1.8.1 — invalidate Summary cache too so totals reflect the
+        // post-import state when the user navigates back. Previously
+        // only state.stocks/state.crypto were cleared, which left the
+        // Summary tab showing stale pre-import numbers.
+        state.stocks = null;
         state.crypto = null;
+        state.summary = null;
+        state.watchlist = null; // demoted-stock entries appear here
         loadActiveTab();
       });
       break;
