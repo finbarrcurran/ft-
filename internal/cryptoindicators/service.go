@@ -240,6 +240,38 @@ func (s *Service) WriteDailySnapshot(ctx context.Context, snapshotDate string, b
 	return tx.Commit()
 }
 
+// PriorSnapshotValue returns the indicator's raw_value from the
+// snapshot nearest to N days ago. Used by the refresher to compute
+// trend_4w for providers that don't supply trend natively (CoinGecko,
+// F&G). Returns nil if no snapshot exists within ±2 days of the target.
+func (s *Service) PriorSnapshotValue(ctx context.Context, indicatorID string, daysAgo int) (*float64, error) {
+	target := time.Now().UTC().AddDate(0, 0, -daysAgo).Format("2006-01-02")
+	// Allow ±2 day window so we don't miss when cron is irregular.
+	earliest := time.Now().UTC().AddDate(0, 0, -(daysAgo + 2)).Format("2006-01-02")
+	latest := time.Now().UTC().AddDate(0, 0, -(daysAgo - 2)).Format("2006-01-02")
+
+	var raw sql.NullFloat64
+	err := s.DB.QueryRowContext(ctx, `
+		SELECT raw_value FROM crypto_indicator_snapshots
+		 WHERE indicator_id = ?
+		   AND snapshot_date BETWEEN ? AND ?
+		   AND raw_value IS NOT NULL
+		 ORDER BY ABS(julianday(snapshot_date) - julianday(?))
+		 LIMIT 1`,
+		indicatorID, earliest, latest, target).Scan(&raw)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !raw.Valid {
+		return nil, nil
+	}
+	v := raw.Float64
+	return &v, nil
+}
+
 func nullFloat(v *float64) any {
 	if v == nil {
 		return nil

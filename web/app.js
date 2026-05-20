@@ -5962,6 +5962,10 @@ async function renderCryptoIndicators() {
 
   content.innerHTML = `
     <div class="crypto-indicators-tab">
+      <div class="ci-toolbar">
+        <button class="btn-ghost" id="ci-refresh" title="Fetch latest readings from FRED + CoinGecko + Fear & Greed">⟳ Refresh now</button>
+        <span class="dim" style="font-size:0.78rem">Auto-syncs daily at 00:30 UTC</span>
+      </div>
       ${heroHTML}
       ${renderBucket('cowen')}
       ${renderBucket('pal')}
@@ -5986,10 +5990,26 @@ async function renderCryptoIndicators() {
       </section>
       <div class="ci-footer dim">
         Decision support only. Not financial advice. Composite tracks correlation, not causation.
-        ${comp.notes ? '' : '<br>Phase 1 (v1.8.0): skeleton shipped. Data providers (Phase 2 / v1.8.1) light up the indicators above.'}
       </div>
     </div>
   `;
+
+  $('#ci-refresh')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = '⟳ Refreshing…';
+    try {
+      await api('/api/crypto-indicators/refresh', { method: 'POST' });
+      // Tiny pause so the spinner is visible even on fast networks,
+      // then re-render.
+      setTimeout(() => renderCryptoIndicators(), 400);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = orig;
+      alert(`Refresh failed: ${err.message}`);
+    }
+  });
 }
 
 async function renderPerformance() {

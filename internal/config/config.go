@@ -40,6 +40,12 @@ type Config struct {
 	ThesisRepoName   string        // "cross_sector_research"
 	ThesisRepoDir    string        // local clone dir on jarvis, e.g. /var/lib/ft/research
 	ThesisSyncEvery  time.Duration // how often the cron pulls + reindexes
+
+	// Spec 9e — Crypto Indicators tab. FRED key required for the Pal
+	// bucket (DGS2 + DTWEXBGS); missing key marks those two indicators
+	// stale with a clear error message in the UI.
+	FREDApiKey               string
+	CryptoIndicatorsDataDir  string // /var/lib/ft/data — ISM JSON lives here
 }
 
 func Load() (*Config, error) {
@@ -61,6 +67,9 @@ func Load() (*Config, error) {
 		ThesisRepoName:  envStr("FT_THESIS_REPO_NAME", "cross_sector_research"),
 		ThesisRepoDir:   envStr("FT_THESIS_REPO_DIR", "/var/lib/ft/research"),
 		ThesisSyncEvery: envDuration("FT_THESIS_SYNC_EVERY", 5*time.Minute),
+		// Spec 9e
+		FREDApiKey:              envStr("FRED_API_KEY", ""),
+		CryptoIndicatorsDataDir: envStr("FT_CRYPTO_INDICATORS_DATA_DIR", "/var/lib/ft/data"),
 	}
 	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o750); err != nil {
 		return nil, fmt.Errorf("mkdir db dir: %w", err)

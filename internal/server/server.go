@@ -204,6 +204,7 @@ func (s *Server) routes() {
 	// Spec 9e Phase 1: Crypto Indicators tab.
 	s.mux.HandleFunc("GET /api/crypto-indicators", s.requireUser(s.handleListCryptoIndicators))
 	s.mux.HandleFunc("GET /api/crypto-indicators/composite/latest", s.requireUser(s.handleCryptoIndicatorsComposite))
+	s.mux.HandleFunc("POST /api/crypto-indicators/refresh", s.requireUser(s.handleRefreshCryptoIndicators))
 
 	// Spec 15: Thesis Library (GitHub-backed).
 	s.mux.HandleFunc("GET /api/theses", s.requireUser(s.handleListTheses))

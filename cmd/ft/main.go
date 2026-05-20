@@ -25,6 +25,7 @@ import (
 	"ft/internal/performance"
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
+	"ft/internal/cryptoindicators"
 	"ft/internal/sector_rotation"
 	"ft/internal/theses"
 	"ft/internal/server"
@@ -298,6 +299,31 @@ func runServe() {
 	// Spec 9f D8 — Friday 22:00 UTC weekly digest. ScheduleWeeklyDigest
 	// has its own next-Friday loop; we just kick it off in a goroutine.
 	go sector_rotation.ScheduleWeeklyDigest(bgCtx, st)
+
+	// Spec 9e Phase 2 (v1.8.2) — daily Crypto Indicators refresh + snapshot
+	// at 00:30 UTC. Plus a startup refresh after a 30s warm-up so the tab
+	// has data on first visit without waiting for the cron tick.
+	go func() {
+		ciSvc := cryptoindicators.New(st.DB)
+		refresher := cryptoindicators.NewRefresher(ciSvc, cfg.FREDApiKey)
+
+		// Initial refresh shortly after boot.
+		time.Sleep(30 * time.Second)
+		warmCtx, warmCancel := context.WithTimeout(bgCtx, 60*time.Second)
+		if err := refresher.RefreshAll(warmCtx); err != nil {
+			slog.Warn("crypto indicators: initial refresh failed", "err", err)
+		}
+		warmCancel()
+
+		// Daily snapshot at 00:30 UTC.
+		scheduleAt(bgCtx, 0, 30, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 5*time.Minute)
+			defer cancel()
+			if err := refresher.RefreshAllAndSnapshot(ctx); err != nil {
+				slog.Error("crypto indicators: daily snapshot", "err", err)
+			}
+		})
+	}()
 
 	// Spec 15 — Thesis Library sync. Periodically `git pull` the
 	// cross_sector_research clone and re-index. No-op if FT_GITHUB_TOKEN

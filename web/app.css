@@ -3112,3 +3112,9 @@ input.autofilled, select.autofilled {
   text-align: center;
   padding: 0.5rem;
 }
+
+.ci-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
