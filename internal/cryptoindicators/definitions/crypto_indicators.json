@@ -1,0 +1,158 @@
+{
+  "_comment": "Spec 9e Phase 1 indicator definitions. 11 indicators across 4 buckets (Cowen x5, Pal x3, Universal x2, Sentiment x1). Cowen Cycle Phase is derived/displayed but not in this list — composite skips it. Thresholds tunable post-launch by editing this file. Reload on FT restart (no hot reload in v1).",
+  "indicators": [
+    {
+      "id": "cowen_price_vs_200wma",
+      "bucket": "cowen",
+      "display_name": "Price vs 200-week MA",
+      "unit": "ratio",
+      "scoring_fn": "linear",
+      "thresholds": [
+        {"value": 0.8,  "score":  1.0},
+        {"value": 1.2,  "score":  0.5},
+        {"value": 2.0,  "score":  0.0},
+        {"value": 3.5,  "score": -0.5},
+        {"value": 5.0,  "score": -1.0}
+      ]
+    },
+    {
+      "id": "cowen_log_band",
+      "bucket": "cowen",
+      "display_name": "Log regression band position",
+      "unit": "third",
+      "scoring_fn": "step",
+      "thresholds": [
+        {"band": "lower",     "score":  1.0},
+        {"band": "mid_lower", "score":  0.5},
+        {"band": "mid",       "score":  0.0},
+        {"band": "mid_upper", "score": -0.5},
+        {"band": "upper",     "score": -1.0}
+      ]
+    },
+    {
+      "id": "cowen_risk_indicator",
+      "bucket": "cowen",
+      "display_name": "Cowen Risk Indicator (proxy or manual)",
+      "unit": "0-1",
+      "scoring_fn": "linear",
+      "thresholds": [
+        {"value": 0.0, "score":  1.0},
+        {"value": 0.2, "score":  1.0},
+        {"value": 0.4, "score":  0.5},
+        {"value": 0.6, "score":  0.0},
+        {"value": 0.8, "score": -0.5},
+        {"value": 1.0, "score": -1.0}
+      ]
+    },
+    {
+      "id": "cowen_btc_dominance",
+      "bucket": "cowen",
+      "display_name": "BTC Dominance",
+      "unit": "%",
+      "scoring_fn": "level_and_trend",
+      "thresholds": [
+        {"level_min": 55, "trend_4w": "positive", "score":  0.5},
+        {"level_min": 50, "trend_4w": "any",      "score":  0.25},
+        {"level_min": 45, "trend_4w": "negative", "score": -0.5},
+        {"level_min":  0, "trend_4w": "any",      "score": -0.25}
+      ]
+    },
+    {
+      "id": "cowen_eth_btc",
+      "bucket": "cowen",
+      "display_name": "ETH/BTC ratio",
+      "unit": "ratio",
+      "scoring_fn": "trend_only",
+      "thresholds": [
+        {"trend_4w_min":    3, "score": -0.5},
+        {"trend_4w_min":   -3, "score":  0.0},
+        {"trend_4w_min": -100, "score":  0.5}
+      ]
+    },
+    {
+      "id": "pal_dxy",
+      "bucket": "pal",
+      "display_name": "DXY (Dollar Index)",
+      "unit": "index",
+      "scoring_fn": "level_and_trend",
+      "thresholds": [
+        {"level_max": 100, "trend_4w": "negative", "score":  1.0},
+        {"level_max": 105, "trend_4w": "negative", "score":  0.5},
+        {"level_max": 105, "trend_4w": "flat",     "score":  0.0},
+        {"level_min": 100, "trend_4w": "positive", "score": -0.5},
+        {"level_min": 105, "trend_4w": "positive", "score": -1.0}
+      ]
+    },
+    {
+      "id": "pal_us2y",
+      "bucket": "pal",
+      "display_name": "US 2-Year Yield",
+      "unit": "%",
+      "scoring_fn": "level_and_trend",
+      "thresholds": [
+        {"level_max": 3.0, "trend_4w": "negative", "score":  1.0},
+        {"level_max": 4.0, "trend_4w": "negative", "score":  0.5},
+        {"level_max": 5.0, "trend_4w": "flat",     "score":  0.0},
+        {"level_min": 4.0, "trend_4w": "positive", "score": -0.5},
+        {"level_min": 5.0, "trend_4w": "positive", "score": -1.0}
+      ]
+    },
+    {
+      "id": "pal_ism",
+      "bucket": "pal",
+      "display_name": "ISM Manufacturing PMI",
+      "unit": "index",
+      "scoring_fn": "level_and_trend",
+      "thresholds": [
+        {"level_min": 52, "trend_4w": "positive", "score":  1.0},
+        {"level_min": 50, "trend_4w": "positive", "score":  0.5},
+        {"level_min": 50, "trend_4w": "flat",     "score":  0.0},
+        {"level_max": 50, "trend_4w": "negative", "score": -0.5},
+        {"level_max": 47, "trend_4w": "negative", "score": -1.0}
+      ]
+    },
+    {
+      "id": "universal_etf_flow_7d",
+      "bucket": "universal",
+      "display_name": "Spot BTC ETF Net Flow (7d rolling)",
+      "unit": "USD millions",
+      "scoring_fn": "linear",
+      "thresholds": [
+        {"value":  1000, "score":  1.0},
+        {"value":   500, "score":  0.5},
+        {"value":     0, "score":  0.0},
+        {"value":  -500, "score": -0.5},
+        {"value": -1000, "score": -1.0}
+      ]
+    },
+    {
+      "id": "universal_stablecoin_supply",
+      "bucket": "universal",
+      "display_name": "Stablecoin Total Supply (4-wk ROC)",
+      "unit": "%",
+      "scoring_fn": "linear",
+      "thresholds": [
+        {"value":  2.0, "score":  1.0},
+        {"value":  0.5, "score":  0.5},
+        {"value":  0.0, "score":  0.0},
+        {"value": -0.5, "score": -0.5},
+        {"value": -2.0, "score": -1.0}
+      ]
+    },
+    {
+      "id": "sentiment_fear_greed",
+      "bucket": "sentiment",
+      "display_name": "Crypto Fear & Greed",
+      "unit": "0-100",
+      "scoring_fn": "linear",
+      "thresholds": [
+        {"value":   0, "score":  1.0},
+        {"value":  25, "score":  1.0},
+        {"value":  45, "score":  0.5},
+        {"value":  55, "score":  0.0},
+        {"value":  75, "score": -0.5},
+        {"value": 100, "score": -1.0}
+      ]
+    }
+  ]
+}

@@ -13,6 +13,7 @@ import (
 	"ft/internal/domain"
 	"ft/internal/llm"
 	"ft/internal/refresh"
+	"ft/internal/cryptoindicators"
 	"ft/internal/scorecards"
 	"ft/internal/store"
 	"ft/internal/theses"
@@ -31,9 +32,10 @@ type Server struct {
 	store      *store.Store
 	refresh    *refresh.Service
 	llm        *llm.Service        // Spec 9c.1; nil-safe — handlers guard
-	scorecards *scorecards.Service // Spec 9g
-	theses     *theses.Engine      // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
-	mux        *http.ServeMux
+	scorecards       *scorecards.Service       // Spec 9g
+	theses           *theses.Engine            // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
+	cryptoIndicators *cryptoindicators.Service // Spec 9e Phase 1
+	mux              *http.ServeMux
 }
 
 func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
@@ -45,7 +47,8 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		scorecards: scorecards.New(st.DB),
 		theses: theses.New(st.DB, cfg.ThesisRepoDir, cfg.ThesisRepoOwner,
 			cfg.ThesisRepoName, cfg.GitHubToken),
-		mux: http.NewServeMux(),
+		cryptoIndicators: cryptoindicators.New(st.DB), // Spec 9e Phase 1
+		mux:              http.NewServeMux(),
 	}
 	s.routes()
 	return s
@@ -197,6 +200,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis/versions", s.requireUser(s.handleHoldingThesisVersions))
 	s.mux.HandleFunc("PUT /api/holdings/{kind}/{id}/thesis/status", s.requireUser(s.handleHoldingThesisStatus))
 	s.mux.HandleFunc("POST /api/holdings/{kind}/{id}/thesis/preview", s.requireUser(s.handleHoldingThesisPreview))
+
+	// Spec 9e Phase 1: Crypto Indicators tab.
+	s.mux.HandleFunc("GET /api/crypto-indicators", s.requireUser(s.handleListCryptoIndicators))
+	s.mux.HandleFunc("GET /api/crypto-indicators/composite/latest", s.requireUser(s.handleCryptoIndicatorsComposite))
 
 	// Spec 15: Thesis Library (GitHub-backed).
 	s.mux.HandleFunc("GET /api/theses", s.requireUser(s.handleListTheses))

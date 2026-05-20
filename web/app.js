@@ -322,6 +322,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'summary' ? 'active' : ''}" data-tab="summary">Summary</button>
         <button class="tab ${state.tab === 'stocks' ? 'active' : ''}" data-tab="stocks">Stocks &amp; ETFs</button>
         <button class="tab ${state.tab === 'crypto' ? 'active' : ''}" data-tab="crypto">Crypto</button>
+        <button class="tab ${state.tab === 'crypto-indicators' ? 'active' : ''}" data-tab="crypto-indicators">Crypto Indicators</button>
         <button class="tab ${state.tab === 'performance' ? 'active' : ''}" data-tab="performance">Performance</button>
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
         <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Sector Rotation</button>
@@ -1343,6 +1344,8 @@ async function loadActiveTab() {
         state.crypto = res.holdings || [];
       }
       renderCrypto();
+    } else if (state.tab === 'crypto-indicators') {
+      await renderCryptoIndicators();
     } else if (state.tab === 'performance') {
       await renderPerformance();
     } else if (state.tab === 'screener') {
@@ -5821,6 +5824,167 @@ async function openThesisVersions({ kind, id, ticker }) {
 // ============================================================================
 
 if (state.perfWindow == null) state.perfWindow = 'all';
+
+// ---------- Spec 9e Phase 1: Crypto Indicators tab ----------------------
+//
+// Hero composite gauge + 4 bucket sections + footer disclaimer. Phase 1
+// ships the skeleton; the gauge SVG, bucket cards and Top/Worst table
+// get their visual polish in Phase 3 (v1.8.2). Data providers ship in
+// Phase 2 (v1.8.1) — until then, current_value/current_score are NULL
+// and the composite is 0 / NEUTRAL.
+
+const CI_BAND_COLOR = {
+  strong_accumulate: 'gain',
+  accumulate:        'gain',
+  neutral:           'dim',
+  caution:           'warn',
+  distribute_wait:   'loss',
+};
+
+async function renderCryptoIndicators() {
+  const content = $('#content');
+  content.innerHTML = `<div class="empty"><div>Loading crypto indicators…</div></div>`;
+
+  let listResp, compResp, fg;
+  try {
+    [listResp, compResp, fg] = await Promise.all([
+      api('/api/crypto-indicators'),
+      api('/api/crypto-indicators/composite/latest'),
+      api('/api/feargreed').catch(() => null), // reuse existing endpoint
+    ]);
+  } catch (err) {
+    content.innerHTML = `<div class="empty"><div class="loss">error: ${escapeHTML(err.message)}</div></div>`;
+    return;
+  }
+
+  const indicators = listResp.indicators || [];
+  const bucketLabels = listResp.bucketLabels || {};
+  const comp = (compResp && compResp.composite) || { compositeScore: 0, actionBand: 'neutral', subScores: {}, effectiveWeights: {} };
+  const bandLabel = (compResp && compResp.bandLabel) || 'NEUTRAL';
+  const bandClass = CI_BAND_COLOR[comp.actionBand] || 'dim';
+
+  // Group indicators by bucket.
+  const byBucket = { cowen: [], pal: [], universal: [], sentiment: [] };
+  for (const i of indicators) {
+    if (byBucket[i.bucket]) byBucket[i.bucket].push(i);
+  }
+
+  // Hero composite gauge — Phase 3 will replace this with an SVG.
+  const dispScore = Number(comp.compositeScore || 0).toFixed(1);
+  const subChip = (label, key) => {
+    const v = comp[key];
+    if (v == null) return `<span class="ci-sub dim">${label} —</span>`;
+    const sign = v >= 0 ? '+' : '';
+    return `<span class="ci-sub">${label} ${sign}${Number(v).toFixed(2)}</span>`;
+  };
+  const heroHTML = `
+    <div class="ci-hero">
+      <div class="ci-hero-head">
+        <span class="dim">Composite Score</span>
+        <span class="ci-band ${bandClass}">${escapeHTML(bandLabel)}</span>
+      </div>
+      <div class="ci-hero-num ${bandClass}">${dispScore}</div>
+      <div class="ci-hero-scale">
+        <span class="dim">-100</span>
+        <div class="ci-hero-bar">
+          <div class="ci-hero-marker" style="left: ${Math.max(0, Math.min(100, (Number(dispScore) + 100) / 2))}%"></div>
+        </div>
+        <span class="dim">+100</span>
+      </div>
+      <div class="ci-hero-subs">
+        ${subChip('Cowen',     'cowenSubscore')}
+        ${subChip('Pal',       'palSubscore')}
+        ${subChip('Universal', 'universalSubscore')}
+        ${subChip('Sentiment', 'sentimentSubscore')}
+      </div>
+      ${comp.notes ? `<div class="dim" style="margin-top:0.5rem; font-size:0.8rem">${escapeHTML(comp.notes)}</div>` : ''}
+    </div>
+  `;
+
+  // Bucket rendering. Phase 3 ships the proper card grid; Phase 1 is a
+  // simple list so the data shape is visible.
+  const renderBucket = (bucketKey) => {
+    const rows = byBucket[bucketKey] || [];
+    const label = bucketLabels[bucketKey] || bucketKey;
+    if (rows.length === 0) return '';
+    const items = rows.map(i => {
+      const val = i.currentValue != null ? Number(i.currentValue).toFixed(2) : '—';
+      const score = i.currentScore != null
+        ? `<span class="${i.currentScore >= 0 ? 'gain' : 'loss'}">${Number(i.currentScore).toFixed(2)}</span>`
+        : '<span class="dim">—</span>';
+      const trend = i.trend4w != null
+        ? `${i.trend4w > 0.5 ? '▲' : i.trend4w < -0.5 ? '▼' : '▬'} ${Number(i.trend4w).toFixed(1)}%`
+        : '<span class="dim">—</span>';
+      const stale = !i.currentValue && !i.fetchError
+        ? '<span class="ci-pill stale">awaiting data</span>'
+        : i.fetchError
+          ? `<span class="ci-pill err" title="${escapeHTML(i.fetchError)}">⚠ error</span>`
+          : '';
+      return `
+        <div class="ci-card">
+          <div class="ci-card-head">
+            <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
+            <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
+          </div>
+          <div class="ci-card-grid">
+            <div><span class="dim">Value</span> ${val} ${i.unit ? `<span class="dim">${escapeHTML(i.unit)}</span>` : ''}</div>
+            <div><span class="dim">4w</span> ${trend}</div>
+            <div><span class="dim">Score</span> ${score}</div>
+            <div>${stale}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    return `
+      <section class="ci-bucket">
+        <h3 class="ci-bucket-head">${escapeHTML(label)}</h3>
+        <div class="ci-card-row">${items}</div>
+      </section>
+    `;
+  };
+
+  // Sentiment bucket: render Crypto F&G inline (Spec 9e D11 — moved here).
+  const fgValue = fg && (fg.value != null ? fg.value : null);
+  const fgLabel = fg && fg.valueClassification ? fg.valueClassification : (fg && fg.classification ? fg.classification : '');
+  const sentimentExtra = fgValue != null ? `
+    <div class="ci-fg-inline">
+      <span class="dim">Live F&amp;G:</span>
+      <strong>${escapeHTML(String(fgValue))}</strong>
+      <span class="dim">${escapeHTML(fgLabel)}</span>
+    </div>
+  ` : '';
+
+  content.innerHTML = `
+    <div class="crypto-indicators-tab">
+      ${heroHTML}
+      ${renderBucket('cowen')}
+      ${renderBucket('pal')}
+      ${renderBucket('universal')}
+      <section class="ci-bucket">
+        <h3 class="ci-bucket-head">${escapeHTML(bucketLabels.sentiment || 'Sentiment')}</h3>
+        ${sentimentExtra}
+        <div class="ci-card-row">${(byBucket.sentiment || []).map(i => `
+          <div class="ci-card">
+            <div class="ci-card-head">
+              <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
+              <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
+            </div>
+            <div class="ci-card-grid">
+              <div><span class="dim">Value</span> ${i.currentValue != null ? Number(i.currentValue).toFixed(2) : (fgValue != null ? fgValue : '—')}</div>
+              <div><span class="dim">Score</span> ${i.currentScore != null
+                ? `<span class="${i.currentScore >= 0 ? 'gain' : 'loss'}">${Number(i.currentScore).toFixed(2)}</span>`
+                : '<span class="dim">—</span>'}</div>
+            </div>
+          </div>
+        `).join('')}</div>
+      </section>
+      <div class="ci-footer dim">
+        Decision support only. Not financial advice. Composite tracks correlation, not causation.
+        ${comp.notes ? '' : '<br>Phase 1 (v1.8.0): skeleton shipped. Data providers (Phase 2 / v1.8.1) light up the indicators above.'}
+      </div>
+    </div>
+  `;
+}
 
 async function renderPerformance() {
   const content = $('#content');
