@@ -77,7 +77,20 @@ func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	parsed, err := persistence.ParseXLSX(file)
+	// v1.7.5 — auto-detect xlsx vs csv by filename extension.
+	// CSV format matches the v1.5 per-tab export (round-trip friendly).
+	var parsed *persistence.ImportResult
+	lower := strings.ToLower(header.Filename)
+	switch {
+	case strings.HasSuffix(lower, ".csv"):
+		parsed, err = persistence.ParseCSV(file)
+	case strings.HasSuffix(lower, ".xlsx"), strings.HasSuffix(lower, ".xls"):
+		parsed, err = persistence.ParseXLSX(file)
+	default:
+		writeError(w, http.StatusBadRequest,
+			"file must be .xlsx or .csv (got "+header.Filename+")")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("parse: %s", err))
 		return

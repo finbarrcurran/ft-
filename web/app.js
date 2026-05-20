@@ -974,12 +974,15 @@ function renderImportBody() {
 
   switch (importState.step) {
     case 'pick': {
-      desc.textContent = 'Drop an .xlsx and review the diff before applying.';
+      desc.textContent = 'Drop an .xlsx or .csv and review the diff before applying.';
       body.innerHTML = `
         <div class="dropzone" id="dropzone">
-          <input type="file" class="file-input" id="file-input" accept=".xlsx,.xls" />
+          <input type="file" class="file-input" id="file-input" accept=".xlsx,.xls,.csv" />
           <div>Drop a file here, or <button type="button" class="browse" id="browse">browse</button></div>
-          <div class="hint">.xlsx · master format (stocks_etfs + crypto + meta) or legacy 5-col</div>
+          <div class="hint">
+            <strong>.xlsx</strong> · master format (stocks_etfs + crypto + meta) or legacy 5-col<br>
+            <strong>.csv</strong> · matches the per-tab Download CSV export (one kind at a time)
+          </div>
         </div>
         ${importState.error ? `<div class="error" style="margin-top:1rem">${escapeHTML(importState.error)}</div>` : ''}
       `;
@@ -6081,7 +6084,7 @@ async function buildCommandPaletteItems() {
   // Actions.
   items.push(
     { kind: 'action', label: 'Refresh market data',  hint: 'action', sort: 'b1', action: () => onRefresh() },
-    { kind: 'action', label: 'Import xlsx master',   hint: 'action', sort: 'b2', action: () => openImportModal() },
+    { kind: 'action', label: 'Import xlsx / csv',    hint: 'action', sort: 'b2', action: () => openImportModal() },
     { kind: 'action', label: 'Export master xlsx',   hint: 'action', sort: 'b3', action: () => onExport() },
     { kind: 'action', label: 'Add stock',            hint: 'action', sort: 'b4', action: () => openHoldingModal({ kind: 'stock', mode: 'add' }) },
     { kind: 'action', label: 'Add crypto',           hint: 'action', sort: 'b5', action: () => openHoldingModal({ kind: 'crypto', mode: 'add' }) },
