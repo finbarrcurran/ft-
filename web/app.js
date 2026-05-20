@@ -5963,7 +5963,9 @@ async function renderCryptoIndicators() {
   content.innerHTML = `
     <div class="crypto-indicators-tab">
       <div class="ci-toolbar">
-        <button class="btn-ghost" id="ci-refresh" title="Fetch latest readings from FRED + CoinGecko + Fear & Greed">⟳ Refresh now</button>
+        <button class="btn-ghost" id="ci-refresh" title="Fetch latest readings from FRED + CoinGecko + DefiLlama + Farside + ISM + F&G">⟳ Refresh now</button>
+        <button class="btn-ghost" id="ci-ism-upload" title="Upload monthly ISM Manufacturing PMI prints (JSON)">📊 Update ISM data…</button>
+        <input type="file" id="ci-ism-file" accept=".json,application/json" hidden />
         <span class="dim" style="font-size:0.78rem">Auto-syncs daily at 00:30 UTC</span>
       </div>
       ${heroHTML}
@@ -5993,6 +5995,36 @@ async function renderCryptoIndicators() {
       </div>
     </div>
   `;
+
+  $('#ci-ism-upload')?.addEventListener('click', () => $('#ci-ism-file').click());
+  $('#ci-ism-file')?.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    let payload;
+    try { payload = JSON.parse(text); } catch (err) {
+      alert('Invalid JSON: ' + err.message);
+      return;
+    }
+    if (!payload.prints || !Array.isArray(payload.prints)) {
+      alert('JSON must have a "prints" array. See https://ft.curranhouse.dev/help for the format.');
+      return;
+    }
+    try {
+      const resp = await fetch('/api/crypto-indicators/ism', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) { alert('Upload failed: ' + (data.error || `HTTP ${resp.status}`)); return; }
+      alert(`✓ ISM data uploaded (${data.count} prints). Refreshing indicators…`);
+      setTimeout(() => renderCryptoIndicators(), 600);
+    } catch (err) {
+      alert('Upload failed: ' + err.message);
+    }
+  });
 
   $('#ci-refresh')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;

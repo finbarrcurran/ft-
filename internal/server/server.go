@@ -205,6 +205,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/crypto-indicators", s.requireUser(s.handleListCryptoIndicators))
 	s.mux.HandleFunc("GET /api/crypto-indicators/composite/latest", s.requireUser(s.handleCryptoIndicatorsComposite))
 	s.mux.HandleFunc("POST /api/crypto-indicators/refresh", s.requireUser(s.handleRefreshCryptoIndicators))
+	s.mux.HandleFunc("GET /api/crypto-indicators/ism", s.requireUser(s.handleReadISM))
+	s.mux.HandleFunc("POST /api/crypto-indicators/ism", s.requireUser(s.handleUploadISM))
 
 	// Spec 15: Thesis Library (GitHub-backed).
 	s.mux.HandleFunc("GET /api/theses", s.requireUser(s.handleListTheses))

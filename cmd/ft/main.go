@@ -305,7 +305,7 @@ func runServe() {
 	// has data on first visit without waiting for the cron tick.
 	go func() {
 		ciSvc := cryptoindicators.New(st.DB)
-		refresher := cryptoindicators.NewRefresher(ciSvc, cfg.FREDApiKey)
+		refresher := cryptoindicators.NewRefresher(ciSvc, cfg.FREDApiKey, cfg.CryptoIndicatorsDataDir)
 
 		// Initial refresh shortly after boot.
 		time.Sleep(30 * time.Second)

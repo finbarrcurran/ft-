@@ -17,14 +17,18 @@ import (
 // Refresher is stateless; safe to construct per call. Provider clients
 // are cheap (Go *http.Client with a 20s timeout).
 type Refresher struct {
-	Service     *Service
-	FREDApiKey  string
+	Service    *Service
+	FREDApiKey string
+	DataDir    string // for ISM JSON file
 }
 
 // NewRefresher builds one from a Service handle + FRED key (may be empty;
 // FRED-sourced indicators then mark themselves stale).
-func NewRefresher(svc *Service, fredKey string) *Refresher {
-	return &Refresher{Service: svc, FREDApiKey: fredKey}
+func NewRefresher(svc *Service, fredKey, dataDir string) *Refresher {
+	if dataDir == "" {
+		dataDir = "/var/lib/ft/data"
+	}
+	return &Refresher{Service: svc, FREDApiKey: fredKey, DataDir: dataDir}
 }
 
 // RefreshAll fetches all v1.8.2-wired providers in sequence (cheap;
@@ -37,6 +41,14 @@ func NewRefresher(svc *Service, fredKey string) *Refresher {
 func (r *Refresher) RefreshAll(ctx context.Context) error {
 	cg := providers.NewCoinGeckoClient()
 	fred := providers.NewFREDClient(r.FREDApiKey)
+	llama := providers.NewDefiLlamaClient()
+	farside := providers.NewFarsideClient()
+
+	// Make sure btc_price_history is seeded before computing Cowen
+	// indicators. Best-effort — Cowen indicators tolerate missing data.
+	if err := r.Service.SeedBTCHistory(ctx, cg); err != nil {
+		slog.Warn("crypto indicators: BTC history seed failed", "err", err)
+	}
 
 	// Compute trend_4w from snapshot history where the provider can't
 	// supply it (CoinGecko, F&G). This requires the snapshot table to
@@ -54,6 +66,13 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 		return &t
 	}
 
+	// Compute Cowen indicators from BTC price history.
+	history, err := r.Service.BTCHistory(ctx)
+	if err != nil {
+		slog.Warn("crypto indicators: BTC history fetch failed", "err", err)
+	}
+	cowen := ComputeCowen(history)
+
 	type result struct {
 		id      string
 		reading providers.Reading
@@ -63,9 +82,49 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 		// FRED (Pal bucket)
 		func() result { return result{"pal_dxy", fred.FetchSeries(ctx, "DTWEXBGS")} },
 		func() result { return result{"pal_us2y", fred.FetchSeries(ctx, "DGS2")} },
+		// ISM (Pal bucket — local JSON file)
+		func() result { return result{"pal_ism", providers.FetchISMReading(r.DataDir)} },
 		// CoinGecko (Cowen bucket)
 		func() result { return result{"cowen_btc_dominance", cg.FetchBTCDominance(ctx)} },
 		func() result { return result{"cowen_eth_btc", cg.FetchETHBTCRatio(ctx)} },
+		// Cowen indicators derived from BTC history.
+		func() result {
+			r := providers.Reading{}
+			if cowen.PriceVs200WMA != nil {
+				v := *cowen.PriceVs200WMA
+				r.Value = &v
+			} else {
+				r.Err = "BTC history insufficient for 200-week MA (need ≥200 weekly bars)"
+			}
+			return result{"cowen_price_vs_200wma", r}
+		},
+		func() result {
+			r := providers.Reading{}
+			if cowen.LogBandValue != nil {
+				v := *cowen.LogBandValue
+				r.Value = &v
+			} else {
+				r.Err = "BTC history insufficient for log-band fit (need ≥100 daily bars)"
+			}
+			return result{"cowen_log_band", r}
+		},
+		func() result {
+			r := providers.Reading{}
+			if cowen.RiskProxy != nil {
+				v := *cowen.RiskProxy
+				r.Value = &v
+			} else {
+				r.Err = "risk proxy needs both log_band and price_vs_200wma"
+			}
+			return result{"cowen_risk_indicator", r}
+		},
+		// Universal bucket
+		func() result {
+			return result{"universal_etf_flow_7d", farside.FetchBTCETFFlow7d(ctx)}
+		},
+		func() result {
+			return result{"universal_stablecoin_supply", llama.FetchStablecoinSupply(ctx)}
+		},
 		// Alternative.me (Sentiment bucket)
 		func() result { return result{"sentiment_fear_greed", providers.FetchFearGreed(ctx)} },
 	}
@@ -86,7 +145,14 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 		def, ok := DefsByID[res.id]
 		var score *float64
 		if ok && res.reading.Err == "" {
-			s, valid := def.Score(buildInputsFor(def, res.reading))
+			inputs := buildInputsFor(def, res.reading)
+			// cowen_log_band is the only step-fn indicator — needs the
+			// band string, which we derive from the residual via Cowen
+			// indicators.
+			if res.id == "cowen_log_band" && cowen.LogBand != "" {
+				inputs.Band = cowen.LogBand
+			}
+			s, valid := def.Score(inputs)
 			if valid {
 				score = &s
 			}

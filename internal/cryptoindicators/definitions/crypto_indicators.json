@@ -129,14 +129,14 @@
       "id": "universal_stablecoin_supply",
       "bucket": "universal",
       "display_name": "Stablecoin Total Supply (4-wk ROC)",
-      "unit": "%",
-      "scoring_fn": "linear",
+      "unit": "USD bn (4w ROC %)",
+      "scoring_fn": "trend_only",
       "thresholds": [
-        {"value":  2.0, "score":  1.0},
-        {"value":  0.5, "score":  0.5},
-        {"value":  0.0, "score":  0.0},
-        {"value": -0.5, "score": -0.5},
-        {"value": -2.0, "score": -1.0}
+        {"trend_4w_min":    2.0, "score":  1.0},
+        {"trend_4w_min":    0.5, "score":  0.5},
+        {"trend_4w_min":    0.0, "score":  0.0},
+        {"trend_4w_min":   -0.5, "score": -0.5},
+        {"trend_4w_min": -100.0, "score": -1.0}
       ]
     },
     {

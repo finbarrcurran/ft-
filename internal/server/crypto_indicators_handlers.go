@@ -10,7 +10,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"ft/internal/cryptoindicators"
+	"ft/internal/cryptoindicators/providers"
+	"io"
 	"net/http"
 	"time"
 )
@@ -44,6 +47,79 @@ func (s *Server) handleListCryptoIndicators(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// GET /api/crypto-indicators/ism — read current ISM file (v1.8.3)
+func (s *Server) handleReadISM(w http.ResponseWriter, r *http.Request) {
+	f, err := providers.LoadISM(s.cfg.CryptoIndicatorsDataDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if f == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"prints": []any{}, "uploaded": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"prints": f.Prints, "uploaded": true})
+}
+
+// POST /api/crypto-indicators/ism — upload new ISM JSON (v1.8.3)
+//
+// Accepts either:
+//   - multipart/form-data with field "file" (a .json file)
+//   - application/json body with the ISMFile shape directly
+//
+// Validates via providers.ValidateISM, atomic-writes to disk, then
+// triggers a refresh so the indicator lights up immediately.
+func (s *Server) handleUploadISM(w http.ResponseWriter, r *http.Request) {
+	var f providers.ISMFile
+	ct := r.Header.Get("Content-Type")
+	if hasCTPrefix(ct, "multipart/form-data") {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			writeError(w, http.StatusBadRequest, "multipart parse: "+err.Error())
+			return
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "missing 'file' part")
+			return
+		}
+		defer file.Close()
+		b, err := io.ReadAll(file)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "read file: "+err.Error())
+			return
+		}
+		if err := json.Unmarshal(b, &f); err != nil {
+			writeError(w, http.StatusBadRequest, "JSON parse: "+err.Error())
+			return
+		}
+	} else {
+		if err := json.NewDecoder(r.Body).Decode(&f); err != nil {
+			writeError(w, http.StatusBadRequest, "JSON parse: "+err.Error())
+			return
+		}
+	}
+	if err := providers.ValidateISM(&f); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := providers.SaveISM(s.cfg.CryptoIndicatorsDataDir, &f); err != nil {
+		writeError(w, http.StatusInternalServerError, "save: "+err.Error())
+		return
+	}
+	// Fire a refresh so pal_ism lights up immediately.
+	if s.cryptoIndicators != nil {
+		refresher := cryptoindicators.NewRefresher(s.cryptoIndicators, s.cfg.FREDApiKey, s.cfg.CryptoIndicatorsDataDir)
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		_ = refresher.RefreshAll(ctx)
+		cancel()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(f.Prints)})
+}
+
+func hasCTPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
 // POST /api/crypto-indicators/refresh (v1.8.2)
 //
 // Manual trigger for the same refresh logic the daily 00:30 UTC cron runs.
@@ -54,7 +130,7 @@ func (s *Server) handleRefreshCryptoIndicators(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusNotFound, "crypto indicators not initialised")
 		return
 	}
-	refresher := cryptoindicators.NewRefresher(s.cryptoIndicators, s.cfg.FREDApiKey)
+	refresher := cryptoindicators.NewRefresher(s.cryptoIndicators, s.cfg.FREDApiKey, s.cfg.CryptoIndicatorsDataDir)
 	// 60s timeout — generous; in practice all calls together take ~5s.
 	ctx, cancel := contextWithTimeout(r, 60)
 	defer cancel()
