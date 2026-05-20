@@ -1066,7 +1066,27 @@ function renderImportBody() {
         </div>
       ` : '';
 
-      body.innerHTML = sections.join('') + enrichPanel + warnPanel + meta;
+      // v1.7.6 — preview of stocks that will be demoted to the watchlist
+      // (held now, missing from import). Non-destructive: ticker + name +
+      // sector + thesis_link carry through. Already-on-watchlist tickers
+      // are silently skipped.
+      const demote = p.willDemoteToWatchlist || [];
+      const demotePanel = demote.length === 0 ? '' : `
+        <div class="warn-panel" style="border-color:rgb(var(--color-accent)/0.35); background:rgb(var(--color-accent)/0.06)">
+          <div class="head" style="color:rgb(var(--color-accent))">
+            ↘ Will move to Watchlist (${demote.length})
+          </div>
+          <div class="dim" style="margin:0.2rem 0 0.4rem 0; font-size:0.78rem">
+            These stocks are currently held but missing from the import — they'll be added to the watchlist (with name / sector / thesis_link carried over) instead of deleted.
+          </div>
+          <ul>
+            ${demote.slice(0, 20).map(t => `<li class="tabular">· <strong>${escapeHTML(t)}</strong></li>`).join('')}
+            ${demote.length > 20 ? `<li class="dim">· …and ${demote.length - 20} more</li>` : ''}
+          </ul>
+        </div>
+      `;
+
+      body.innerHTML = sections.join('') + demotePanel + enrichPanel + warnPanel + meta;
 
       const sCb = $('#apply-stocks');
       const cCb = $('#apply-crypto');
@@ -1092,13 +1112,15 @@ function renderImportBody() {
     }
     case 'applied': {
       desc.textContent = 'Import complete.';
-      const r = importState.applyResult || { stocksApplied: 0, cryptoApplied: 0 };
+      const r = importState.applyResult || { stocksApplied: 0, cryptoApplied: 0, stocksDemoted: [] };
+      const demoted = r.stocksDemoted || [];
       body.innerHTML = `
         <div class="applied-panel">
           <div class="head">Import applied</div>
           <p style="margin:0; font-size:0.85rem">
             ${r.stocksApplied} stock${r.stocksApplied === 1 ? '' : 's'} ·
             ${r.cryptoApplied} crypto holding${r.cryptoApplied === 1 ? '' : 's'} written.
+            ${demoted.length > 0 ? `<br>${demoted.length} stock${demoted.length === 1 ? '' : 's'} moved to watchlist: <span class="tabular">${demoted.map(t => escapeHTML(t)).join(', ')}</span>` : ''}
           </p>
         </div>
       `;

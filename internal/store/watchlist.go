@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"ft/internal/domain"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -78,6 +79,69 @@ func (s *Store) CreateWatchlistEntry(ctx context.Context, e *domain.WatchlistEnt
 	id, _ := res.LastInsertId()
 	e.ID = id
 	return e, nil
+}
+
+// DemoteHoldingToWatchlist creates a watchlist entry from a stock holding
+// being removed by an import (v1.7.6). Carries forward identity and the
+// pieces of context that are expensive to re-enter manually: ticker, name,
+// sector, sector_universe_id, current_price, thesis_link. Sets a
+// descriptive note so the watchlist row's origin is obvious later.
+//
+// Idempotent: if an ACTIVE (non-soft-deleted) watchlist row already exists
+// for this user+ticker, nothing happens and (nil, nil) is returned. This
+// means re-importing the same "missing ticker" twice won't pile up
+// duplicates.
+//
+// Used from handleImportApply before the slam-replace deletes the holding.
+// The same logic applies to crypto holdings (kind="crypto").
+func (s *Store) DemoteHoldingToWatchlist(ctx context.Context, userID int64, kind, ticker, companyName string, sector *string, sectorUniverseID *int64, currentPrice *float64, thesisLink *string, investedUSD float64) (*domain.WatchlistEntry, error) {
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	if ticker == "" {
+		return nil, nil
+	}
+	// Skip if an active watchlist row already exists for this ticker.
+	var existing int
+	if err := s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM watchlist
+		  WHERE user_id = ? AND ticker = ? AND deleted_at IS NULL`,
+		userID, ticker).Scan(&existing); err != nil {
+		return nil, err
+	}
+	if existing > 0 {
+		return nil, nil // already watched — don't duplicate
+	}
+	now := time.Now().UTC()
+	noteStr := "Auto-moved from holdings on " + now.Format("2006-01-02") +
+		" — removed via import"
+	if investedUSD > 0 {
+		noteStr += " (was invested $" + ftoa2(investedUSD) + ")"
+	}
+	e := &domain.WatchlistEntry{
+		UserID:           userID,
+		Ticker:           ticker,
+		Kind:             kind,
+		CompanyName:      ptrStr(companyName),
+		Sector:           sector,
+		SectorUniverseID: sectorUniverseID,
+		CurrentPrice:     currentPrice,
+		ThesisLink:       thesisLink,
+		Note:             &noteStr,
+		AddedAt:          now,
+	}
+	return s.CreateWatchlistEntry(ctx, e)
+}
+
+// ftoa2 formats a float to 2 decimals without trailing zeros.
+func ftoa2(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 2, 64)
+	return s
+}
+
+func ptrStr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // UpdateWatchlistEntry overwrites the editable fields. Adds an updated_at touch.

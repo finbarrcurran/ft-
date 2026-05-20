@@ -116,6 +116,40 @@ func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 	stockDiff := persistence.DiffStocks(currentStocks, parsed.Stocks)
 	cryptoDiff := persistence.DiffCrypto(currentCrypto, parsed.Crypto)
 
+	// v1.7.6 — preview which tickers will be demoted to the watchlist on
+	// apply (stocks missing from the import that are currently held). Only
+	// includes those NOT already on the active watchlist — those are
+	// silently skipped at apply time.
+	var willDemote []string
+	if len(parsed.Stocks) > 0 {
+		importTickers := map[string]bool{}
+		for _, h := range parsed.Stocks {
+			if h.Ticker != nil && *h.Ticker != "" {
+				importTickers[strings.ToUpper(*h.Ticker)] = true
+			}
+		}
+		watchActive, _ := s.store.ListWatchlist(r.Context(), userID)
+		watchedTickers := map[string]bool{}
+		for _, w := range watchActive {
+			if w.DeletedAt == nil {
+				watchedTickers[strings.ToUpper(w.Ticker)] = true
+			}
+		}
+		for _, h := range currentStocks {
+			if h.Ticker == nil || *h.Ticker == "" {
+				continue
+			}
+			tk := strings.ToUpper(*h.Ticker)
+			if importTickers[tk] {
+				continue // still in import
+			}
+			if watchedTickers[tk] {
+				continue // already on watchlist; skip silently
+			}
+			willDemote = append(willDemote, *h.Ticker)
+		}
+	}
+
 	// Stash for the apply step.
 	storePending(userID, &pendingImport{
 		Stocks:   parsed.Stocks,
@@ -137,6 +171,7 @@ func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 		"skipped":              parsed.Skipped,
 		"stockDiff":            stockDiff,
 		"cryptoDiff":           cryptoDiff,
+		"willDemoteToWatchlist": willDemote, // v1.7.6
 		"enriched":             enriched, // Spec 12 D7 — UI highlight hints
 		"ttlSeconds":           int(pendingTTL.Seconds()),
 	})
@@ -169,8 +204,39 @@ func (s *Server) handleImportApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var stocksApplied, cryptoApplied int
+	var stocksDemoted []string // tickers moved to watchlist (v1.7.6)
 
 	if req.ApplyStocks && len(pending.Stocks) > 0 {
+		// v1.7.6 — before slam-replace, demote any holding whose ticker is
+		// missing from the import to the watchlist. Preserves company name,
+		// sector, sector_universe_id, thesis_link so the watchlist row picks
+		// up the context cheaply.
+		newTickers := map[string]bool{}
+		for _, h := range pending.Stocks {
+			if h.Ticker != nil && *h.Ticker != "" {
+				newTickers[strings.ToUpper(*h.Ticker)] = true
+			}
+		}
+		currentStocksForDemote, _ := s.store.ListStockHoldings(r.Context(), userID)
+		for _, h := range currentStocksForDemote {
+			if h.Ticker == nil || *h.Ticker == "" {
+				continue
+			}
+			if newTickers[strings.ToUpper(*h.Ticker)] {
+				continue // still in import — not being removed
+			}
+			entry, err := s.store.DemoteHoldingToWatchlist(r.Context(), userID,
+				"stock", *h.Ticker, h.Name, h.Sector, h.SectorUniverseID,
+				h.CurrentPrice, h.ThesisLink, h.InvestedUSD)
+			if err != nil {
+				slog.Warn("import: demote-to-watchlist failed", "ticker", *h.Ticker, "err", err)
+				continue
+			}
+			if entry != nil {
+				stocksDemoted = append(stocksDemoted, *h.Ticker)
+			}
+		}
+
 		if err := s.store.DeleteAllStockHoldings(r.Context(), userID); err != nil {
 			mapStoreError(w, err)
 			return
@@ -212,11 +278,13 @@ func (s *Server) handleImportApply(w http.ResponseWriter, r *http.Request) {
 		"user_id", userID,
 		"stocks", stocksApplied,
 		"crypto", cryptoApplied,
+		"demoted_to_watchlist", len(stocksDemoted),
 		"file", pending.FileName)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"stocksApplied": stocksApplied,
-		"cryptoApplied": cryptoApplied,
+		"stocksApplied":      stocksApplied,
+		"cryptoApplied":      cryptoApplied,
+		"stocksDemoted":      stocksDemoted, // v1.7.6
 	})
 }
 
