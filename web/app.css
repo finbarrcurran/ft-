@@ -2935,3 +2935,20 @@ input.autofilled, select.autofilled {
   padding: 0.6rem 0.4rem;
   font-size: 0.85rem;
 }
+
+/* v1.7.7 — import preview absent-kind state. */
+.diff-section.absent {
+  opacity: 0.78;
+  border-style: dashed;
+}
+.diff-section.absent .section-title {
+  font-weight: 600;
+}
+.diff-section.absent .absent-msg {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  color: rgb(var(--color-gain));
+  background: rgb(var(--color-gain) / 0.08);
+  border-radius: var(--radius2);
+  margin-top: 0.3rem;
+}

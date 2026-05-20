@@ -1149,44 +1149,60 @@ function renderImportBody() {
 
 function renderDiffSection({ title, tag, rowCount, counts, rows, included, inputId }) {
   const empty = rowCount === 0;
+
+  // v1.7.7 — when the import file contains no rows for this kind, the
+  // section is entirely "informational, no action will be taken." Don't
+  // show a checkbox, don't show diff counts, don't show a row list —
+  // just an unambiguous "your existing X will not be modified" message
+  // so the user knows stocks and crypto are independent.
+  if (empty) {
+    return `
+      <section class="diff-section absent">
+        <div class="diff-head">
+          <span class="section-title">${escapeHTML(title)}</span>
+          <span class="sheet-tag dim">not in this file</span>
+        </div>
+        <div class="absent-msg">
+          ✓ Your existing ${escapeHTML(title.toLowerCase())} <strong>will not be modified</strong> — this file contains no ${escapeHTML(title.toLowerCase())} data.
+        </div>
+      </section>
+    `;
+  }
+
   const visibleRows = (rows || []).filter(r => r.kind !== 'unchanged').slice(0, 12);
   const omitted = (counts.new + counts.updated + counts.removed) - visibleRows.length;
-  const rowsHTML = empty
-    ? `<div class="dim">No rows detected for this section.</div>`
-    : visibleRows.length === 0
-      ? `<div class="dim">No changes — every row is identical to the current state.</div>`
-      : `<ul class="diff-rows">
-          ${visibleRows.map(r => `
-            <li>
-              <span class="kind-badge ${r.kind}">${r.kind === 'unchanged' ? '—' : r.kind === 'updated' ? 'UPD' : r.kind === 'new' ? 'NEW' : 'RMV'}</span>
-              <span class="label">${escapeHTML(r.label)}</span>
-              ${r.sub ? `<span class="sub">· ${escapeHTML(r.sub)}</span>` : ''}
-              ${r.changedFields && r.changedFields.length > 0
-                ? `<span class="fields">(${r.changedFields.slice(0, 4).map(escapeHTML).join(', ')}${r.changedFields.length > 4 ? ` +${r.changedFields.length - 4}` : ''})</span>`
-                : ''}
-            </li>
-          `).join('')}
-          ${omitted > 0 ? `<li class="dim">· …and ${omitted} more</li>` : ''}
-        </ul>`;
+  const rowsHTML = visibleRows.length === 0
+    ? `<div class="dim">No changes — every row is identical to the current state.</div>`
+    : `<ul class="diff-rows">
+        ${visibleRows.map(r => `
+          <li>
+            <span class="kind-badge ${r.kind}">${r.kind === 'unchanged' ? '—' : r.kind === 'updated' ? 'UPD' : r.kind === 'new' ? 'NEW' : 'RMV'}</span>
+            <span class="label">${escapeHTML(r.label)}</span>
+            ${r.sub ? `<span class="sub">· ${escapeHTML(r.sub)}</span>` : ''}
+            ${r.changedFields && r.changedFields.length > 0
+              ? `<span class="fields">(${r.changedFields.slice(0, 4).map(escapeHTML).join(', ')}${r.changedFields.length > 4 ? ` +${r.changedFields.length - 4}` : ''})</span>`
+              : ''}
+          </li>
+        `).join('')}
+        ${omitted > 0 ? `<li class="dim">· …and ${omitted} more</li>` : ''}
+      </ul>`;
 
   return `
-    <section class="diff-section ${empty ? 'empty' : ''}">
+    <section class="diff-section">
       <div class="diff-head">
         <label>
-          <input type="checkbox" id="${inputId}" ${included && !empty ? 'checked' : ''} ${empty ? 'disabled' : ''} />
+          <input type="checkbox" id="${inputId}" ${included ? 'checked' : ''} />
           ${escapeHTML(title)}
           <span class="sheet-tag">sheet: ${escapeHTML(tag)}</span>
         </label>
         <span class="row-count">${rowCount} row${rowCount === 1 ? '' : 's'}</span>
       </div>
-      ${empty ? '' : `
-        <div class="count-chips">
-          <span class="count-chip gain"><span>New</span><span class="n">${counts.new}</span></span>
-          <span class="count-chip warn"><span>Updated</span><span class="n">${counts.updated}</span></span>
-          <span class="count-chip muted"><span>Unchanged</span><span class="n">${counts.unchanged}</span></span>
-          <span class="count-chip loss"><span>Removed</span><span class="n">${counts.removed}</span></span>
-        </div>
-      `}
+      <div class="count-chips">
+        <span class="count-chip gain"><span>New</span><span class="n">${counts.new}</span></span>
+        <span class="count-chip warn"><span>Updated</span><span class="n">${counts.updated}</span></span>
+        <span class="count-chip muted"><span>Unchanged</span><span class="n">${counts.unchanged}</span></span>
+        <span class="count-chip loss"><span>Removed</span><span class="n">${counts.removed}</span></span>
+      </div>
       ${rowsHTML}
     </section>
   `;
