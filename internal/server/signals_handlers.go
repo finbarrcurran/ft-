@@ -28,6 +28,7 @@ func (s *Server) handleListSignals(w http.ResponseWriter, r *http.Request) {
 		Type:         r.URL.Query().Get("type"),
 		RangeDays:    rangeDays,
 		IncludeAcked: r.URL.Query().Get("include_acked") == "1",
+		Universe:     r.URL.Query().Get("universe"),
 	}
 	rows, err := s.signals.List(r.Context(), f)
 	if err != nil {

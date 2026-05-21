@@ -24,6 +24,7 @@ type Row struct {
 	SourceURL       *string  `json:"sourceUrl,omitempty"`
 	AlarmReasons    *string  `json:"alarmReasons,omitempty"` // JSON-encoded string array
 	Acknowledged    bool     `json:"acknowledged"`
+	Universe        string   `json:"universe"` // 'owned' | 'watchlist' | 'sector_etf' | 'unowned'
 }
 
 // ListFilter is the query-string filter passed to List.
@@ -32,6 +33,7 @@ type ListFilter struct {
 	Type         string // "" | insider | congress | executive_order
 	RangeDays    int    // e.g. 1, 7, 30, 90. 0 = no range filter.
 	IncludeAcked bool
+	Universe     string // "" | owned | watchlist | sector_etf | unowned
 }
 
 // List returns matching signal_events rows ordered by event_date DESC,
@@ -109,9 +111,37 @@ func (s *Service) List(ctx context.Context, f ListFilter) ([]Row, error) {
 		if alarmReasons.Valid && strings.TrimSpace(alarmReasons.String) != "" {
 			r.AlarmReasons = &alarmReasons.String
 		}
+		// Classify against current universe so the frontend can filter
+		// owned/watchlist/sector/unowned without a separate roundtrip.
+		r.Universe = classifyUniverse(s, ctx, r.Ticker)
+		// Apply universe filter post-classification.
+		if f.Universe != "" && f.Universe != "all" && r.Universe != f.Universe {
+			continue
+		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// classifyUniverse returns 'owned' | 'watchlist' | 'sector_etf' | 'unowned'
+// for a given ticker. Returns 'unowned' for nil/empty tickers too.
+func classifyUniverse(s *Service, ctx context.Context, ticker *string) string {
+	if ticker == nil || strings.TrimSpace(*ticker) == "" {
+		return "unowned"
+	}
+	hit := s.InUniverse(ctx, *ticker)
+	if !hit.Matched {
+		return "unowned"
+	}
+	switch hit.Source {
+	case "holding":
+		return "owned"
+	case "watchlist":
+		return "watchlist"
+	case "sector_etf":
+		return "sector_etf"
+	}
+	return "unowned"
 }
 
 // Counts returns per-tier counts of unacked rows in the given window.

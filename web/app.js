@@ -6051,7 +6051,7 @@ async function renderCryptoIndicators() {
 // expansion, ack workflow, gap report) in 9k.B/C.
 
 if (!state.signalsFilter) {
-  state.signalsFilter = { tier: '', type: '', range: 30, includeAcked: false };
+  state.signalsFilter = { tier: '', type: '', range: 30, includeAcked: false, universe: '' };
 }
 
 const SIGNAL_TYPE_ICON = {
@@ -6072,6 +6072,7 @@ async function renderSignals() {
   const q = new URLSearchParams();
   if (f.tier) q.set('tier', f.tier);
   if (f.type) q.set('type', f.type);
+  if (f.universe) q.set('universe', f.universe);
   q.set('range', String(f.range));
   if (f.includeAcked) q.set('include_acked', '1');
 
@@ -6098,11 +6099,22 @@ async function renderSignals() {
     const active = f.type === key;
     return `<button class="ci-chip ${active ? 'active' : ''}" data-signal-type="${key}">${label}</button>`;
   };
+  const univChip = (key, label) => {
+    const active = (f.universe || '') === key;
+    return `<button class="ci-chip ${active ? 'active' : ''}" data-signal-universe="${key}">${label}</button>`;
+  };
 
   const fmtAmt = (n) => n == null ? '—' : '$' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(n);
 
+  const UNIV_BADGE = {
+    owned:      '<span class="univ-badge owned" title="In holdings">💼</span>',
+    watchlist:  '<span class="univ-badge watchlist" title="In watchlist">👁</span>',
+    sector_etf: '<span class="univ-badge sector"  title="Sector ETF match">🏷</span>',
+    unowned:    '',
+  };
   const tableRows = rows.map(r => {
-    const tickerLink = r.ticker ? `<strong>${escapeHTML(r.ticker)}</strong>` : '<span class="dim">—</span>';
+    const univ = UNIV_BADGE[r.universe] || '';
+    const tickerLink = r.ticker ? `${univ}<strong>${escapeHTML(r.ticker)}</strong>` : '<span class="dim">—</span>';
     const actor = r.actorName ? `${escapeHTML(r.actorName)}${r.actorRole ? `<br><span class="dim" style="font-size:0.75rem">${escapeHTML(r.actorRole)}</span>` : ''}` : '<span class="dim">—</span>';
     const action = r.action ? `<span class="${r.action === 'BUY' ? 'gain' : r.action === 'SELL' ? 'loss' : 'dim'}">${escapeHTML(r.action)}</span>` : '—';
     let reasonChips = '';
@@ -6153,6 +6165,14 @@ async function renderSignals() {
         ${typeChip('congress', '🏛 Congress')}
         ${typeChip('executive_order', '📜 EO')}
       </div>
+      <div class="signal-chip-row">
+        <span class="dim" style="font-size:0.78rem">Universe:</span>
+        ${univChip('', 'All')}
+        ${univChip('owned', '💼 Owned')}
+        ${univChip('watchlist', '👁 Watchlist')}
+        ${univChip('sector_etf', '🏷 Sector ETF')}
+        ${univChip('unowned', '🌐 Unowned')}
+      </div>
 
       <div class="tablewrap" style="margin-top:0.8rem">
         <table class="holdings signals-table">
@@ -6193,6 +6213,9 @@ async function renderSignals() {
   }
   for (const btn of document.querySelectorAll('[data-signal-type]')) {
     btn.addEventListener('click', () => { state.signalsFilter.type = btn.dataset.signalType; renderSignals(); });
+  }
+  for (const btn of document.querySelectorAll('[data-signal-universe]')) {
+    btn.addEventListener('click', () => { state.signalsFilter.universe = btn.dataset.signalUniverse; renderSignals(); });
   }
   for (const btn of document.querySelectorAll('[data-signal-ack]')) {
     btn.addEventListener('click', async (ev) => {

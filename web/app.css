@@ -3247,6 +3247,13 @@ input.autofilled, select.autofilled {
   background: rgb(var(--color-accent) / 0.05);
 }
 
+.univ-badge {
+  display: inline-block;
+  margin-right: 0.3rem;
+  font-size: 0.85rem;
+  vertical-align: middle;
+}
+
 .tab-badge.loss {
   background: rgb(var(--color-loss) / 0.22);
   color: rgb(var(--color-loss));
