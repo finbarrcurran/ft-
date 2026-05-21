@@ -82,8 +82,9 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 		// FRED (Pal bucket)
 		func() result { return result{"pal_dxy", fred.FetchSeries(ctx, "DTWEXBGS")} },
 		func() result { return result{"pal_us2y", fred.FetchSeries(ctx, "DGS2")} },
-		// ISM (Pal bucket — local JSON file)
-		func() result { return result{"pal_ism", providers.FetchISMReading(r.DataDir)} },
+		// v1.9.1: CFNAI from FRED replaces the manual-JSON pal_ism upload.
+		// Same monthly cadence + same business-cycle pulse signal.
+		func() result { return result{"pal_cfnai", fred.FetchSeries(ctx, "CFNAI")} },
 		// CoinGecko (Cowen bucket)
 		func() result { return result{"cowen_btc_dominance", cg.FetchBTCDominance(ctx)} },
 		func() result { return result{"cowen_eth_btc", cg.FetchETHBTCRatio(ctx)} },

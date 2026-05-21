@@ -13,6 +13,7 @@ var tooltips = map[string]string{
 	"pal_dxy":               "USD strength. Strong dollar drains risk assets globally. Trigger: falling DXY, ideally < 100 = bullish. Rising > 105 = bearish.",
 	"pal_us2y":              "Market's read on Fed policy path. Falling 2Y = cut expectations = risk-on supportive. Rising fast = hike fear / hot inflation.",
 	"pal_ism":               "Business cycle pulse. > 50 = expansion, < 50 = contraction. Pal's most underrated single indicator. Trigger: > 50 and rising = bullish; < 50 falling = recession risk.",
+	"pal_cfnai":             "Business cycle pulse via the Chicago Fed National Activity Index — same signal Pal uses ISM for, but free + automated from FRED. > 0 = above-trend growth (bullish, analogous to ISM > 50). < 0 = below trend. < -0.7 = recession likely.",
 	"universal_etf_flow_7d": "Institutional demand pulse. Biggest single variable post-Jan 2024. Trigger: 7d net > +$1B = strongly bullish; sustained outflows = bearish.",
 	"universal_stablecoin_supply": "Dry powder waiting inside crypto. Rising = mint cycle (liquidity coming). Contracting = redemptions (liquidity leaving).",
 	"sentiment_fear_greed":  "Crowd emotion, contrarian indicator. < 25 (Extreme Fear) = contrarian buy. > 75 (Extreme Greed) = contrarian caution.",

@@ -5963,10 +5963,8 @@ async function renderCryptoIndicators() {
   content.innerHTML = `
     <div class="crypto-indicators-tab">
       <div class="ci-toolbar">
-        <button class="btn-ghost" id="ci-refresh" title="Fetch latest readings from FRED + CoinGecko + DefiLlama + Farside + ISM + F&G">⟳ Refresh now</button>
-        <button class="btn-ghost" id="ci-ism-upload" title="Upload monthly ISM Manufacturing PMI prints (JSON)">📊 Update ISM data…</button>
-        <input type="file" id="ci-ism-file" accept=".json,application/json" hidden />
-        <span class="dim" style="font-size:0.78rem">Auto-syncs daily at 00:30 UTC</span>
+        <button class="btn-ghost" id="ci-refresh" title="Fetch latest readings from FRED + CoinGecko + DefiLlama + Farside + F&G">⟳ Refresh now</button>
+        <span class="dim" style="font-size:0.78rem">Auto-syncs daily at 00:30 UTC · all indicators automated (v1.9.1)</span>
       </div>
       ${heroHTML}
       ${renderBucket('cowen')}

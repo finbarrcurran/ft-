@@ -98,17 +98,18 @@
       ]
     },
     {
-      "id": "pal_ism",
+      "id": "pal_cfnai",
       "bucket": "pal",
-      "display_name": "ISM Manufacturing PMI",
+      "display_name": "Business cycle (CFNAI)",
       "unit": "index",
       "scoring_fn": "level_and_trend",
+      "_note": "CFNAI is the Chicago Fed National Activity Index — same business-cycle pulse signal Pal uses ISM for. >0 = above-trend growth (analogous to ISM >50); <0 = below-trend; <-0.7 = recession likely. Free + automated via FRED (replaces manual ISM upload from v1.8.3).",
       "thresholds": [
-        {"level_min": 52, "trend_4w": "positive", "score":  1.0},
-        {"level_min": 50, "trend_4w": "positive", "score":  0.5},
-        {"level_min": 50, "trend_4w": "flat",     "score":  0.0},
-        {"level_max": 50, "trend_4w": "negative", "score": -0.5},
-        {"level_max": 47, "trend_4w": "negative", "score": -1.0}
+        {"level_min":  0.2, "trend_4w": "positive", "score":  1.0},
+        {"level_min":  0.0, "trend_4w": "positive", "score":  0.5},
+        {"level_min":  0.0, "trend_4w": "flat",     "score":  0.0},
+        {"level_max":  0.0, "trend_4w": "negative", "score": -0.5},
+        {"level_max": -0.7, "trend_4w": "negative", "score": -1.0}
       ]
     },
     {
