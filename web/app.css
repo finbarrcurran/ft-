@@ -3118,3 +3118,73 @@ input.autofilled, select.autofilled {
   align-items: center;
   gap: 0.8rem;
 }
+
+/* v1.9.0 — Theses tab badge + revision-prompt modal */
+
+.tab-badge {
+  font-size: 0.72rem;
+  padding: 0.04rem 0.36rem;
+  border-radius: 8px;
+  margin-left: 0.2rem;
+  letter-spacing: 0.03em;
+}
+.tab-badge.warn {
+  background: rgb(255 140 0 / 0.22);
+  color: rgb(255 140 0);
+}
+
+.rev-prompt-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rev-prompt-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+}
+.rev-prompt-box {
+  position: relative;
+  background: rgb(var(--color-bg-elev));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius2);
+  padding: 1rem 1.2rem;
+  width: min(820px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.rev-prompt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.rev-prompt-hint {
+  font-size: 0.82rem;
+}
+.rev-prompt-hint code {
+  font-family: var(--font-mono);
+  background: rgb(var(--color-bg) / 0.4);
+  padding: 0 0.3rem;
+  border-radius: 3px;
+}
+.rev-prompt-text {
+  width: 100%;
+  min-height: 380px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding: 0.6rem;
+  background: rgb(var(--color-bg));
+  color: rgb(var(--color-text));
+  border: 1px solid rgb(var(--color-border) / 0.4);
+  border-radius: var(--radius2);
+  resize: vertical;
+}
+.rev-prompt-foot {
+  display: flex;
+  align-items: center;
+}

@@ -284,6 +284,26 @@ func runServe() {
 		})
 	}()
 
+	// v1.9.0 — Hourly earnings-only refresh. Slim version of the daily
+	// job — only updates earnings_date / ex_dividend_date so the Theses
+	// tab's revision_needed trigger fires within ~1 hour of Yahoo
+	// publishing the updated calendar (~3-4 hrs after the actual release).
+	go func() {
+		earningsSvc := refresh.New(st)
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-t.C:
+				ctx, cancel := context.WithTimeout(bgCtx, 3*time.Minute)
+				earningsSvc.RefreshEarningsOnly(ctx, 1)
+				cancel()
+			}
+		}
+	}()
+
 	// Spec 9f D2 — daily sector ETF ingest at 22:00 UTC (after US close,
 	// before APAC open). Independent of the 04:00 UTC job so a stalled
 	// Yahoo call in one path can't block the other.

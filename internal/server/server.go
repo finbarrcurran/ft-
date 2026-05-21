@@ -215,6 +215,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/theses/upload", s.requireUser(s.handleUploadThesis))
 	s.mux.HandleFunc("POST /api/theses/scoring-log", s.requireUser(s.handleUploadScoringLog))
 	s.mux.HandleFunc("POST /api/theses/sync", s.requireUser(s.handleThesesSync))
+	s.mux.HandleFunc("GET /api/theses/{id}/revision-prompt", s.requireUser(s.handleThesisRevisionPrompt))
 
 	// Spec 9g: Scorecard Repository.
 	s.mux.HandleFunc("GET /api/scorecards", s.requireUserOrToken(s.handleScorecardsList))

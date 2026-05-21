@@ -15,10 +15,12 @@
 package server
 
 import (
+	"fmt"
 	"ft/internal/theses"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // GET /api/theses?adapter=pharma
@@ -118,6 +120,83 @@ func (s *Server) handleUploadThesis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// GET /api/theses/{id}/revision-prompt — v1.9.0
+//
+// Returns a markdown prompt template populated with:
+//   - Current thesis content
+//   - Indicator metadata (ticker, score, pillar breakdown if present)
+//   - Latest earnings date (the trigger)
+//   - Explicit instructions to revise per the framework
+//
+// User copy-pastes the result into Gemini/Claude/etc. to draft v2.
+func (s *Server) handleThesisRevisionPrompt(w http.ResponseWriter, r *http.Request) {
+	if s.theses == nil {
+		writeError(w, http.StatusNotFound, "theses engine not configured")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	t, err := s.theses.Get(r.Context(), id)
+	if err != nil {
+		mapStoreError(w, err)
+		return
+	}
+	var prompt strings.Builder
+	prompt.WriteString("# Thesis Revision Request — " + t.Ticker)
+	if t.CompanyName != nil {
+		prompt.WriteString(" (" + *t.CompanyName + ")")
+	}
+	prompt.WriteString("\n\n## Context\n\n")
+	prompt.WriteString("- **Ticker:** " + t.Ticker + "\n")
+	if t.CompanyName != nil {
+		prompt.WriteString("- **Company:** " + *t.CompanyName + "\n")
+	}
+	prompt.WriteString("- **Adapter:** " + t.Adapter + "\n")
+	if t.SubType != nil {
+		prompt.WriteString("- **Sub-type:** " + *t.SubType + "\n")
+	}
+	if t.Score != nil {
+		prompt.WriteString(fmt.Sprintf("- **Current locked score:** %d / %d\n", *t.Score, t.MaxScore))
+	}
+	prompt.WriteString("- **Current version:** v" + strconv.Itoa(t.Version) + "\n")
+	if t.LockedDate != nil {
+		prompt.WriteString("- **Locked date:** " + *t.LockedDate + "\n")
+	}
+	if t.NextEarningsDate != nil {
+		prompt.WriteString("- **Earnings (the trigger):** " + *t.NextEarningsDate + "\n")
+	}
+	prompt.WriteString("\n## Task\n\n")
+	prompt.WriteString("An earnings report has been issued since this thesis was locked. ")
+	prompt.WriteString("Revise the thesis below as v" + strconv.Itoa(t.Version+1) + " considering ")
+	prompt.WriteString("the new print. Update specifically:\n\n")
+	prompt.WriteString("1. Re-score each of the 8 pillars (or 4 for Asset-Hedge) against the new data\n")
+	prompt.WriteString("2. Update the Verified Empirical Anchors section with new Q figures\n")
+	prompt.WriteString("3. Re-check Critical Invalidation Triggers — did any fire?\n")
+	prompt.WriteString("4. Update Watch Flags + Bull/Bear cases for new context\n")
+	prompt.WriteString("5. Add a new row to the Score History table\n")
+	prompt.WriteString("6. Keep the same MD structure so it round-trips through the FT Thesis Library uploader\n")
+	prompt.WriteString("7. Save the file as `" + t.Ticker + "_v" + strconv.Itoa(t.Version+1) + "_locked.md` — DO NOT overwrite v" + strconv.Itoa(t.Version) + "\n\n")
+	prompt.WriteString("## Current locked thesis (verbatim, for context)\n\n")
+	prompt.WriteString("```markdown\n")
+	prompt.WriteString(t.MarkdownContent)
+	if !strings.HasSuffix(t.MarkdownContent, "\n") {
+		prompt.WriteString("\n")
+	}
+	prompt.WriteString("```\n\n")
+	prompt.WriteString("## Output format\n\n")
+	prompt.WriteString("Return ONLY the full revised thesis markdown for v" + strconv.Itoa(t.Version+1) + ", ")
+	prompt.WriteString("nothing else. I will paste it into a `" + t.Ticker + "_v" + strconv.Itoa(t.Version+1) + "_locked.md` file and drop it into FT's Theses dropzone.\n")
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ticker":      t.Ticker,
+		"nextVersion": t.Version + 1,
+		"prompt":      prompt.String(),
+	})
 }
 
 // POST /api/theses/scoring-log

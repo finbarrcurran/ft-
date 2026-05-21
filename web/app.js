@@ -327,7 +327,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
         <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Sector Rotation</button>
         <button class="tab ${state.tab === 'scorecards' ? 'active' : ''}" data-tab="scorecards">Scorecards</button>
-        <button class="tab ${state.tab === 'theses' ? 'active' : ''}" data-tab="theses">Theses</button>
+        <button class="tab ${state.tab === 'theses' ? 'active' : ''}" data-tab="theses">Theses${state.thesesRevisionCount > 0 ? ` <span class="tab-badge warn">⚠ ${state.thesesRevisionCount}</span>` : ''}</button>
         <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
         <button class="tab ${state.tab === 'news' ? 'active' : ''}" data-tab="news">News</button>
@@ -7123,6 +7123,8 @@ async function renderTheses() {
   }
 
   let theses = payload.theses || [];
+  // v1.9.0 — refresh the nav-bar badge count.
+  state.thesesRevisionCount = theses.filter(t => t.earningsUrgency === 'revision_needed').length;
   // Client-side urgency filter (server only filters adapter).
   if (state.theses.urgencyFilter) {
     theses = theses.filter(t => t.earningsUrgency === state.theses.urgencyFilter);
@@ -7201,7 +7203,12 @@ async function renderTheses() {
         <td><span class="dim">v${t.version}</span></td>
         <td><span class="dim">${escapeHTML(t.lockedDate || '—')}</span></td>
         <td>${urgencyBadge(t.earningsUrgency, t.nextEarningsDate)}</td>
-        <td><a href="${escapeHTML(t.githubUrl)}" target="_blank" rel="noopener" class="dim" title="Open on GitHub">↗</a></td>
+        <td>
+          ${t.earningsUrgency === 'revision_needed'
+            ? `<button class="row-mini" data-revprompt="${t.id}" title="Generate LLM prompt to revise this thesis">📋</button>`
+            : ''}
+          <a href="${escapeHTML(t.githubUrl)}" target="_blank" rel="noopener" class="dim" title="Open on GitHub">↗</a>
+        </td>
       </tr>
     `;
   };
@@ -7364,6 +7371,59 @@ function wireThesesEvents() {
       loadThesisIntoViewer(id);
     });
   }
+  // v1.9.0 — "Generate revision prompt" buttons. Don't bubble to the
+  // row-click handler.
+  for (const btn of document.querySelectorAll('[data-revprompt]')) {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const id = parseInt(btn.dataset.revprompt, 10);
+      await openRevisionPromptModal(id);
+    });
+  }
+}
+
+async function openRevisionPromptModal(thesisId) {
+  let payload;
+  try {
+    payload = await api('/api/theses/' + thesisId + '/revision-prompt');
+  } catch (err) {
+    alert('Could not generate prompt: ' + err.message);
+    return;
+  }
+  // Simple inline modal — no existing modal infra to plug into.
+  const wrap = document.createElement('div');
+  wrap.className = 'rev-prompt-modal';
+  wrap.innerHTML = `
+    <div class="rev-prompt-backdrop"></div>
+    <div class="rev-prompt-box">
+      <div class="rev-prompt-head">
+        <strong>Revision prompt — ${escapeHTML(payload.ticker)} v${payload.nextVersion}</strong>
+        <button class="btn-ghost" id="rev-close" title="Close">×</button>
+      </div>
+      <div class="rev-prompt-hint dim">
+        Paste this into Gemini / Claude / ChatGPT. The model returns the revised thesis markdown. Save as
+        <code>${escapeHTML(payload.ticker)}_v${payload.nextVersion}_locked.md</code> and drop into the Theses tab.
+      </div>
+      <textarea class="rev-prompt-text" readonly>${escapeHTML(payload.prompt)}</textarea>
+      <div class="rev-prompt-foot">
+        <button class="btn-primary" id="rev-copy">📋 Copy to clipboard</button>
+        <span id="rev-copied" class="dim" style="margin-left:0.6rem"></span>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  $('#rev-close').addEventListener('click', close);
+  wrap.querySelector('.rev-prompt-backdrop').addEventListener('click', close);
+  $('#rev-copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(payload.prompt);
+      $('#rev-copied').textContent = '✓ Copied';
+      setTimeout(() => { const el = $('#rev-copied'); if (el) el.textContent = ''; }, 2000);
+    } catch (err) {
+      $('#rev-copied').textContent = 'Copy failed — select & ⌘C';
+    }
+  });
 }
 
 function setDropStatus(kind, msg) {

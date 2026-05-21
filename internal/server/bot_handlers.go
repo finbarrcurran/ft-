@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -123,6 +124,56 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 				Triggers:     []string{ev.Trigger},
 				CurrentPrice: h.CurrentPrice,
 			})
+		}
+	}
+
+	// v1.9.0 — thesis_revision_needed alerts. Fires when an active locked
+	// thesis (in theses_index) has earnings_urgency='revision_needed',
+	// i.e. earnings has passed since the thesis was locked. Matches by
+	// ticker to stock_holdings so the bot can deep-link / ack against
+	// the right holding row.
+	if s.cryptoIndicators == nil { /* keep nil safe */ }
+	if s.theses != nil {
+		thesesRows, terr := s.theses.List(r.Context(), "")
+		if terr == nil {
+			byTicker := map[string]*domain.StockHolding{}
+			for _, h := range stocks {
+				if h.Ticker != nil && *h.Ticker != "" {
+					byTicker[strings.ToUpper(*h.Ticker)] = h
+				}
+			}
+			for _, t := range thesesRows {
+				if t.EarningsUrgency != "revision_needed" {
+					continue
+				}
+				h := byTicker[strings.ToUpper(t.Ticker)]
+				if h == nil {
+					continue // thesis is for a ticker we don't currently hold
+				}
+				if onlyUnnotified {
+					acked, err := s.store.HasAlertBeenAckedToday(r.Context(), "stock", h.ID, "thesis_revision_needed", today)
+					if err != nil {
+						mapStoreError(w, err)
+						return
+					}
+					if acked {
+						continue
+					}
+				}
+				trigger := "earnings has passed since the thesis was locked — re-score recommended"
+				if t.NextEarningsDate != nil && t.LockedDate != nil {
+					trigger = "earnings " + *t.NextEarningsDate + " ≥ thesis lock " + *t.LockedDate + " — re-score recommended"
+				}
+				out = append(out, alertOut{
+					HoldingKind:  "stock",
+					HoldingID:    h.ID,
+					Ticker:       h.Ticker,
+					Name:         h.Name,
+					Kind:         "thesis_revision_needed",
+					Triggers:     []string{trigger},
+					CurrentPrice: h.CurrentPrice,
+				})
+			}
 		}
 	}
 
