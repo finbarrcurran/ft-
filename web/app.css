@@ -3188,3 +3188,66 @@ input.autofilled, select.autofilled {
   display: flex;
   align-items: center;
 }
+
+/* Spec 9k — Signals tab styling */
+
+.signals-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.signal-chip-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ci-chip {
+  background: rgb(var(--color-bg-elev) / 0.5);
+  border: 1px solid rgb(var(--color-border) / 0.4);
+  border-radius: 12px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  color: rgb(var(--color-text));
+}
+.ci-chip:hover {
+  background: rgb(var(--color-accent) / 0.1);
+}
+.ci-chip.active {
+  background: rgb(var(--color-accent) / 0.2);
+  border-color: rgb(var(--color-accent) / 0.6);
+}
+
+.tier-pill {
+  font-size: 0.7rem;
+  padding: 0.08rem 0.4rem;
+  border-radius: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.tier-pill.info  { background: rgb(var(--color-dim) / 0.2); color: rgb(var(--color-dim)); }
+.tier-pill.flag  { background: rgb(255 191 0 / 0.22); color: rgb(255 191 0); }
+.tier-pill.alarm { background: rgb(var(--color-loss) / 0.22); color: rgb(var(--color-loss)); }
+
+.reason-chip {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  background: rgb(var(--color-accent) / 0.18);
+  color: rgb(var(--color-accent));
+  border-radius: 6px;
+  margin-right: 0.2rem;
+  font-family: var(--font-mono);
+}
+
+.signal-row.acked {
+  opacity: 0.45;
+}
+.signal-row:hover {
+  background: rgb(var(--color-accent) / 0.05);
+}
+
+.tab-badge.loss {
+  background: rgb(var(--color-loss) / 0.22);
+  color: rgb(var(--color-loss));
+}

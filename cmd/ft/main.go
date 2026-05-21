@@ -27,6 +27,7 @@ import (
 	"ft/internal/scorecards"
 	"ft/internal/cryptoindicators"
 	"ft/internal/sector_rotation"
+	"ft/internal/signals"
 	"ft/internal/theses"
 	"ft/internal/server"
 	"ft/internal/store"
@@ -319,6 +320,22 @@ func runServe() {
 	// Spec 9f D8 — Friday 22:00 UTC weekly digest. ScheduleWeeklyDigest
 	// has its own next-Friday loop; we just kick it off in a goroutine.
 	go sector_rotation.ScheduleWeeklyDigest(bgCtx, st)
+
+	// Spec 9k Phase A (v1.10.0) — daily 23:00 UTC SEC EDGAR Form 4 ingest.
+	// Slots after sector_rotation 22:00 UTC. Self-rate-limited to ~7.7
+	// req/sec per SEC fair-access policy.
+	go func() {
+		sigSvc := signals.New(st.DB)
+		scheduleAt(bgCtx, 23, 0, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Minute)
+			defer cancel()
+			inserted, err := sigSvc.IngestInsiders(ctx)
+			if err != nil {
+				slog.Error("signals: insider ingest", "err", err)
+			}
+			slog.Info("signals: insider ingest complete", "inserted", inserted)
+		})
+	}()
 
 	// Spec 9e Phase 2 (v1.8.2) — daily Crypto Indicators refresh + snapshot
 	// at 00:30 UTC. Plus a startup refresh after a 30s warm-up so the tab

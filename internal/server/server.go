@@ -15,6 +15,7 @@ import (
 	"ft/internal/refresh"
 	"ft/internal/cryptoindicators"
 	"ft/internal/scorecards"
+	"ft/internal/signals"
 	"ft/internal/store"
 	"ft/internal/theses"
 	"ft/internal/web"
@@ -35,6 +36,7 @@ type Server struct {
 	scorecards       *scorecards.Service       // Spec 9g
 	theses           *theses.Engine            // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
 	cryptoIndicators *cryptoindicators.Service // Spec 9e Phase 1
+	signals          *signals.Service          // Spec 9k Phase A
 	mux              *http.ServeMux
 }
 
@@ -48,6 +50,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		theses: theses.New(st.DB, cfg.ThesisRepoDir, cfg.ThesisRepoOwner,
 			cfg.ThesisRepoName, cfg.GitHubToken),
 		cryptoIndicators: cryptoindicators.New(st.DB), // Spec 9e Phase 1
+		signals:          signals.New(st.DB),           // Spec 9k Phase A
 		mux:              http.NewServeMux(),
 	}
 	s.routes()
@@ -205,6 +208,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/crypto-indicators", s.requireUser(s.handleListCryptoIndicators))
 	s.mux.HandleFunc("GET /api/crypto-indicators/composite/latest", s.requireUser(s.handleCryptoIndicatorsComposite))
 	s.mux.HandleFunc("POST /api/crypto-indicators/refresh", s.requireUser(s.handleRefreshCryptoIndicators))
+
+	// Spec 9k Phase A — Political & Insider Signal endpoints.
+	s.mux.HandleFunc("GET /api/signals", s.requireUser(s.handleListSignals))
+	s.mux.HandleFunc("POST /api/signals/{id}/ack", s.requireUser(s.handleAckSignal))
+	s.mux.HandleFunc("POST /api/signals/refresh-insiders", s.requireUser(s.handleRefreshInsiders))
+	s.mux.HandleFunc("GET /api/signals/universe", s.requireUser(s.handleSignalsUniverse))
 	s.mux.HandleFunc("GET /api/crypto-indicators/ism", s.requireUser(s.handleReadISM))
 	s.mux.HandleFunc("POST /api/crypto-indicators/ism", s.requireUser(s.handleUploadISM))
 

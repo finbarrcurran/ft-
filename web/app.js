@@ -323,6 +323,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'stocks' ? 'active' : ''}" data-tab="stocks">Stocks &amp; ETFs</button>
         <button class="tab ${state.tab === 'crypto' ? 'active' : ''}" data-tab="crypto">Crypto</button>
         <button class="tab ${state.tab === 'crypto-indicators' ? 'active' : ''}" data-tab="crypto-indicators">Crypto Indicators</button>
+        <button class="tab ${state.tab === 'signals' ? 'active' : ''}" data-tab="signals">Signals${state.signalsAlarmCount > 0 ? ` <span class="tab-badge loss">🔴 ${state.signalsAlarmCount}</span>` : ''}</button>
         <button class="tab ${state.tab === 'performance' ? 'active' : ''}" data-tab="performance">Performance</button>
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
         <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Sector Rotation</button>
@@ -1352,6 +1353,8 @@ async function loadActiveTab() {
       renderCrypto();
     } else if (state.tab === 'crypto-indicators') {
       await renderCryptoIndicators();
+    } else if (state.tab === 'signals') {
+      await renderSignals();
     } else if (state.tab === 'performance') {
       await renderPerformance();
     } else if (state.tab === 'screener') {
@@ -6038,6 +6041,184 @@ async function renderCryptoIndicators() {
       btn.disabled = false;
       btn.textContent = orig;
       alert(`Refresh failed: ${err.message}`);
+    }
+  });
+}
+
+// ---------- Spec 9k Phase A: Signals tab -------------------------------
+//
+// Insider Form 4 MVP. Congress + EO arrive in 9k.B; full UI polish (row
+// expansion, ack workflow, gap report) in 9k.B/C.
+
+if (!state.signalsFilter) {
+  state.signalsFilter = { tier: '', type: '', range: 30, includeAcked: false };
+}
+
+const SIGNAL_TYPE_ICON = {
+  insider: '📈',
+  congress: '🏛',
+  executive_order: '📜',
+};
+const SIGNAL_TIER_PILL = {
+  info:  '<span class="tier-pill info">INFO</span>',
+  flag:  '<span class="tier-pill flag">FLAG</span>',
+  alarm: '<span class="tier-pill alarm">ALARM</span>',
+};
+
+async function renderSignals() {
+  const content = $('#content');
+  content.innerHTML = `<div class="empty"><div>Loading signals…</div></div>`;
+  const f = state.signalsFilter;
+  const q = new URLSearchParams();
+  if (f.tier) q.set('tier', f.tier);
+  if (f.type) q.set('type', f.type);
+  q.set('range', String(f.range));
+  if (f.includeAcked) q.set('include_acked', '1');
+
+  let payload;
+  try {
+    payload = await api('/api/signals?' + q.toString());
+  } catch (err) {
+    content.innerHTML = `<div class="empty"><div class="loss">error: ${escapeHTML(err.message)}</div></div>`;
+    return;
+  }
+  const rows = payload.signals || [];
+  const counts = payload.counts || { info: 0, flag: 0, alarm: 0 };
+  state.signalsAlarmCount = counts.alarm || 0;
+
+  const tierChip = (key, label, count) => {
+    const active = f.tier === key;
+    return `<button class="ci-chip ${active ? 'active' : ''}" data-signal-tier="${key}">${label}${count != null ? ` <span class="dim">${count}</span>` : ''}</button>`;
+  };
+  const rangeChip = (n, label) => {
+    const active = f.range === n;
+    return `<button class="ci-chip ${active ? 'active' : ''}" data-signal-range="${n}">${label}</button>`;
+  };
+  const typeChip = (key, label) => {
+    const active = f.type === key;
+    return `<button class="ci-chip ${active ? 'active' : ''}" data-signal-type="${key}">${label}</button>`;
+  };
+
+  const fmtAmt = (n) => n == null ? '—' : '$' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(n);
+
+  const tableRows = rows.map(r => {
+    const tickerLink = r.ticker ? `<strong>${escapeHTML(r.ticker)}</strong>` : '<span class="dim">—</span>';
+    const actor = r.actorName ? `${escapeHTML(r.actorName)}${r.actorRole ? `<br><span class="dim" style="font-size:0.75rem">${escapeHTML(r.actorRole)}</span>` : ''}` : '<span class="dim">—</span>';
+    const action = r.action ? `<span class="${r.action === 'BUY' ? 'gain' : r.action === 'SELL' ? 'loss' : 'dim'}">${escapeHTML(r.action)}</span>` : '—';
+    let reasonChips = '';
+    if (r.alarmReasons) {
+      try {
+        const parsed = JSON.parse(r.alarmReasons);
+        reasonChips = parsed.map(s => `<span class="reason-chip">${escapeHTML(s)}</span>`).join(' ');
+      } catch (_) {}
+    }
+    return `
+      <tr class="signal-row ${r.acknowledged ? 'acked' : ''}" data-signal-id="${r.id}">
+        <td><span>${escapeHTML(r.eventDate)}</span>${r.filedDate && r.filedDate !== r.eventDate ? `<br><span class="dim" style="font-size:0.72rem">filed ${escapeHTML(r.filedDate)}</span>` : ''}</td>
+        <td>${SIGNAL_TYPE_ICON[r.signalType] || '·'} <span class="dim">${escapeHTML(r.signalType)}</span></td>
+        <td>${SIGNAL_TIER_PILL[r.tier] || r.tier}</td>
+        <td>${tickerLink}</td>
+        <td>${actor}</td>
+        <td>${action}</td>
+        <td class="num">${fmtAmt(r.amountUsd)}</td>
+        <td>${reasonChips}</td>
+        <td>${r.sourceUrl ? `<a href="${escapeHTML(r.sourceUrl)}" target="_blank" rel="noopener" class="dim" title="Open source">↗</a>` : ''}</td>
+        <td>${r.acknowledged ? '<span class="dim">✓</span>' : `<button class="row-mini" data-signal-ack="${r.id}" title="Acknowledge">ack</button>`}</td>
+      </tr>
+    `;
+  }).join('');
+
+  content.innerHTML = `
+    <div class="signals-tab">
+      <div class="theses-toolbar" style="margin-bottom:0.6rem">
+        <button class="btn-ghost" id="signals-refresh" title="Trigger SEC EDGAR Form 4 ingest now">⟳ Refresh insiders</button>
+        <span class="dim" style="font-size:0.78rem">Auto-ingest 23:00 UTC daily</span>
+      </div>
+
+      <div class="signal-chip-row">
+        <span class="dim" style="font-size:0.78rem">Tier:</span>
+        ${tierChip('', 'All')}
+        ${tierChip('alarm', '🔴 Alarm', counts.alarm)}
+        ${tierChip('flag', '🟡 Flag', counts.flag)}
+        ${tierChip('info', '⚪ Info', counts.info)}
+      </div>
+      <div class="signal-chip-row">
+        <span class="dim" style="font-size:0.78rem">Range:</span>
+        ${rangeChip(1, '24h')} ${rangeChip(7, '7d')} ${rangeChip(30, '30d')} ${rangeChip(90, '90d')}
+      </div>
+      <div class="signal-chip-row">
+        <span class="dim" style="font-size:0.78rem">Type:</span>
+        ${typeChip('', 'All')}
+        ${typeChip('insider', '📈 Insider')}
+        ${typeChip('congress', '🏛 Congress')}
+        ${typeChip('executive_order', '📜 EO')}
+      </div>
+
+      <div class="tablewrap" style="margin-top:0.8rem">
+        <table class="holdings signals-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Type</th>
+              <th>Tier</th>
+              <th>Ticker</th>
+              <th>Actor</th>
+              <th>Action</th>
+              <th class="num">Amount</th>
+              <th>Reason</th>
+              <th>Source</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.length === 0
+              ? '<tr><td colspan="10"><div class="empty"><div>No signals matching the current filters. Try widening the range or clicking ⟳ Refresh insiders.</div></div></td></tr>'
+              : tableRows}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="ci-footer dim">
+        Spec 9k Phase A — insider Form 4 only. Congress + Executive Orders ship in v1.11.0.
+      </div>
+    </div>
+  `;
+
+  // Wire interactions.
+  for (const btn of document.querySelectorAll('[data-signal-tier]')) {
+    btn.addEventListener('click', () => { state.signalsFilter.tier = btn.dataset.signalTier; renderSignals(); });
+  }
+  for (const btn of document.querySelectorAll('[data-signal-range]')) {
+    btn.addEventListener('click', () => { state.signalsFilter.range = parseInt(btn.dataset.signalRange, 10); renderSignals(); });
+  }
+  for (const btn of document.querySelectorAll('[data-signal-type]')) {
+    btn.addEventListener('click', () => { state.signalsFilter.type = btn.dataset.signalType; renderSignals(); });
+  }
+  for (const btn of document.querySelectorAll('[data-signal-ack]')) {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const id = btn.dataset.signalAck;
+      try {
+        await api('/api/signals/' + id + '/ack', { method: 'POST' });
+        renderSignals();
+      } catch (err) {
+        alert('Ack failed: ' + err.message);
+      }
+    });
+  }
+  $('#signals-refresh')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = '⟳ Refreshing… (may take 60-90s)';
+    try {
+      const res = await api('/api/signals/refresh-insiders', { method: 'POST' });
+      alert(`Inserted ${res.inserted} new signal${res.inserted === 1 ? '' : 's'}.`);
+      renderSignals();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = orig;
+      alert('Refresh failed: ' + err.message);
     }
   });
 }
