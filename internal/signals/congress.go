@@ -179,7 +179,7 @@ func (s *Service) ingestCongressBatch(ctx context.Context, rows []houseTxn, cham
 			nullInt64Ptr(hit.SectorUniverseID),
 			nullStr(actor), nullStr(chamber),
 			nullInt64(legID),
-			action, amountMid, nullStr(amountBucket),
+			nullStr(action), amountMid, nullStr(amountBucket),
 			source, nullStr(r.PtrLink), sourceID, alarmJSON,
 		)
 		if err != nil {
