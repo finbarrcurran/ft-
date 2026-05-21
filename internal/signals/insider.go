@@ -105,6 +105,7 @@ func (s *Service) IngestInsiders(ctx context.Context) (inserted int, retErr erro
 		}
 
 		rows := extractInsiderEvents(filing, accession, entry.Updated)
+		issuerName := strings.TrimSpace(filing.Issuer.IssuerName)
 		for _, r := range rows {
 			r.UniverseHit = s.InUniverse(ctx, r.Ticker)
 			tier, reasons := InsiderTier(r, thresholds)
@@ -115,12 +116,13 @@ func (s *Service) IngestInsiders(ctx context.Context) (inserted int, retErr erro
 			res, err := s.DB.ExecContext(ctx, `
 				INSERT OR IGNORE INTO signal_events
 				  (signal_type, tier, event_date, filed_date,
-				   ticker, sector_universe_id, actor_name, actor_role,
+				   ticker, issuer_name, sector_universe_id, actor_name, actor_role,
 				   action, amount_usd, source, source_url, source_id,
 				   alarm_reasons)
-				VALUES ('insider', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sec_edgar', ?, ?, ?)`,
+				VALUES ('insider', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sec_edgar', ?, ?, ?)`,
 				tier, r.EventDate, r.FiledDate,
 				nullStr(r.Ticker),
+				nullStr(issuerName),
 				nullInt64Ptr(r.UniverseHit.SectorUniverseID),
 				nullStr(r.ActorName), nullStr(actorRole),
 				r.Action, r.AmountUSD,

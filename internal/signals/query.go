@@ -15,6 +15,8 @@ type Row struct {
 	EventDate       string  `json:"eventDate"`
 	FiledDate       string  `json:"filedDate"`
 	Ticker          *string `json:"ticker,omitempty"`
+	IssuerName      *string `json:"issuerName,omitempty"`
+	Sector          *string `json:"sector,omitempty"` // resolved at read-time
 	ActorName       *string `json:"actorName,omitempty"`
 	ActorRole       *string `json:"actorRole,omitempty"`
 	Action          *string `json:"action,omitempty"`
@@ -41,6 +43,7 @@ type ListFilter struct {
 func (s *Service) List(ctx context.Context, f ListFilter) ([]Row, error) {
 	q := `
 		SELECT id, signal_type, tier, event_date, filed_date, ticker,
+		       issuer_name,
 		       actor_name, actor_role, action, amount_usd, amount_bucket,
 		       source, source_url, alarm_reasons, acknowledged
 		  FROM signal_events
@@ -77,17 +80,20 @@ func (s *Service) List(ctx context.Context, f ListFilter) ([]Row, error) {
 	out := []Row{}
 	for rows.Next() {
 		var r Row
-		var ticker, actorName, actorRole, action, amountBucket, sourceURL, alarmReasons sql.NullString
+		var ticker, issuerName, actorName, actorRole, action, amountBucket, sourceURL, alarmReasons sql.NullString
 		var amountUSD sql.NullFloat64
 		var acked int
 		if err := rows.Scan(&r.ID, &r.SignalType, &r.Tier, &r.EventDate, &r.FiledDate,
-			&ticker, &actorName, &actorRole, &action, &amountUSD, &amountBucket,
+			&ticker, &issuerName, &actorName, &actorRole, &action, &amountUSD, &amountBucket,
 			&r.Source, &sourceURL, &alarmReasons, &acked); err != nil {
 			return nil, err
 		}
 		r.Acknowledged = acked == 1
 		if ticker.Valid {
 			r.Ticker = &ticker.String
+		}
+		if issuerName.Valid && strings.TrimSpace(issuerName.String) != "" {
+			r.IssuerName = &issuerName.String
 		}
 		if actorName.Valid {
 			r.ActorName = &actorName.String
@@ -118,9 +124,48 @@ func (s *Service) List(ctx context.Context, f ListFilter) ([]Row, error) {
 		if f.Universe != "" && f.Universe != "all" && r.Universe != f.Universe {
 			continue
 		}
+		// Resolve sector — only known when ticker matches universe.
+		if sec := s.lookupSector(ctx, r.Ticker, r.Universe); sec != "" {
+			r.Sector = &sec
+		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// lookupSector resolves the sector display name for a ticker based on
+// its universe class:
+//   - owned:      stock_holdings.sector
+//   - watchlist:  watchlist.sector
+//   - sector_etf: sector_universe.display_name
+//   - unowned:    "" (we don't enrich)
+func (s *Service) lookupSector(ctx context.Context, ticker *string, universe string) string {
+	if ticker == nil || strings.TrimSpace(*ticker) == "" {
+		return ""
+	}
+	t := strings.ToUpper(strings.TrimSpace(*ticker))
+	var sec sql.NullString
+	switch universe {
+	case "owned":
+		_ = s.DB.QueryRowContext(ctx,
+			`SELECT sector FROM stock_holdings
+			  WHERE UPPER(ticker)=? AND (deleted_at IS NULL OR deleted_at=0)
+			  LIMIT 1`, t).Scan(&sec)
+	case "watchlist":
+		_ = s.DB.QueryRowContext(ctx,
+			`SELECT sector FROM watchlist
+			  WHERE UPPER(ticker)=? AND deleted_at IS NULL
+			  LIMIT 1`, t).Scan(&sec)
+	case "sector_etf":
+		_ = s.DB.QueryRowContext(ctx,
+			`SELECT display_name FROM sector_universe
+			  WHERE UPPER(etf_ticker_primary)=? OR UPPER(etf_ticker_secondary)=?
+			  LIMIT 1`, t, t).Scan(&sec)
+	}
+	if sec.Valid {
+		return strings.TrimSpace(sec.String)
+	}
+	return ""
 }
 
 // classifyUniverse returns 'owned' | 'watchlist' | 'sector_etf' | 'unowned'

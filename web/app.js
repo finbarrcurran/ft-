@@ -6114,7 +6114,11 @@ async function renderSignals() {
   };
   const tableRows = rows.map(r => {
     const univ = UNIV_BADGE[r.universe] || '';
-    const tickerLink = r.ticker ? `${univ}<strong>${escapeHTML(r.ticker)}</strong>` : '<span class="dim">—</span>';
+    const issuerLine = r.issuerName ? `<br><span class="dim" style="font-size:0.72rem">${escapeHTML(r.issuerName)}</span>` : '';
+    const sectorLine = r.sector ? `<br><span class="sector-chip">${escapeHTML(r.sector)}</span>` : '';
+    const tickerLink = r.ticker
+      ? `${univ}<strong>${escapeHTML(r.ticker)}</strong>${issuerLine}${sectorLine}`
+      : '<span class="dim">—</span>';
     const actor = r.actorName ? `${escapeHTML(r.actorName)}${r.actorRole ? `<br><span class="dim" style="font-size:0.75rem">${escapeHTML(r.actorRole)}</span>` : ''}` : '<span class="dim">—</span>';
     const action = r.action ? `<span class="${r.action === 'BUY' ? 'gain' : r.action === 'SELL' ? 'loss' : 'dim'}">${escapeHTML(r.action)}</span>` : '—';
     let reasonChips = '';
