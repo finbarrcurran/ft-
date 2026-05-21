@@ -7,38 +7,38 @@ import (
 	"ft/internal/health"
 	"io"
 	"net/http"
-	"net/url"
-	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// FetchCryptoNews pulls public posts from CryptoPanic. Returns (nil, nil) if
-// the API key is missing.
+// FetchCryptoNews pulls aggregated crypto news from CryptoCompare's free
+// News API (v1.9.2 — replaces the discontinued CryptoPanic free tier).
 //
-// CryptoPanic's votes block gives us native sentiment: more positives than
-// negatives → positive; opposite → negative; otherwise neutral.
+// Endpoint: https://min-api.cryptocompare.com/data/v2/news/?lang=EN
+//
+// No API key required for basic use; free tier is generous (~100k req/month
+// — FT's news cache hits this once per refresh cycle, well under limit).
+// Returns aggregated headlines from CoinDesk, Cointelegraph, The Block,
+// Decrypt, BeInCrypto, Bitcoin Magazine, etc. — the same publisher set
+// CryptoPanic was previously sourcing from.
+//
+// Sentiment: CryptoCompare exposes upvotes/downvotes per article. When
+// neither is set (most articles in the free feed), sentiment falls back
+// to "neutral". UI already handles the neutral case, so this is a clean
+// downgrade from CryptoPanic's richer sentiment data.
 func FetchCryptoNews(ctx context.Context) (articles []Article, retErr error) {
 	defer func() {
-		if os.Getenv("CRYPTOPANIC_API_KEY") != "" {
-			health.Record(ctx, "cryptopanic", retErr)
-		}
+		health.Record(ctx, "cryptocompare", retErr)
 	}()
-	key := os.Getenv("CRYPTOPANIC_API_KEY")
-	if key == "" {
-		return nil, nil
-	}
 
-	u, _ := url.Parse("https://cryptopanic.com/api/v1/posts/")
-	q := u.Query()
-	q.Set("auth_token", key)
-	q.Set("public", "true")
-	q.Set("kind", "news")
-	u.RawQuery = q.Encode()
+	const endpoint = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	req.Header.Set("Accept", "application/json")
+	// CryptoCompare blocks generic Go default UAs; identify politely.
+	req.Header.Set("User-Agent", "FT-Dashboard fin@curranhouse.dev")
 	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -46,54 +46,55 @@ func FetchCryptoNews(ctx context.Context) (articles []Article, retErr error) {
 	defer res.Body.Close()
 	if res.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(res.Body, 256))
-		return nil, fmt.Errorf("cryptopanic http %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("cryptocompare http %d: %s",
+			res.StatusCode, strings.TrimSpace(string(body)))
 	}
 
+	// CryptoCompare wraps the array in {Type, Message, Data}.
 	var payload struct {
-		Results []struct {
+		Type    int    `json:"Type"`
+		Message string `json:"Message"`
+		Data    []struct {
+			ID          string `json:"id"`
+			PublishedOn int64  `json:"published_on"` // unix seconds
 			Title       string `json:"title"`
-			PublishedAt string `json:"published_at"`
 			URL         string `json:"url"`
-			Domain      string `json:"domain"`
-			Source      struct {
-				Title  string `json:"title"`
-				Domain string `json:"domain"`
-			} `json:"source"`
-			Votes struct {
-				Negative   int `json:"negative"`
-				Positive   int `json:"positive"`
-				Important  int `json:"important"`
-				Liked      int `json:"liked"`
-				Disliked   int `json:"disliked"`
-				LoL        int `json:"lol"`
-				Toxic      int `json:"toxic"`
-				Saved      int `json:"saved"`
-				Comments   int `json:"comments"`
-			} `json:"votes"`
-		} `json:"results"`
+			Body        string `json:"body"`
+			Tags        string `json:"tags"`
+			Categories  string `json:"categories"`
+			Upvotes     string `json:"upvotes"`   // strings in their JSON
+			Downvotes   string `json:"downvotes"`
+			Source      string `json:"source"`    // slug, e.g. "coindesk"
+			SourceInfo  struct {
+				Name string `json:"name"` // display name, e.g. "CoinDesk"
+				Lang string `json:"lang"`
+			} `json:"source_info"`
+		} `json:"Data"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
 
-	out := make([]Article, 0, len(payload.Results))
-	for _, p := range payload.Results {
+	out := make([]Article, 0, len(payload.Data))
+	for _, p := range payload.Data {
 		if p.Title == "" || p.URL == "" {
 			continue
 		}
-		t, _ := time.Parse(time.RFC3339, p.PublishedAt)
+		t := time.Unix(p.PublishedOn, 0).UTC()
+		// Derive sentiment from upvotes vs downvotes. Most articles in the
+		// free feed have 0/0 → neutral. Strings in the JSON because their
+		// API is quirky.
+		up, _ := strconv.Atoi(p.Upvotes)
+		down, _ := strconv.Atoi(p.Downvotes)
 		sentiment := "neutral"
-		if p.Votes.Positive > p.Votes.Negative {
+		if up > down {
 			sentiment = "positive"
-		} else if p.Votes.Negative > p.Votes.Positive {
+		} else if down > up {
 			sentiment = "negative"
 		}
-		src := p.Source.Title
+		src := p.SourceInfo.Name
 		if src == "" {
-			src = p.Source.Domain
-		}
-		if src == "" {
-			src = p.Domain
+			src = p.Source
 		}
 		out = append(out, Article{
 			Title:       p.Title,

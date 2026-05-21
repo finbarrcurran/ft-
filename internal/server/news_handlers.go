@@ -27,7 +27,7 @@ func (s *Server) handleMarketNews(w http.ResponseWriter, r *http.Request) {
 	s.handleNews(w, r, "market", "newsapi", news.FetchMarketNews)
 }
 func (s *Server) handleCryptoNews(w http.ResponseWriter, r *http.Request) {
-	s.handleNews(w, r, "crypto", "cryptopanic", news.FetchCryptoNews)
+	s.handleNews(w, r, "crypto", "cryptocompare", news.FetchCryptoNews)
 }
 
 func (s *Server) handleNews(
