@@ -25,6 +25,7 @@ type Row struct {
 	Source          string   `json:"source"`
 	SourceURL       *string  `json:"sourceUrl,omitempty"`
 	AlarmReasons    *string  `json:"alarmReasons,omitempty"` // JSON-encoded string array
+	Notes           *string  `json:"notes,omitempty"`        // EO title, free-text annotations
 	Acknowledged    bool     `json:"acknowledged"`
 	Universe        string   `json:"universe"` // 'owned' | 'watchlist' | 'sector_etf' | 'unowned'
 }
@@ -45,7 +46,7 @@ func (s *Service) List(ctx context.Context, f ListFilter) ([]Row, error) {
 		SELECT id, signal_type, tier, event_date, filed_date, ticker,
 		       issuer_name,
 		       actor_name, actor_role, action, amount_usd, amount_bucket,
-		       source, source_url, alarm_reasons, acknowledged
+		       source, source_url, alarm_reasons, notes, acknowledged
 		  FROM signal_events
 		 WHERE 1=1`
 	args := []any{}
@@ -80,13 +81,16 @@ func (s *Service) List(ctx context.Context, f ListFilter) ([]Row, error) {
 	out := []Row{}
 	for rows.Next() {
 		var r Row
-		var ticker, issuerName, actorName, actorRole, action, amountBucket, sourceURL, alarmReasons sql.NullString
+		var ticker, issuerName, actorName, actorRole, action, amountBucket, sourceURL, alarmReasons, notes sql.NullString
 		var amountUSD sql.NullFloat64
 		var acked int
 		if err := rows.Scan(&r.ID, &r.SignalType, &r.Tier, &r.EventDate, &r.FiledDate,
 			&ticker, &issuerName, &actorName, &actorRole, &action, &amountUSD, &amountBucket,
-			&r.Source, &sourceURL, &alarmReasons, &acked); err != nil {
+			&r.Source, &sourceURL, &alarmReasons, &notes, &acked); err != nil {
 			return nil, err
+		}
+		if notes.Valid && strings.TrimSpace(notes.String) != "" {
+			r.Notes = &notes.String
 		}
 		r.Acknowledged = acked == 1
 		if ticker.Valid {

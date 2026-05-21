@@ -209,10 +209,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/crypto-indicators/composite/latest", s.requireUser(s.handleCryptoIndicatorsComposite))
 	s.mux.HandleFunc("POST /api/crypto-indicators/refresh", s.requireUser(s.handleRefreshCryptoIndicators))
 
-	// Spec 9k Phase A — Political & Insider Signal endpoints.
+	// Spec 9k Phase A + B — Political & Insider Signal endpoints.
 	s.mux.HandleFunc("GET /api/signals", s.requireUser(s.handleListSignals))
 	s.mux.HandleFunc("POST /api/signals/{id}/ack", s.requireUser(s.handleAckSignal))
 	s.mux.HandleFunc("POST /api/signals/refresh-insiders", s.requireUser(s.handleRefreshInsiders))
+	s.mux.HandleFunc("POST /api/signals/refresh-congress", s.requireUser(s.handleRefreshCongress))
+	s.mux.HandleFunc("POST /api/signals/refresh-eo", s.requireUser(s.handleRefreshEO))
+	s.mux.HandleFunc("POST /api/signals/refresh-committees", s.requireUser(s.handleRefreshCommittees))
 	s.mux.HandleFunc("GET /api/signals/universe", s.requireUser(s.handleSignalsUniverse))
 	s.mux.HandleFunc("GET /api/crypto-indicators/ism", s.requireUser(s.handleReadISM))
 	s.mux.HandleFunc("POST /api/crypto-indicators/ism", s.requireUser(s.handleUploadISM))

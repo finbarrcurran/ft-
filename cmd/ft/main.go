@@ -322,8 +322,8 @@ func runServe() {
 	go sector_rotation.ScheduleWeeklyDigest(bgCtx, st)
 
 	// Spec 9k Phase A (v1.10.0) — daily 23:00 UTC SEC EDGAR Form 4 ingest.
-	// Slots after sector_rotation 22:00 UTC. Self-rate-limited to ~7.7
-	// req/sec per SEC fair-access policy.
+	// Spec 9k Phase B (v1.11.0) — adds Congress 23:10, EO 23:20, quarterly
+	// legislator refresh (first day of quarter, 02:00 UTC).
 	go func() {
 		sigSvc := signals.New(st.DB)
 		scheduleAt(bgCtx, 23, 0, func() {
@@ -334,6 +334,45 @@ func runServe() {
 				slog.Error("signals: insider ingest", "err", err)
 			}
 			slog.Info("signals: insider ingest complete", "inserted", inserted)
+		})
+		scheduleAt(bgCtx, 23, 10, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Minute)
+			defer cancel()
+			inserted, err := sigSvc.IngestCongress(ctx)
+			if err != nil {
+				slog.Error("signals: congress ingest", "err", err)
+			}
+			slog.Info("signals: congress ingest complete", "inserted", inserted)
+		})
+		scheduleAt(bgCtx, 23, 20, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Minute)
+			defer cancel()
+			inserted, err := sigSvc.IngestEOs(ctx)
+			if err != nil {
+				slog.Error("signals: EO ingest", "err", err)
+			}
+			slog.Info("signals: EO ingest complete", "inserted", inserted)
+		})
+		// Quarterly legislator + committee refresh. The scheduleAt helper
+		// is daily-only, so we do a daily 02:00 UTC tick and self-gate on
+		// "is today the first of Jan/Apr/Jul/Oct".
+		scheduleAt(bgCtx, 2, 0, func() {
+			now := time.Now().UTC()
+			if now.Day() != 1 {
+				return
+			}
+			if now.Month() != time.January && now.Month() != time.April &&
+				now.Month() != time.July && now.Month() != time.October {
+				return
+			}
+			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Minute)
+			defer cancel()
+			leg, com, err := sigSvc.IngestLegislators(ctx)
+			if err != nil {
+				slog.Error("signals: quarterly legislator refresh", "err", err)
+			}
+			slog.Info("signals: quarterly legislator refresh complete",
+				"legislators", leg, "committee_rows", com)
 		})
 	}()
 

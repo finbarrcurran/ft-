@@ -6114,11 +6114,21 @@ async function renderSignals() {
   };
   const tableRows = rows.map(r => {
     const univ = UNIV_BADGE[r.universe] || '';
+    // For EOs without a ticker (sector-only matches), surface the EO title
+    // (stored in notes) so the row isn't a blank "—".
+    const eoLine = (r.signalType === 'executive_order' && r.notes)
+      ? `<span class="dim" style="font-size:0.78rem"><em>${escapeHTML(r.notes)}</em></span>`
+      : '';
     const issuerLine = r.issuerName ? `<br><span class="dim" style="font-size:0.72rem">${escapeHTML(r.issuerName)}</span>` : '';
     const sectorLine = r.sector ? `<br><span class="sector-chip">${escapeHTML(r.sector)}</span>` : '';
-    const tickerLink = r.ticker
-      ? `${univ}<strong>${escapeHTML(r.ticker)}</strong>${issuerLine}${sectorLine}`
-      : '<span class="dim">—</span>';
+    let tickerLink;
+    if (r.ticker) {
+      tickerLink = `${univ}<strong>${escapeHTML(r.ticker)}</strong>${issuerLine}${sectorLine}`;
+    } else if (eoLine) {
+      tickerLink = `${eoLine}${sectorLine}`;
+    } else {
+      tickerLink = '<span class="dim">—</span>';
+    }
     const actor = r.actorName ? `${escapeHTML(r.actorName)}${r.actorRole ? `<br><span class="dim" style="font-size:0.75rem">${escapeHTML(r.actorRole)}</span>` : ''}` : '<span class="dim">—</span>';
     const action = r.action ? `<span class="${r.action === 'BUY' ? 'gain' : r.action === 'SELL' ? 'loss' : 'dim'}">${escapeHTML(r.action)}</span>` : '—';
     let reasonChips = '';
@@ -6147,8 +6157,11 @@ async function renderSignals() {
   content.innerHTML = `
     <div class="signals-tab">
       <div class="theses-toolbar" style="margin-bottom:0.6rem">
-        <button class="btn-ghost" id="signals-refresh" title="Trigger SEC EDGAR Form 4 ingest now">⟳ Refresh insiders</button>
-        <span class="dim" style="font-size:0.78rem">Auto-ingest 23:00 UTC daily</span>
+        <button class="btn-ghost" id="signals-refresh"           title="Trigger SEC EDGAR Form 4 ingest">⟳ Insiders</button>
+        <button class="btn-ghost" id="signals-refresh-congress"  title="Pull latest House + Senate Stock Watcher">⟳ Congress</button>
+        <button class="btn-ghost" id="signals-refresh-eo"        title="Pull latest Executive Orders (Federal Register)">⟳ EO</button>
+        <button class="btn-ghost" id="signals-refresh-committees" title="Quarterly legislator + committee roster refresh">⟳ Committees</button>
+        <span class="dim" style="font-size:0.78rem">Daily 23:00 / 23:10 / 23:20 UTC · committees quarterly</span>
       </div>
 
       <div class="signal-chip-row">
@@ -6233,36 +6246,40 @@ async function renderSignals() {
       }
     });
   }
-  $('#signals-refresh')?.addEventListener('click', async (ev) => {
-    const btn = ev.currentTarget;
-    btn.disabled = true;
-    const orig = btn.textContent;
-    btn.textContent = '⟳ Started — polling for results…';
-    try {
-      // Server returns 202 immediately and runs ingest in background.
-      await api('/api/signals/refresh-insiders', { method: 'POST' });
-      // Poll the list every 10s for up to 2 min; re-render when rows arrive.
-      const baseline = (state.signalsRows || []).length;
-      for (let i = 0; i < 12; i++) {
-        await new Promise((r) => setTimeout(r, 10000));
-        try {
-          const data = await api(`/api/signals?range=${state.signalsRange || 30}`);
-          if ((data.signals || []).length !== baseline) {
-            await renderSignals();
-            return;
-          }
-        } catch { /* keep polling */ }
-        btn.textContent = `⟳ Still running… (${(i + 1) * 10}s)`;
+  const wireSignalsRefreshBtn = (id, endpoint) => {
+    $(id)?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = '⟳ Started — polling…';
+      try {
+        await api(endpoint, { method: 'POST' });
+        const baseline = (state.signalsRows || []).length;
+        for (let i = 0; i < 12; i++) {
+          await new Promise((r) => setTimeout(r, 10000));
+          try {
+            const data = await api(`/api/signals?range=${state.signalsRange || 30}`);
+            if ((data.signals || []).length !== baseline) {
+              await renderSignals();
+              return;
+            }
+          } catch { /* keep polling */ }
+          btn.textContent = `⟳ Still running… (${(i + 1) * 10}s)`;
+        }
+        btn.disabled = false;
+        btn.textContent = orig;
+        await renderSignals();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = orig;
+        alert('Refresh failed: ' + err.message);
       }
-      btn.disabled = false;
-      btn.textContent = orig;
-      await renderSignals();
-    } catch (err) {
-      btn.disabled = false;
-      btn.textContent = orig;
-      alert('Refresh failed: ' + err.message);
-    }
-  });
+    });
+  };
+  wireSignalsRefreshBtn('#signals-refresh',            '/api/signals/refresh-insiders');
+  wireSignalsRefreshBtn('#signals-refresh-congress',   '/api/signals/refresh-congress');
+  wireSignalsRefreshBtn('#signals-refresh-eo',         '/api/signals/refresh-eo');
+  wireSignalsRefreshBtn('#signals-refresh-committees', '/api/signals/refresh-committees');
 }
 
 async function renderPerformance() {

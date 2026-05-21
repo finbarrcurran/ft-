@@ -102,6 +102,36 @@ func InsiderTier(e InsiderEvent, t Thresholds) (tier string, reasons []string) {
 	return TierInfo, reasons
 }
 
+// CongressEvent is the shape CongressTier consumes.
+type CongressEvent struct {
+	Ticker         string
+	AmountUSD      float64
+	UniverseHit    UniverseHit
+	CommitteeMatch bool // legislator sits on a committee whose committee_sector_map
+	                    // includes this ticker's sector_universe_id
+}
+
+// CongressTier computes the tier for a Congressional trade. Spec 9k §D6:
+//
+//   not in universe                               → INFO
+//   amount < $15K                                 → INFO
+//   in universe AND committee jurisdiction match  → ALARM (+ committee_match)
+//   in universe, no committee match               → FLAG
+func CongressTier(e CongressEvent, t Thresholds) (tier string, reasons []string) {
+	reasons = []string{}
+	if !e.UniverseHit.Matched {
+		return TierInfo, reasons
+	}
+	if e.AmountUSD < t.CongressUSD {
+		return TierInfo, reasons
+	}
+	if e.CommitteeMatch {
+		reasons = append(reasons, "committee_match")
+		return TierAlarm, reasons
+	}
+	return TierFlag, reasons
+}
+
 // isCEOOrCFO reports whether the SEC "officerTitle" / "reportingOwnerRelationship"
 // text identifies the actor as Chief Executive or Chief Financial Officer.
 // SEC filings vary in capitalisation and exact wording ("Chief Executive Officer",

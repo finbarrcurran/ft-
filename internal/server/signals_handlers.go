@@ -103,3 +103,60 @@ func (s *Server) handleSignalsUniverse(w http.ResponseWriter, r *http.Request) {
 	snap := s.signals.Snapshot(r.Context())
 	writeJSON(w, http.StatusOK, snap)
 }
+
+// POST /api/signals/refresh-congress — background ingest, returns 202.
+func (s *Server) handleRefreshCongress(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, err := s.signals.IngestCongress(ctx); err != nil {
+			_ = err // IngestCongress already logs
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"started": true,
+		"message": "congress ingest started in background — refresh in 30-60s",
+	})
+}
+
+// POST /api/signals/refresh-eo — background ingest, returns 202.
+func (s *Server) handleRefreshEO(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, err := s.signals.IngestEOs(ctx); err != nil {
+			_ = err
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"started": true,
+		"message": "EO ingest started in background — refresh in 30-60s",
+	})
+}
+
+// POST /api/signals/refresh-committees — quarterly legislator + committee refresh.
+func (s *Server) handleRefreshCommittees(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, _, err := s.signals.IngestLegislators(ctx); err != nil {
+			_ = err
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"started": true,
+		"message": "legislator + committee refresh started in background",
+	})
+}
