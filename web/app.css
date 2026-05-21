@@ -3253,6 +3253,22 @@ input.autofilled, select.autofilled {
   font-size: 0.85rem;
   vertical-align: middle;
 }
+.signal-section {
+  margin-top: 1.2rem;
+}
+.signal-section-h {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 0.4rem 0;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid rgb(var(--color-dim) / 0.25);
+}
+.signal-sort:hover {
+  color: rgb(var(--color-accent));
+}
+.maint-row td {
+  padding: 0.5rem 0.6rem;
+}
 .sector-chip {
   display: inline-block;
   font-size: 0.68rem;

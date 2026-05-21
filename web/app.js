@@ -3348,6 +3348,143 @@ function renderPortfolioRiskSection(r) {
 // Spec 8 / Master Spec — small Settings section linking into the
 // Scorecards tab with master-spec preselected. Reuses 100% of the
 // Scorecards machinery for storage, render, edit, and versioning.
+// Maintenance checklist — hard-coded list of recurring tasks that
+// aren't fully automated (or that benefit from a manual sanity-check).
+// "Last done" timestamps stored in localStorage. As more things get
+// automated, drop them from the list.
+const MAINTENANCE_ITEMS = [
+  {
+    id: 'mtnc_master_spec_push',
+    title: 'Master spec → live DB sync',
+    cadence: 'After every deploy',
+    detail: 'After git push + deploy, scp internal/scorecards/seed/master-spec.md to jarvis and UPDATE sector_scorecards SET current_version=…, markdown_current=readfile(…). Confirm via the Spec Docs link below.',
+    checkLink: '#tab=scorecards',
+  },
+  {
+    id: 'mtnc_signals_committees',
+    title: 'Legislator + committee roster',
+    cadence: 'Quarterly (1st of Jan / Apr / Jul / Oct, 02:00 UTC cron)',
+    detail: 'Automated, but worth verifying after each quarter-end that legislators table is populated and last_refreshed is recent. Manual trigger: Signals tab → ⟳ Committees.',
+  },
+  {
+    id: 'mtnc_eo_keywords_review',
+    title: 'Review EO keyword false positives',
+    cadence: 'Every 30 days',
+    detail: 'Scan the Signals tab for any EO-tier INFO/FLAG rows that triggered on noisy keywords (e.g. "nuclear family" in social-policy EO). Remove problem keywords from eo_sector_keywords directly via sqlite or add a v1.x migration.',
+  },
+  {
+    id: 'mtnc_committee_jurisdiction_review',
+    title: 'Review committee→sector jurisdiction map',
+    cadence: 'Every 6 months',
+    detail: 'After a Congress turnover or major committee restructuring, audit committee_sector_map to make sure assignments still make sense. Currently 13 committees seeded in migration 0029.',
+  },
+  {
+    id: 'mtnc_api_keys',
+    title: 'API key health + rotation',
+    cadence: 'Annually (or on alert)',
+    detail: 'Check /etc/ft/env on jarvis: FINNHUB / TWELVEDATA / FRED / NEWSAPI / GITHUB. Rotate any keys that have leaked or whose free tier has changed. SEC EDGAR + DefiLlama + CoinGecko + Federal Register + RSS feeds all keyless.',
+  },
+  {
+    id: 'mtnc_db_backup',
+    title: 'Backup live DB',
+    cadence: 'Weekly',
+    detail: 'sudo cp /var/lib/ft/ft.db /var/lib/ft/backups/ft-$(date +%F).db on jarvis. Keep 4 weeks worth; older snapshots aren\'t worth the disk.',
+  },
+  {
+    id: 'mtnc_holdings_audit',
+    title: 'Holdings + watchlist sanity check',
+    cadence: 'Monthly',
+    detail: 'Re-import the brokerage CSV; verify no rows in Settings → Deleted stock holdings should actually be active.',
+  },
+  {
+    id: 'mtnc_thesis_revision_scan',
+    title: 'Scan revision-needed theses',
+    cadence: 'Weekly',
+    detail: 'Theses tab → look for ⚠ badge. Earnings-revision trigger flags holdings whose thesis was locked before the latest earnings print. Refresh prompts as needed.',
+  },
+  {
+    id: 'mtnc_sector_universe_review',
+    title: 'Sector universe definitions',
+    cadence: 'Quarterly',
+    detail: 'sector_universe (33 sectors currently). New thematic adapters (Spec 9j) add rows; revisit ETF primary/secondary mappings as the market evolves.',
+  },
+];
+
+function getMaintenanceState() {
+  try {
+    return JSON.parse(localStorage.getItem('ft_maintenance_state') || '{}');
+  } catch { return {}; }
+}
+function setMaintenanceDone(id) {
+  const s = getMaintenanceState();
+  s[id] = new Date().toISOString();
+  localStorage.setItem('ft_maintenance_state', JSON.stringify(s));
+}
+function clearMaintenanceDone(id) {
+  const s = getMaintenanceState();
+  delete s[id];
+  localStorage.setItem('ft_maintenance_state', JSON.stringify(s));
+}
+
+function renderMaintenanceSection() {
+  const state = getMaintenanceState();
+  const fmt = (iso) => {
+    if (!iso) return '<span class="dim">never marked done</span>';
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    if (days === 0) return `<span class="gain">today</span>`;
+    if (days === 1) return `<span class="gain">yesterday</span>`;
+    return `${days} days ago`;
+  };
+  const rows = MAINTENANCE_ITEMS.map(item => {
+    const done = state[item.id];
+    return `
+      <tr class="maint-row">
+        <td style="vertical-align:top;width:30%">
+          <strong>${escapeHTML(item.title)}</strong><br>
+          <span class="dim" style="font-size:0.78rem">${escapeHTML(item.cadence)}</span>
+        </td>
+        <td style="vertical-align:top">
+          <span style="font-size:0.85rem">${escapeHTML(item.detail)}</span>
+        </td>
+        <td style="vertical-align:top;white-space:nowrap;text-align:right">
+          <div style="font-size:0.78rem">Last: ${fmt(done)}</div>
+          <button class="row-mini" data-maint-done="${item.id}" style="margin-top:0.3rem">${done ? '↻ redo' : '✓ done'}</button>
+          ${done ? `<button class="row-mini" data-maint-clear="${item.id}" title="Clear last-done timestamp" style="margin-left:0.2rem">✕</button>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <section class="settings-block">
+      <h3 class="settings-h3">Maintenance checklist <span class="dim" style="font-size:0.78rem;font-weight:normal">(recurring tasks worth a sanity-check)</span></h3>
+      <div class="tablewrap">
+        <table class="holdings">
+          <thead>
+            <tr><th>Task</th><th>Detail</th><th style="text-align:right">Status</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function wireMaintenanceSection() {
+  for (const btn of document.querySelectorAll('[data-maint-done]')) {
+    btn.addEventListener('click', () => {
+      setMaintenanceDone(btn.dataset.maintDone);
+      renderSettings();
+    });
+  }
+  for (const btn of document.querySelectorAll('[data-maint-clear]')) {
+    btn.addEventListener('click', () => {
+      clearMaintenanceDone(btn.dataset.maintClear);
+      renderSettings();
+    });
+  }
+}
+
 function renderSpecDocsSection() {
   return `
     <section class="settings-block">
@@ -3974,11 +4111,14 @@ async function renderSettings() {
 
   // Spec 8 / Master Spec — link to the living-doc scorecard.
   const specDocsHTML = renderSpecDocsSection();
+  // v1.11.1 — recurring maintenance checklist (localStorage-tracked).
+  const maintenanceHTML = renderMaintenanceSection();
 
   content.innerHTML = `
     <h2 class="settings-h">Settings</h2>
 
     ${specDocsHTML}
+    ${maintenanceHTML}
     ${portfolioRiskHTML}
     ${llmSpendHTML}
     ${diagnosticsHTML}
@@ -4046,6 +4186,8 @@ async function renderSettings() {
 
   // Spec 7 — Diagnostics manual refresh.
   document.querySelector('#diag-refresh-btn')?.addEventListener('click', () => renderSettings());
+  // v1.11.1 — wire maintenance checklist buttons.
+  wireMaintenanceSection();
 
   // Spec 8 / Master Spec — jump into the Scorecards tab with the right doc.
   document.querySelector('#spec-docs-open-master')?.addEventListener('click', () => {
@@ -6051,7 +6193,15 @@ async function renderCryptoIndicators() {
 // expansion, ack workflow, gap report) in 9k.B/C.
 
 if (!state.signalsFilter) {
-  state.signalsFilter = { tier: '', type: '', range: 30, includeAcked: false, universe: '' };
+  state.signalsFilter = { tier: '', range: 30, includeAcked: false, universe: '' };
+}
+// Per-section sort state. col ∈ {date, ticker, actor, amount, tier}; dir ∈ {asc, desc}.
+if (!state.signalsSort) {
+  state.signalsSort = {
+    insider:         { col: 'date', dir: 'desc' },
+    congress:        { col: 'date', dir: 'desc' },
+    executive_order: { col: 'date', dir: 'desc' },
+  };
 }
 
 const SIGNAL_TYPE_ICON = {
@@ -6071,7 +6221,6 @@ async function renderSignals() {
   const f = state.signalsFilter;
   const q = new URLSearchParams();
   if (f.tier) q.set('tier', f.tier);
-  if (f.type) q.set('type', f.type);
   if (f.universe) q.set('universe', f.universe);
   q.set('range', String(f.range));
   if (f.includeAcked) q.set('include_acked', '1');
@@ -6095,10 +6244,6 @@ async function renderSignals() {
     const active = f.range === n;
     return `<button class="ci-chip ${active ? 'active' : ''}" data-signal-range="${n}">${label}</button>`;
   };
-  const typeChip = (key, label) => {
-    const active = f.type === key;
-    return `<button class="ci-chip ${active ? 'active' : ''}" data-signal-type="${key}">${label}</button>`;
-  };
   const univChip = (key, label) => {
     const active = (f.universe || '') === key;
     return `<button class="ci-chip ${active ? 'active' : ''}" data-signal-universe="${key}">${label}</button>`;
@@ -6112,13 +6257,122 @@ async function renderSignals() {
     sector_etf: '<span class="univ-badge sector"  title="Sector ETF match">🏷</span>',
     unowned:    '',
   };
-  const tableRows = rows.map(r => {
+  // Split rows by signal type. Then sort each section by its own
+  // sort-state (state.signalsSort[type]).
+  const sectionsConfig = [
+    { type: 'insider',         label: '📈 Insider Form 4',     endpoint: '/api/signals/refresh-insiders' },
+    { type: 'congress',        label: '🏛 Congress (PTRs)',    endpoint: '/api/signals/refresh-congress' },
+    { type: 'executive_order', label: '📜 Executive Orders',   endpoint: '/api/signals/refresh-eo' },
+  ];
+
+  const sortRows = (xs, sort) => {
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    const cmp = {
+      date:   (a, b) => (a.eventDate || '').localeCompare(b.eventDate || ''),
+      ticker: (a, b) => (a.ticker || '~').localeCompare(b.ticker || '~'),
+      actor:  (a, b) => (a.actorName || '~').localeCompare(b.actorName || '~'),
+      amount: (a, b) => (a.amountUsd || 0) - (b.amountUsd || 0),
+      tier:   (a, b) => {
+        const rank = { alarm: 0, flag: 1, info: 2 };
+        return (rank[a.tier] ?? 9) - (rank[b.tier] ?? 9);
+      },
+    }[sort.col] || ((a, b) => 0);
+    return [...xs].sort((a, b) => dir * cmp(a, b));
+  };
+
+  const sortHdr = (type, col, label, extraCls = '') => {
+    const s = state.signalsSort[type];
+    const active = s.col === col;
+    const arrow = active ? (s.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th class="signal-sort ${extraCls}" data-sort-type="${type}" data-sort-col="${col}" style="cursor:pointer;user-select:none">${label}${arrow}</th>`;
+  };
+
+  const renderSection = (cfg) => {
+    const sectionRows = sortRows(rows.filter(r => r.signalType === cfg.type), state.signalsSort[cfg.type]);
+    const count = sectionRows.length;
+    const body = sectionRows.length === 0
+      ? `<tr><td colspan="9"><div class="empty"><div class="dim">No ${cfg.type.replace('_', ' ')} signals in window. Try widening Range or hit ⟳ Refresh all.</div></div></td></tr>`
+      : sectionRows.map(buildRowHTML).join('');
+    return `
+      <section class="signal-section">
+        <h3 class="signal-section-h">
+          ${cfg.label} <span class="dim" style="font-size:0.85rem;font-weight:normal">${count} row${count === 1 ? '' : 's'}</span>
+        </h3>
+        <div class="tablewrap">
+          <table class="holdings signals-table">
+            <thead>
+              <tr>
+                ${sortHdr(cfg.type, 'date',   'Date')}
+                ${sortHdr(cfg.type, 'tier',   'Tier')}
+                ${sortHdr(cfg.type, 'ticker', 'Ticker')}
+                ${sortHdr(cfg.type, 'actor',  'Actor')}
+                <th>Action</th>
+                ${sortHdr(cfg.type, 'amount', 'Amount', 'num')}
+                <th>Reason</th>
+                <th>Source</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  };
+
+  content.innerHTML = `
+    <div class="signals-tab">
+      <div class="theses-toolbar" style="margin-bottom:0.6rem">
+        <button class="btn-primary" id="signals-refresh-all"
+                title="Run all four ingests in parallel">⟳ Refresh all signals</button>
+        <span class="dim" id="signals-refresh-status" style="font-size:0.78rem"></span>
+        <details style="margin-left:auto">
+          <summary class="dim" style="font-size:0.78rem;cursor:pointer">individual triggers</summary>
+          <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
+            <button class="btn-ghost" id="signals-refresh"            title="SEC EDGAR Form 4">⟳ Insiders</button>
+            <button class="btn-ghost" id="signals-refresh-congress"   title="House + Senate Stock Watcher">⟳ Congress</button>
+            <button class="btn-ghost" id="signals-refresh-eo"         title="Federal Register">⟳ EO</button>
+            <button class="btn-ghost" id="signals-refresh-committees" title="unitedstates/congress-legislators">⟳ Committees</button>
+          </div>
+        </details>
+      </div>
+      <div class="dim" style="font-size:0.75rem;margin-bottom:0.5rem">
+        Auto-ingest daily: insiders 23:00 · congress 23:10 · EO 23:20 UTC · committees quarterly
+      </div>
+
+      <div class="signal-chip-row">
+        <span class="dim" style="font-size:0.78rem">Tier:</span>
+        ${tierChip('', 'All')}
+        ${tierChip('alarm', '🔴 Alarm', counts.alarm)}
+        ${tierChip('flag', '🟡 Flag', counts.flag)}
+        ${tierChip('info', '⚪ Info', counts.info)}
+      </div>
+      <div class="signal-chip-row">
+        <span class="dim" style="font-size:0.78rem">Range:</span>
+        ${rangeChip(1, '24h')} ${rangeChip(7, '7d')} ${rangeChip(30, '30d')} ${rangeChip(90, '90d')}
+      </div>
+      <div class="signal-chip-row">
+        <span class="dim" style="font-size:0.78rem">Universe:</span>
+        ${univChip('', 'All')}
+        ${univChip('owned', '💼 Owned')}
+        ${univChip('watchlist', '👁 Watchlist')}
+        ${univChip('sector_etf', '🏷 Sector ETF')}
+        ${univChip('unowned', '🌐 Unowned')}
+      </div>
+
+      ${sectionsConfig.map(renderSection).join('')}
+
+      <div class="ci-footer dim">
+        Spec 9k Phase A + B — insider + congressional + EO. Telegram routing ships in v1.12.0.
+      </div>
+    </div>
+  `;
+
+  // Helper used by renderSection above.
+  function buildRowHTML(r) {
     const univ = UNIV_BADGE[r.universe] || '';
-    // For EOs without a ticker (sector-only matches), surface the EO title
-    // (stored in notes) so the row isn't a blank "—".
     const eoLine = (r.signalType === 'executive_order' && r.notes)
-      ? `<span class="dim" style="font-size:0.78rem"><em>${escapeHTML(r.notes)}</em></span>`
-      : '';
+      ? `<span class="dim" style="font-size:0.78rem"><em>${escapeHTML(r.notes)}</em></span>` : '';
     const issuerLine = r.issuerName ? `<br><span class="dim" style="font-size:0.72rem">${escapeHTML(r.issuerName)}</span>` : '';
     const sectorLine = r.sector ? `<br><span class="sector-chip">${escapeHTML(r.sector)}</span>` : '';
     let tickerLink;
@@ -6141,85 +6395,17 @@ async function renderSignals() {
     return `
       <tr class="signal-row ${r.acknowledged ? 'acked' : ''}" data-signal-id="${r.id}">
         <td><span>${escapeHTML(r.eventDate)}</span>${r.filedDate && r.filedDate !== r.eventDate ? `<br><span class="dim" style="font-size:0.72rem">filed ${escapeHTML(r.filedDate)}</span>` : ''}</td>
-        <td>${SIGNAL_TYPE_ICON[r.signalType] || '·'} <span class="dim">${escapeHTML(r.signalType)}</span></td>
         <td>${SIGNAL_TIER_PILL[r.tier] || r.tier}</td>
         <td>${tickerLink}</td>
         <td>${actor}</td>
         <td>${action}</td>
-        <td class="num">${fmtAmt(r.amountUsd)}</td>
+        <td class="num">${r.amountUsd == null ? '—' : '$' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(r.amountUsd)}</td>
         <td>${reasonChips}</td>
         <td>${r.sourceUrl ? `<a href="${escapeHTML(r.sourceUrl)}" target="_blank" rel="noopener" class="dim" title="Open source">↗</a>` : ''}</td>
         <td>${r.acknowledged ? '<span class="dim">✓</span>' : `<button class="row-mini" data-signal-ack="${r.id}" title="Acknowledge">ack</button>`}</td>
       </tr>
     `;
-  }).join('');
-
-  content.innerHTML = `
-    <div class="signals-tab">
-      <div class="theses-toolbar" style="margin-bottom:0.6rem">
-        <button class="btn-ghost" id="signals-refresh"           title="Trigger SEC EDGAR Form 4 ingest">⟳ Insiders</button>
-        <button class="btn-ghost" id="signals-refresh-congress"  title="Pull latest House + Senate Stock Watcher">⟳ Congress</button>
-        <button class="btn-ghost" id="signals-refresh-eo"        title="Pull latest Executive Orders (Federal Register)">⟳ EO</button>
-        <button class="btn-ghost" id="signals-refresh-committees" title="Quarterly legislator + committee roster refresh">⟳ Committees</button>
-        <span class="dim" style="font-size:0.78rem">Daily 23:00 / 23:10 / 23:20 UTC · committees quarterly</span>
-      </div>
-
-      <div class="signal-chip-row">
-        <span class="dim" style="font-size:0.78rem">Tier:</span>
-        ${tierChip('', 'All')}
-        ${tierChip('alarm', '🔴 Alarm', counts.alarm)}
-        ${tierChip('flag', '🟡 Flag', counts.flag)}
-        ${tierChip('info', '⚪ Info', counts.info)}
-      </div>
-      <div class="signal-chip-row">
-        <span class="dim" style="font-size:0.78rem">Range:</span>
-        ${rangeChip(1, '24h')} ${rangeChip(7, '7d')} ${rangeChip(30, '30d')} ${rangeChip(90, '90d')}
-      </div>
-      <div class="signal-chip-row">
-        <span class="dim" style="font-size:0.78rem">Type:</span>
-        ${typeChip('', 'All')}
-        ${typeChip('insider', '📈 Insider')}
-        ${typeChip('congress', '🏛 Congress')}
-        ${typeChip('executive_order', '📜 EO')}
-      </div>
-      <div class="signal-chip-row">
-        <span class="dim" style="font-size:0.78rem">Universe:</span>
-        ${univChip('', 'All')}
-        ${univChip('owned', '💼 Owned')}
-        ${univChip('watchlist', '👁 Watchlist')}
-        ${univChip('sector_etf', '🏷 Sector ETF')}
-        ${univChip('unowned', '🌐 Unowned')}
-      </div>
-
-      <div class="tablewrap" style="margin-top:0.8rem">
-        <table class="holdings signals-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Type</th>
-              <th>Tier</th>
-              <th>Ticker</th>
-              <th>Actor</th>
-              <th>Action</th>
-              <th class="num">Amount</th>
-              <th>Reason</th>
-              <th>Source</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.length === 0
-              ? '<tr><td colspan="10"><div class="empty"><div>No signals matching the current filters. Try widening the range or clicking ⟳ Refresh insiders.</div></div></td></tr>'
-              : tableRows}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="ci-footer dim">
-        Spec 9k Phase A — insider Form 4 only. Congress + Executive Orders ship in v1.11.0.
-      </div>
-    </div>
-  `;
+  }
 
   // Wire interactions.
   for (const btn of document.querySelectorAll('[data-signal-tier]')) {
@@ -6228,11 +6414,23 @@ async function renderSignals() {
   for (const btn of document.querySelectorAll('[data-signal-range]')) {
     btn.addEventListener('click', () => { state.signalsFilter.range = parseInt(btn.dataset.signalRange, 10); renderSignals(); });
   }
-  for (const btn of document.querySelectorAll('[data-signal-type]')) {
-    btn.addEventListener('click', () => { state.signalsFilter.type = btn.dataset.signalType; renderSignals(); });
-  }
   for (const btn of document.querySelectorAll('[data-signal-universe]')) {
     btn.addEventListener('click', () => { state.signalsFilter.universe = btn.dataset.signalUniverse; renderSignals(); });
+  }
+  // Sort-header clicks: toggle dir on same col, switch to new col defaults desc.
+  for (const th of document.querySelectorAll('[data-sort-type]')) {
+    th.addEventListener('click', () => {
+      const type = th.dataset.sortType;
+      const col = th.dataset.sortCol;
+      const s = state.signalsSort[type];
+      if (s.col === col) {
+        s.dir = s.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        s.col = col;
+        s.dir = 'desc';
+      }
+      renderSignals();
+    });
   }
   for (const btn of document.querySelectorAll('[data-signal-ack]')) {
     btn.addEventListener('click', async (ev) => {
@@ -6280,6 +6478,52 @@ async function renderSignals() {
   wireSignalsRefreshBtn('#signals-refresh-congress',   '/api/signals/refresh-congress');
   wireSignalsRefreshBtn('#signals-refresh-eo',         '/api/signals/refresh-eo');
   wireSignalsRefreshBtn('#signals-refresh-committees', '/api/signals/refresh-committees');
+
+  // ⟳ Refresh all signals — fires all four endpoints in parallel and
+  // polls /api/signals every 10s until the row count changes or we
+  // time out at ~2 min. Status text updates inline.
+  $('#signals-refresh-all')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const status = $('#signals-refresh-status');
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = '⟳ All started — polling…';
+    const targets = [
+      ['insiders',   '/api/signals/refresh-insiders'],
+      ['congress',   '/api/signals/refresh-congress'],
+      ['EO',         '/api/signals/refresh-eo'],
+      ['committees', '/api/signals/refresh-committees'],
+    ];
+    // Fire all four; tolerate individual failures.
+    const launched = [];
+    for (const [name, ep] of targets) {
+      try {
+        await api(ep, { method: 'POST' });
+        launched.push(name);
+      } catch (err) {
+        if (status) status.textContent = `(${name} failed: ${err.message})`;
+      }
+    }
+    if (status) status.textContent = `Running: ${launched.join(', ')}`;
+
+    // Poll for new rows. Baseline = current count.
+    const baseline = rows.length;
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 10000));
+      try {
+        const data = await api(`/api/signals?range=${state.signalsFilter.range || 30}`);
+        if ((data.signals || []).length !== baseline) {
+          await renderSignals();
+          return;
+        }
+      } catch { /* keep polling */ }
+      btn.textContent = `⟳ Still running… (${(i + 1) * 10}s)`;
+    }
+    btn.disabled = false;
+    btn.textContent = orig;
+    if (status) status.textContent = 'done (no new rows)';
+    await renderSignals();
+  });
 }
 
 async function renderPerformance() {
