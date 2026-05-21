@@ -84,7 +84,9 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 		func() result { return result{"pal_us2y", fred.FetchSeries(ctx, "DGS2")} },
 		// v1.9.1: CFNAI from FRED replaces the manual-JSON pal_ism upload.
 		// Same monthly cadence + same business-cycle pulse signal.
-		func() result { return result{"pal_cfnai", fred.FetchSeries(ctx, "CFNAI")} },
+		// AbsoluteTrend variant because CFNAI oscillates around 0 — % change
+		// would be nonsense near zero.
+		func() result { return result{"pal_cfnai", fred.FetchSeriesAbsoluteTrend(ctx, "CFNAI")} },
 		// CoinGecko (Cowen bucket)
 		func() result { return result{"cowen_btc_dominance", cg.FetchBTCDominance(ctx)} },
 		func() result { return result{"cowen_eth_btc", cg.FetchETHBTCRatio(ctx)} },

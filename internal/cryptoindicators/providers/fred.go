@@ -57,10 +57,23 @@ type fredResponse struct {
 }
 
 // FetchSeries returns the latest non-missing observation + 4-week trend
-// for a FRED series (e.g. "DGS2", "DTWEXBGS"). 28-day trend is computed
-// from the same observation set — finds the latest reading and the
-// reading nearest to 28 days prior.
+// for a FRED series. Trend is signed % change over ~28 days for
+// series whose level is bounded away from zero (DGS2, DTWEXBGS).
+//
+// For series that oscillate around zero (CFNAI), percentage change is
+// meaningless — a tiny absolute movement near zero produces a huge %.
+// Call FetchSeriesAbsoluteTrend for those.
 func (c *FREDClient) FetchSeries(ctx context.Context, seriesID string) Reading {
+	return c.fetchSeries(ctx, seriesID, false)
+}
+
+// FetchSeriesAbsoluteTrend is the variant for around-zero series. Trend
+// is the raw delta (latest - 28d_ago), not a percentage.
+func (c *FREDClient) FetchSeriesAbsoluteTrend(ctx context.Context, seriesID string) Reading {
+	return c.fetchSeries(ctx, seriesID, true)
+}
+
+func (c *FREDClient) fetchSeries(ctx context.Context, seriesID string, absoluteTrend bool) Reading {
 	if c.APIKey == "" {
 		return Reading{Err: "FRED_API_KEY not set on server"}
 	}
@@ -133,8 +146,15 @@ func (c *FREDClient) FetchSeries(ctx context.Context, seriesID string) Reading {
 			break
 		}
 	}
-	if prior != nil && prior.value != 0 {
-		trend := (latest.value - prior.value) / prior.value * 100
+	if prior != nil {
+		var trend float64
+		if absoluteTrend {
+			trend = latest.value - prior.value
+		} else if prior.value != 0 {
+			trend = (latest.value - prior.value) / prior.value * 100
+		} else {
+			return out
+		}
 		out.Trend4w = &trend
 	}
 	return out

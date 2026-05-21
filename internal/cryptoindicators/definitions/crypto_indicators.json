@@ -102,14 +102,14 @@
       "bucket": "pal",
       "display_name": "Business cycle (CFNAI)",
       "unit": "index",
-      "scoring_fn": "level_and_trend",
-      "_note": "CFNAI is the Chicago Fed National Activity Index — same business-cycle pulse signal Pal uses ISM for. >0 = above-trend growth (analogous to ISM >50); <0 = below-trend; <-0.7 = recession likely. Free + automated via FRED (replaces manual ISM upload from v1.8.3).",
+      "scoring_fn": "linear",
+      "_note": "CFNAI is the Chicago Fed National Activity Index — same business-cycle pulse signal Pal uses ISM for. >0 = above-trend growth (analogous to ISM >50); <0 = below-trend; <-0.7 = recession likely. Scored on level only (linear interp) because the level *is* the signal — month-over-month change adds little. Trend column shown on card is absolute delta vs ~28d ago (not %).",
       "thresholds": [
-        {"level_min":  0.2, "trend_4w": "positive", "score":  1.0},
-        {"level_min":  0.0, "trend_4w": "positive", "score":  0.5},
-        {"level_min":  0.0, "trend_4w": "flat",     "score":  0.0},
-        {"level_max":  0.0, "trend_4w": "negative", "score": -0.5},
-        {"level_max": -0.7, "trend_4w": "negative", "score": -1.0}
+        {"value": -0.7, "score": -1.0},
+        {"value": -0.3, "score": -0.5},
+        {"value":  0.0, "score":  0.0},
+        {"value":  0.3, "score":  0.5},
+        {"value":  0.7, "score":  1.0}
       ]
     },
     {
