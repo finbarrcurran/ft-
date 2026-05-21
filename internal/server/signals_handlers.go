@@ -60,20 +60,37 @@ func (s *Server) handleAckSignal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// POST /api/signals/refresh-insiders — manual trigger for the daily ingest.
+// POST /api/signals/refresh-insiders — kicks off the ingest in the
+// background and returns immediately. Ingest takes 30-60s which exceeds
+// reverse-proxy gateway timeouts. Frontend polls /api/signals to see
+// new rows appear.
 func (s *Server) handleRefreshInsiders(w http.ResponseWriter, r *http.Request) {
 	if s.signals == nil {
 		writeError(w, http.StatusNotFound, "signals not initialised")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
-	defer cancel()
-	inserted, err := s.signals.IngestInsiders(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if !s.signals.TryStartInsiderIngest() {
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"started": false,
+			"running": true,
+			"message": "ingest already in progress",
+		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"inserted": inserted})
+	go func() {
+		defer s.signals.FinishInsiderIngest()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, err := s.signals.IngestInsiders(ctx); err != nil {
+			// IngestInsiders already logs the error via slog.
+			_ = err
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"started": true,
+		"running": true,
+		"message": "insider ingest started in background — refresh in 30-60s",
+	})
 }
 
 // GET /api/signals/universe — debug snapshot of current universe.

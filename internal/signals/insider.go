@@ -3,6 +3,7 @@ package signals
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -339,73 +340,74 @@ func (d *form4Document) actorRole() string {
 	return strings.Join(parts, " · ")
 }
 
-// fetchForm4XML tries the canonical form4.xml paths in order. The first
-// 200 response wins. SEC's standard naming is "form4.xml" or
-// "primary_doc.xml" within /Archives/edgar/data/{CIK}/{ACCNO-nodash}/
+// fetchForm4XML uses SEC's index.json endpoint to discover the actual
+// filing XML filename (it's filing-specific, e.g. "wk-form4_1779378422.xml"),
+// then fetches that XML directly. Two round-trips per filing — half what
+// the old "try primary_doc.xml then form4.xml then index.htm" path needed.
 func (c *secClient) fetchForm4XML(ctx context.Context, cik, accession string) (*form4Document, error) {
 	noDash := strings.ReplaceAll(accession, "-", "")
-	candidates := []string{
-		fmt.Sprintf("https://www.sec.gov/Archives/edgar/data/%s/%s/primary_doc.xml", cik, noDash),
-		fmt.Sprintf("https://www.sec.gov/Archives/edgar/data/%s/%s/form4.xml", cik, noDash),
-		fmt.Sprintf("https://www.sec.gov/Archives/edgar/data/%s/%s/%s-index.htm", cik, noDash, accession),
+	indexURL := fmt.Sprintf("https://www.sec.gov/Archives/edgar/data/%s/%s/index.json", cik, noDash)
+	body, err := c.do(ctx, indexURL)
+	if err != nil {
+		return nil, fmt.Errorf("index.json: %w", err)
 	}
-	var lastErr error
-	for i, url := range candidates {
-		body, err := c.do(ctx, url)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		// First two are XML; third is HTML for fallback parsing.
-		if i < 2 {
-			var doc form4Document
-			if err := decodeXML(body, &doc); err == nil && doc.Issuer.TradingSymbol != "" {
-				return &doc, nil
-			}
-			continue
-		}
-		// HTML fallback — extract the .xml file link from the index page.
-		xmlURL := extractXMLLinkFromIndex(string(body), cik, noDash)
-		if xmlURL == "" {
-			continue
-		}
-		xmlBody, err := c.do(ctx, xmlURL)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		var doc form4Document
-		if err := decodeXML(xmlBody, &doc); err == nil {
-			return &doc, nil
-		}
+	var idx secIndex
+	if err := json.Unmarshal(body, &idx); err != nil {
+		return nil, fmt.Errorf("parse index.json: %w", err)
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no parseable form4.xml found for %s", accession)
+	xmlName := idx.pickFormXMLName()
+	if xmlName == "" {
+		return nil, fmt.Errorf("no form4 .xml in index for %s", accession)
 	}
-	return nil, lastErr
+	xmlURL := fmt.Sprintf("https://www.sec.gov/Archives/edgar/data/%s/%s/%s", cik, noDash, xmlName)
+	xmlBody, err := c.do(ctx, xmlURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s: %w", xmlName, err)
+	}
+	var doc form4Document
+	if err := decodeXML(xmlBody, &doc); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", xmlName, err)
+	}
+	return &doc, nil
 }
 
-// extractXMLLinkFromIndex pulls the first .xml href from the filing's
-// index HTML page. SEC index pages list every document in the filing.
-var xmlHrefRe = regexp.MustCompile(`href="(/Archives/edgar/data/[^"]+\.xml)"`)
+// SEC's index.json shape — only the parts we care about.
+type secIndex struct {
+	Directory struct {
+		Items []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		} `json:"item"`
+	} `json:"directory"`
+}
 
-func extractXMLLinkFromIndex(html, cik, noDash string) string {
-	matches := xmlHrefRe.FindAllStringSubmatch(html, -1)
-	for _, m := range matches {
-		if len(m) >= 2 {
-			path := m[1]
-			// Prefer form4.xml / primary_doc.xml when present.
-			lower := strings.ToLower(path)
-			if strings.HasSuffix(lower, "/form4.xml") || strings.HasSuffix(lower, "/primary_doc.xml") {
-				return "https://www.sec.gov" + path
-			}
+// pickFormXMLName returns the most likely Form 4 XML file from an index.
+// Preference order:
+//  1. primary_doc.xml (some filers use this canonical name)
+//  2. *form4*.xml (e.g. wk-form4_NNN.xml, the common pattern)
+//  3. Any .xml NOT inside an xslF345X0X/ subdirectory (those are HTML
+//     stylesheets, not the structured filing).
+func (idx *secIndex) pickFormXMLName() string {
+	var anyXML string
+	for _, it := range idx.Directory.Items {
+		name := strings.ToLower(it.Name)
+		if !strings.HasSuffix(name, ".xml") {
+			continue
+		}
+		if strings.HasPrefix(name, "xslf345") || strings.Contains(name, "/xslf345") {
+			continue
+		}
+		if name == "primary_doc.xml" {
+			return it.Name
+		}
+		if strings.Contains(name, "form4") {
+			return it.Name
+		}
+		if anyXML == "" {
+			anyXML = it.Name
 		}
 	}
-	// Fall back to any .xml.
-	if len(matches) > 0 && len(matches[0]) >= 2 {
-		return "https://www.sec.gov" + matches[0][1]
-	}
-	return ""
+	return anyXML
 }
 
 // extractInsiderEvents turns a parsed form4.xml into 1+ InsiderEvent rows,

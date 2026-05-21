@@ -6210,11 +6210,26 @@ async function renderSignals() {
     const btn = ev.currentTarget;
     btn.disabled = true;
     const orig = btn.textContent;
-    btn.textContent = '⟳ Refreshing… (may take 60-90s)';
+    btn.textContent = '⟳ Started — polling for results…';
     try {
-      const res = await api('/api/signals/refresh-insiders', { method: 'POST' });
-      alert(`Inserted ${res.inserted} new signal${res.inserted === 1 ? '' : 's'}.`);
-      renderSignals();
+      // Server returns 202 immediately and runs ingest in background.
+      await api('/api/signals/refresh-insiders', { method: 'POST' });
+      // Poll the list every 10s for up to 2 min; re-render when rows arrive.
+      const baseline = (state.signalsRows || []).length;
+      for (let i = 0; i < 12; i++) {
+        await new Promise((r) => setTimeout(r, 10000));
+        try {
+          const data = await api(`/api/signals?range=${state.signalsRange || 30}`);
+          if ((data.signals || []).length !== baseline) {
+            await renderSignals();
+            return;
+          }
+        } catch { /* keep polling */ }
+        btn.textContent = `⟳ Still running… (${(i + 1) * 10}s)`;
+      }
+      btn.disabled = false;
+      btn.textContent = orig;
+      await renderSignals();
     } catch (err) {
       btn.disabled = false;
       btn.textContent = orig;

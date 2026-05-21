@@ -29,6 +29,36 @@ type Service struct {
 	uniMu     sync.RWMutex
 	uniCache  map[string]UniverseHit // ticker (uppercase) → hit
 	uniLoaded time.Time
+
+	ingestMu      sync.Mutex
+	ingestRunning bool
+}
+
+// TryStartInsiderIngest returns true if it claimed the ingest slot, false
+// if another ingest is already running. The caller is then responsible for
+// kicking off the goroutine and releasing the slot via FinishInsiderIngest.
+func (s *Service) TryStartInsiderIngest() bool {
+	s.ingestMu.Lock()
+	defer s.ingestMu.Unlock()
+	if s.ingestRunning {
+		return false
+	}
+	s.ingestRunning = true
+	return true
+}
+
+// FinishInsiderIngest releases the lock. Always pair with TryStartInsiderIngest.
+func (s *Service) FinishInsiderIngest() {
+	s.ingestMu.Lock()
+	s.ingestRunning = false
+	s.ingestMu.Unlock()
+}
+
+// InsiderIngestRunning reports whether a manual or cron ingest is in flight.
+func (s *Service) InsiderIngestRunning() bool {
+	s.ingestMu.Lock()
+	defer s.ingestMu.Unlock()
+	return s.ingestRunning
 }
 
 const uniTTL = 30 * time.Minute
