@@ -1,6 +1,7 @@
 package signals
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/net/html/charset"
 )
 
 // SEC EDGAR Form 4 ingestion per Spec 9k §D3.
@@ -219,8 +222,12 @@ func (c *secClient) fetchAtomFeed(ctx context.Context) (*atomFeed, error) {
 	if err != nil {
 		return nil, err
 	}
+	// SEC ATOM feeds declare encoding="ISO-8859-1" — provide a charset
+	// reader so the stdlib decoder doesn't bail.
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	dec.CharsetReader = charset.NewReaderLabel
 	var feed atomFeed
-	if err := xml.Unmarshal(body, &feed); err != nil {
+	if err := dec.Decode(&feed); err != nil {
 		return nil, fmt.Errorf("parse atom: %w", err)
 	}
 	return &feed, nil
@@ -352,7 +359,7 @@ func (c *secClient) fetchForm4XML(ctx context.Context, cik, accession string) (*
 		// First two are XML; third is HTML for fallback parsing.
 		if i < 2 {
 			var doc form4Document
-			if err := xml.Unmarshal(body, &doc); err == nil && doc.Issuer.TradingSymbol != "" {
+			if err := decodeXML(body, &doc); err == nil && doc.Issuer.TradingSymbol != "" {
 				return &doc, nil
 			}
 			continue
@@ -368,7 +375,7 @@ func (c *secClient) fetchForm4XML(ctx context.Context, cik, accession string) (*
 			continue
 		}
 		var doc form4Document
-		if err := xml.Unmarshal(xmlBody, &doc); err == nil {
+		if err := decodeXML(xmlBody, &doc); err == nil {
 			return &doc, nil
 		}
 	}
@@ -450,6 +457,14 @@ func normaliseDate(s string) string {
 	}
 	// Default to today if unparseable.
 	return time.Now().UTC().Format("2006-01-02")
+}
+
+// decodeXML wraps xml.Unmarshal with a charset-aware decoder so
+// ISO-8859-1 (and other non-UTF-8 declared) payloads from SEC parse cleanly.
+func decodeXML(body []byte, v any) error {
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	dec.CharsetReader = charset.NewReaderLabel
+	return dec.Decode(v)
 }
 
 // ----- helpers -----------------------------------------------------------
