@@ -46,17 +46,26 @@ const (
 //
 // Errors per filing are logged but don't abort the batch.
 func (s *Service) IngestInsiders(ctx context.Context) (inserted int, retErr error) {
+	t0 := time.Now()
+	slog.Info("signals: insider ingest started")
 	client := &secClient{HTTP: &http.Client{Timeout: 30 * time.Second}}
 	feed, err := client.fetchAtomFeed(ctx)
 	if err != nil {
+		slog.Error("signals: ATOM fetch failed", "err", err)
 		return 0, fmt.Errorf("fetch ATOM feed: %w", err)
 	}
+	slog.Info("signals: ATOM feed parsed", "entries", len(feed.Entries))
 	if len(feed.Entries) == 0 {
-		slog.Info("signals: ATOM feed empty")
 		return 0, nil
 	}
 
 	thresholds := DefaultThresholds()
+	defer func() {
+		slog.Info("signals: insider ingest finished",
+			"entries", len(feed.Entries),
+			"inserted", inserted,
+			"took", time.Since(t0).Round(time.Millisecond))
+	}()
 
 	for _, entry := range feed.Entries {
 		select {
@@ -65,6 +74,11 @@ func (s *Service) IngestInsiders(ctx context.Context) (inserted int, retErr erro
 		default:
 		}
 
+		// EDGAR's type=4 filter is loose — entries of other form types
+		// (497J, 4/A, etc.) sometimes leak through. Hard-filter here.
+		if entry.Category.Term != "" && entry.Category.Term != "4" {
+			continue
+		}
 		accession, cik, ok := parseAccessionAndCIK(entry.Link.Href, entry.ID)
 		if !ok {
 			continue
@@ -133,14 +147,18 @@ type atomFeed struct {
 	Entries []atomEntry `xml:"entry"`
 }
 type atomEntry struct {
-	Title   string   `xml:"title"`
-	Link    atomLink `xml:"link"`
-	ID      string   `xml:"id"`
-	Updated string   `xml:"updated"`
+	Title    string       `xml:"title"`
+	Link     atomLink     `xml:"link"`
+	ID       string       `xml:"id"`
+	Updated  string       `xml:"updated"`
+	Category atomCategory `xml:"category"`
 }
 type atomLink struct {
 	Href string `xml:"href,attr"`
 	Rel  string `xml:"rel,attr"`
+}
+type atomCategory struct {
+	Term string `xml:"term,attr"`
 }
 
 type secClient struct {
@@ -166,7 +184,8 @@ func (c *secClient) do(ctx context.Context, url string) ([]byte, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", secUserAgent)
-	req.Header.Set("Accept-Encoding", "gzip, deflate")
+	// NOTE: do NOT set Accept-Encoding manually — Go's net/http
+	// auto-decompresses gzip ONLY when the caller hasn't touched the header.
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
