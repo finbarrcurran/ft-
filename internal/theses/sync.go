@@ -131,11 +131,33 @@ func (e *Engine) Sync(ctx context.Context) error {
 	if err := e.purgeMissing(ctx, seen); err != nil {
 		slog.Error("theses: purge", "err", err)
 	}
+	// Stamp lower-version rows as superseded when a higher version exists
+	// for the same ticker. Runs after upserts so the parser-supplied
+	// status='locked' on the older file gets overwritten each sync.
+	if err := e.markSuperseded(ctx); err != nil {
+		slog.Error("theses: mark superseded", "err", err)
+	}
 	// Recompute earnings urgency for every row (cheap — handful of rows).
 	if err := e.refreshEarningsUrgency(ctx); err != nil {
 		slog.Error("theses: refresh earnings", "err", err)
 	}
 	return nil
+}
+
+// markSuperseded sets status='superseded' on any row where a higher-version
+// row exists for the same ticker. The newest version per ticker keeps
+// whatever status its MD declares (typically 'locked').
+func (e *Engine) markSuperseded(ctx context.Context) error {
+	_, err := e.DB.ExecContext(ctx, `
+		UPDATE theses_index
+		   SET status = 'superseded'
+		 WHERE status != 'superseded'
+		   AND EXISTS (
+		         SELECT 1 FROM theses_index t2
+		          WHERE t2.ticker = theses_index.ticker
+		            AND t2.version > theses_index.version
+		       )`)
+	return err
 }
 
 func (e *Engine) gitFetchReset(ctx context.Context) error {
@@ -248,9 +270,9 @@ func (e *Engine) refreshEarningsUrgency(ctx context.Context) error {
 	}
 	defer rows.Close()
 	type up struct {
-		id        int64
-		earnings  string
-		urgency   string
+		id       int64
+		earnings string
+		urgency  string
 	}
 	var updates []up
 	for rows.Next() {

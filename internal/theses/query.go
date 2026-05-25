@@ -68,10 +68,11 @@ func (e *Engine) List(ctx context.Context, adapter string) ([]Row, error) {
 		           THEN 'watchlist'
 		         ELSE 'other'
 		       END AS ownership
-		  FROM theses_index t`
+		  FROM theses_index t
+		 WHERE t.status != 'superseded'`
 	args := []any{}
 	if adapter != "" {
-		q += ` WHERE t.adapter = ?`
+		q += ` AND t.adapter = ?`
 		args = append(args, adapter)
 	}
 	q += `
