@@ -77,33 +77,37 @@ var (
 // canonical adapter names — folder slugs used in theses/<adapter>/.
 // Keep in sync with the directory list in cross_sector_research/theses/.
 var adapterAliases = map[string]string{
-	"pharma":                "pharma",
-	"ai-infra/semi":         "ai_infra_semi",
-	"ai-infra":              "ai_infra_semi",
-	"ai infra/semi":         "ai_infra_semi",
-	"ai infra semi":         "ai_infra_semi",
-	"hydrocarbons":                 "hydrocarbons",
-	"energy-power":                 "energy_power",
-	"energy power":                 "energy_power",
-	"energy-power infrastructure":  "energy_power",
-	"energy power infrastructure":  "energy_power",
-	"power-infrastructure":         "energy_power",
-	"power infrastructure":         "energy_power",
-	"defense":               "defense",
-	"mining-metals":         "mining_metals",
-	"mining & metals":       "mining_metals",
-	"mining and metals":     "mining_metals",
-	"industrial-electrical": "industrial_electrical",
-	"industrial electrical": "industrial_electrical",
-	"cloud-infra":           "cloud_infra",
-	"cloud infra":           "cloud_infra",
+	"pharma":                      "pharma",
+	"ai-infra/semi":               "ai_infra_semi",
+	"ai-infra":                    "ai_infra_semi",
+	"ai infra/semi":               "ai_infra_semi",
+	"ai infra semi":               "ai_infra_semi",
+	"hydrocarbons":                "hydrocarbons",
+	"energy-power":                "energy_power",
+	"energy power":                "energy_power",
+	"energy-power infrastructure": "energy_power",
+	"energy power infrastructure": "energy_power",
+	"power-infrastructure":        "energy_power",
+	"power infrastructure":        "energy_power",
+	"defense":                     "defense",
+	"mining-metals":               "mining_metals",
+	"mining & metals":             "mining_metals",
+	"mining and metals":           "mining_metals",
+	"industrial-electrical":       "industrial_electrical",
+	"industrial electrical":       "industrial_electrical",
+	"cloud-infra":                 "cloud_infra",
+	"cloud infra":                 "cloud_infra",
+	"ai-frontier-tech":            "ai_frontier_tech",
+	"ai frontier tech":            "ai_frontier_tech",
+	"frontier-tech":               "ai_frontier_tech",
+	"frontier tech":               "ai_frontier_tech",
 	// Spec 9i — 4-pillar Asset-Hedge framework (GLD, SLV, IAU, future
 	// commodity hedge ETFs). Header line uses `Framework:` not `Adapter:`.
-	"asset-hedge":            "asset_hedge",
-	"asset hedge":            "asset_hedge",
-	"asset-hedge scorecard":  "asset_hedge",
-	"asset hedge scorecard":  "asset_hedge",
-	"hedge":                  "asset_hedge",
+	"asset-hedge":           "asset_hedge",
+	"asset hedge":           "asset_hedge",
+	"asset-hedge scorecard": "asset_hedge",
+	"asset hedge scorecard": "asset_hedge",
+	"hedge":                 "asset_hedge",
 }
 
 // NormaliseAdapter maps a free-form adapter name from the MD header to one
@@ -135,7 +139,10 @@ func NormaliseAdapter(raw string) string {
 		canonical string
 	}{
 		{[]string{"industrial", "electrical"}, "industrial_electrical"},
-		{[]string{"semi"}, "ai_infra_semi"},     // catches "Semiconductor", "AI-Semi", etc.
+		{[]string{"frontier"}, "ai_frontier_tech"}, // AI-Frontier-Tech (RGTI quantum-pre-commercial, IonQ, etc.)
+		{[]string{"quantum"}, "ai_frontier_tech"},
+		{[]string{"fusion"}, "ai_frontier_tech"},
+		{[]string{"semi"}, "ai_infra_semi"}, // catches "Semiconductor", "AI-Semi", etc.
 		{[]string{"semiconductor"}, "ai_infra_semi"},
 		{[]string{"pharma"}, "pharma"},
 		{[]string{"defense"}, "defense"},
