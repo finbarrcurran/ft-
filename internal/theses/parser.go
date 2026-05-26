@@ -52,10 +52,16 @@ var (
 	// "> **Primary Adapter:** Energy-Power Infrastructure (`gen-disp` sub-type)"
 	//   ↑ multi-segment names use the "Primary Adapter:" form per the
 	//   doctrine note established 2026-05-18 via RR.L.
+	// Separate from reFramework so that operating-stock theses which include
+	// BOTH a `Framework:` header (declaring 8-Q Operating Stock) AND an
+	// `Adapter:` line (carrying the slug) prefer the Adapter row.
+	reAdapter = regexp.MustCompile(`(?m)^>\s*\*\*(?:Primary\s+)?Adapter:\*\*\s+([A-Za-z0-9\-\/\s&]+?)(?:\s*\(|$)`)
+
 	// "> **Framework:** Asset-Hedge Scorecard (4-pillar /8)"
 	//   ↑ asset-hedge theses (GLD, SLV, etc.) use Framework: not Adapter:
 	//   per the Spec 9i three-framework architecture (2026-05-18 via GLD).
-	reAdapter = regexp.MustCompile(`(?m)^>\s*\*\*(?:Primary\s+)?(?:Adapter|Framework):\*\*\s+([A-Za-z0-9\-\/\s&]+?)(?:\s*\(|$)`)
+	// Used as a fallback only when no Adapter: line is present.
+	reFramework = regexp.MustCompile(`(?m)^>\s*\*\*Framework:\*\*\s+([A-Za-z0-9\-\/\s&]+?)(?:\s*\(|$)`)
 
 	// "> **Instrument Type:** Physical-gold-backed ETF — price-tracking ..."
 	//   For asset-hedge theses without a backtick sub-type on the
@@ -77,30 +83,33 @@ var (
 // canonical adapter names — folder slugs used in theses/<adapter>/.
 // Keep in sync with the directory list in cross_sector_research/theses/.
 var adapterAliases = map[string]string{
-	"pharma":                      "pharma",
-	"ai-infra/semi":               "ai_infra_semi",
-	"ai-infra":                    "ai_infra_semi",
-	"ai infra/semi":               "ai_infra_semi",
-	"ai infra semi":               "ai_infra_semi",
-	"hydrocarbons":                "hydrocarbons",
-	"energy-power":                "energy_power",
-	"energy power":                "energy_power",
-	"energy-power infrastructure": "energy_power",
-	"energy power infrastructure": "energy_power",
-	"power-infrastructure":        "energy_power",
-	"power infrastructure":        "energy_power",
-	"defense":                     "defense",
-	"mining-metals":               "mining_metals",
-	"mining & metals":             "mining_metals",
-	"mining and metals":           "mining_metals",
-	"industrial-electrical":       "industrial_electrical",
-	"industrial electrical":       "industrial_electrical",
-	"cloud-infra":                 "cloud_infra",
-	"cloud infra":                 "cloud_infra",
-	"ai-frontier-tech":            "ai_frontier_tech",
-	"ai frontier tech":            "ai_frontier_tech",
-	"frontier-tech":               "ai_frontier_tech",
-	"frontier tech":               "ai_frontier_tech",
+	"pharma":                             "pharma",
+	"ai-infra/semi":                      "ai_infra_semi",
+	"ai-infra":                           "ai_infra_semi",
+	"ai infra/semi":                      "ai_infra_semi",
+	"ai infra semi":                      "ai_infra_semi",
+	"hydrocarbons":                       "hydrocarbons",
+	"energy-power":                       "energy_power",
+	"energy power":                       "energy_power",
+	"energy-power infrastructure":        "energy_power",
+	"energy power infrastructure":        "energy_power",
+	"power-infrastructure":               "energy_power",
+	"power infrastructure":               "energy_power",
+	"defense":                            "defense",
+	"mining-metals":                      "mining_metals",
+	"mining & metals":                    "mining_metals",
+	"mining and metals":                  "mining_metals",
+	"industrial-electrical":              "industrial_electrical",
+	"industrial electrical":              "industrial_electrical",
+	"industrial-electrical-equipment":    "industrial_electrical_equipment",
+	"industrial electrical equipment":    "industrial_electrical_equipment",
+	"industrial electrical equipment v1": "industrial_electrical_equipment",
+	"cloud-infra":                        "cloud_infra",
+	"cloud infra":                        "cloud_infra",
+	"ai-frontier-tech":                   "ai_frontier_tech",
+	"ai frontier tech":                   "ai_frontier_tech",
+	"frontier-tech":                      "ai_frontier_tech",
+	"frontier tech":                      "ai_frontier_tech",
 	// Spec 9i — 4-pillar Asset-Hedge framework (GLD, SLV, IAU, future
 	// commodity hedge ETFs). Header line uses `Framework:` not `Adapter:`.
 	"asset-hedge":           "asset_hedge",
@@ -138,6 +147,7 @@ func NormaliseAdapter(raw string) string {
 		needles   []string // ALL must appear in k for the route to fire
 		canonical string
 	}{
+		{[]string{"industrial", "electrical", "equipment"}, "industrial_electrical_equipment"}, // MUST come before the contractor route
 		{[]string{"industrial", "electrical"}, "industrial_electrical"},
 		{[]string{"frontier"}, "ai_frontier_tech"}, // AI-Frontier-Tech (RGTI quantum-pre-commercial, IonQ, etc.)
 		{[]string{"quantum"}, "ai_frontier_tech"},
@@ -197,6 +207,11 @@ func ParseHeader(md string) Header {
 
 	if m := reAdapter.FindStringSubmatch(md); len(m) == 2 {
 		h.Adapter = NormaliseAdapter(m[1])
+	}
+	if h.Adapter == "" {
+		if m := reFramework.FindStringSubmatch(md); len(m) == 2 {
+			h.Adapter = NormaliseAdapter(m[1])
+		}
 	}
 	// Look for sub-type on the adapter line (greedy match the full adapter line first).
 	// Try Adapter: first, then Framework: (asset-hedge theses).
