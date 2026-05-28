@@ -19,9 +19,11 @@ package signals
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -60,6 +62,101 @@ type senateTxn struct {
 	PtrLink          string `json:"ptr_link"`
 }
 
+// capitolTradesCachePath is the Playwright-scraped JSON cache produced
+// by /home/curran/scripts/capitol-trades-fetch.js. v1.21B fallback for
+// the dead Stock Watcher S3 buckets.
+const capitolTradesCachePath = "/var/lib/ft/data/capitol-trades/trades.json"
+
+// capitolTrade mirrors the JSON shape capitol-trades-fetch.js writes.
+type capitolTrade struct {
+	TradeDate      string `json:"tradeDate"`
+	DisclosureDate string `json:"disclosureDate"`
+	Politician     string `json:"politician"`
+	Party          string `json:"party"`
+	Chamber        string `json:"chamber"`
+	State          string `json:"state"`
+	Ticker         string `json:"ticker"`
+	Type           string `json:"type"`
+	Amount         string `json:"amount"`
+	AssetName      string `json:"assetName"`
+	SourceURL      string `json:"sourceUrl"`
+}
+
+type capitolTradesFile struct {
+	FetchedAt  string         `json:"fetchedAt"`
+	Source     string         `json:"source"`
+	TradeCount int            `json:"tradeCount"`
+	Trades     []capitolTrade `json:"trades"`
+}
+
+// IngestCongressFromCapitolTradesFile reads the Playwright cache and
+// adapts each row to the existing houseTxn / senateTxn shape so the
+// established ingestCongressBatch path picks them up. Returns inserted
+// count. v1.21B.
+func (s *Service) IngestCongressFromCapitolTradesFile(ctx context.Context) (int, error) {
+	raw, err := os.ReadFile(capitolTradesCachePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var f capitolTradesFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return 0, fmt.Errorf("parse capitol-trades json: %w", err)
+	}
+	if len(f.Trades) == 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().UTC().Add(-swLookback)
+
+	// Split into House + Senate batches so legislator chamber match works.
+	houseRows := make([]houseTxn, 0)
+	senateRows := make([]houseTxn, 0) // re-using houseTxn shape; chamber arg controls source label
+	for _, t := range f.Trades {
+		row := houseTxn{
+			TransactionID:    t.SourceURL,
+			DisclosureDate:   t.DisclosureDate,
+			TransactionDate:  t.TradeDate,
+			Owner:            "",
+			Ticker:           t.Ticker,
+			AssetDescription: t.AssetName,
+			Type:             capitolTypeToCongressType(t.Type),
+			Amount:           t.Amount,
+			Representative:   t.Politician,
+			District:         t.State,
+			PtrLink:          t.SourceURL,
+		}
+		if t.Chamber == "senate" {
+			senateRows = append(senateRows, row)
+		} else {
+			houseRows = append(houseRows, row)
+		}
+	}
+	inserted := 0
+	if len(houseRows) > 0 {
+		inserted += s.ingestCongressBatch(ctx, houseRows, "house", cutoff)
+	}
+	if len(senateRows) > 0 {
+		inserted += s.ingestCongressBatch(ctx, senateRows, "senate", cutoff)
+	}
+	return inserted, nil
+}
+
+// capitolTypeToCongressType maps capitol-trades' "BUY"/"SELL"/"EXCH" to
+// the strings the existing congress ingest's mapCongressAction recognises.
+func capitolTypeToCongressType(t string) string {
+	switch strings.ToUpper(strings.TrimSpace(t)) {
+	case "BUY":
+		return "Purchase"
+	case "SELL":
+		return "Sale (Partial)"
+	case "EXCH":
+		return "Exchange"
+	}
+	return ""
+}
+
 // IngestCongress pulls both feeds, filters + tiers, and inserts.
 func (s *Service) IngestCongress(ctx context.Context) (inserted int, retErr error) {
 	t0 := time.Now()
@@ -69,13 +166,23 @@ func (s *Service) IngestCongress(ctx context.Context) (inserted int, retErr erro
 			"inserted", inserted, "took", time.Since(t0).Round(time.Millisecond))
 	}()
 
+	// v1.21B — Playwright cache first (the dead S3 fallbacks remain for
+	// historical compatibility but always fail now). Cache is written by
+	// /etc/cron.d/ft-capitol-trades 5 min before this ingest.
+	if n, err := s.IngestCongressFromCapitolTradesFile(ctx); err != nil {
+		slog.Warn("signals: capitol-trades file ingest", "err", err)
+	} else {
+		inserted += n
+		slog.Info("signals: capitol-trades file ingest", "inserted", n)
+	}
+
 	client := &http.Client{Timeout: 120 * time.Second}
 	cutoff := time.Now().UTC().Add(-swLookback)
 
 	// House.
 	var houseRows []houseTxn
 	if err := getJSON(ctx, client, houseSWURL, &houseRows); err != nil {
-		slog.Warn("signals: house ingest fetch", "err", err)
+		slog.Warn("signals: house ingest fetch (expected — S3 dead)", "err", err)
 	} else {
 		n := s.ingestCongressBatch(ctx, houseRows, "house", cutoff)
 		inserted += n
@@ -142,7 +249,12 @@ func (s *Service) ingestCongressBatch(ctx context.Context, rows []houseTxn, cham
 		}
 
 		amountMid, amountBucket := parseCongressAmount(r.Amount)
-		if amountMid < 15_000 {
+		// v1.21B — lowered floor from $15K to $1K (STOCK Act disclosure
+		// minimum). Sub-$15K trades land as INFO tier; the Tier system
+		// already gates promotion to FLAG/ALARM by amount + universe +
+		// committee membership, so this just brings in the long-tail
+		// of small disclosed trades the user can still find useful.
+		if amountMid < 1_000 {
 			continue
 		}
 
@@ -265,19 +377,46 @@ func parseCongressAmount(s string) (mid float64, bucket string) {
 }
 
 func parseDollarRange(s string) (low, high float64) {
-	// Strip "$" and ","
+	// v1.21B — also accept capitol-trades' compact format ("1K–15K",
+	// "100K–250K", "1M–5M", "5M+", with en-dash "–"). The old Stock
+	// Watcher format ("$15,001 - $50,000") still works after the
+	// $/comma/space strip below.
 	clean := strings.NewReplacer("$", "", ",", "", "+", "").Replace(s)
+	// Normalise dash characters: en-dash, em-dash → hyphen
+	clean = strings.NewReplacer("–", "-", "—", "-").Replace(clean)
 	parts := strings.Split(clean, "-")
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
-	if len(parts) >= 1 {
-		fmt.Sscanf(parts[0], "%f", &low)
-	}
+	low = parseAmountToken(parts[0])
 	if len(parts) >= 2 {
-		fmt.Sscanf(parts[1], "%f", &high)
+		high = parseAmountToken(parts[1])
 	}
 	return low, high
+}
+
+// parseAmountToken converts "1K", "100K", "1.5M", "1500000" → float64.
+// v1.21B.
+func parseAmountToken(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	mult := 1.0
+	last := s[len(s)-1]
+	if last == 'K' || last == 'k' {
+		mult = 1_000
+		s = s[:len(s)-1]
+	} else if last == 'M' || last == 'm' {
+		mult = 1_000_000
+		s = s[:len(s)-1]
+	} else if last == 'B' || last == 'b' {
+		mult = 1_000_000_000
+		s = s[:len(s)-1]
+	}
+	var v float64
+	fmt.Sscanf(strings.TrimSpace(s), "%f", &v)
+	return v * mult
 }
 
 func condenseBucket(s string) string {
