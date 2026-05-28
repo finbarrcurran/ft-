@@ -109,6 +109,35 @@ func (s *Server) handleSignalsUniverse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snap)
 }
 
+// POST /api/signals/upload-oge — JSON upload of an OGE Form 278e filing.
+// Body shape: signals.OGEUploadPayload. v1.21C.
+//
+// Each disclosed position becomes one signal_event row with
+// signal_type='oge'. Idempotent — re-uploading the same filer + filing
+// date + ticker overwrites rather than duplicates.
+func (s *Server) handleUploadOGE(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	var p signals.OGEUploadPayload
+	if !decodeJSON(r, w, &p) {
+		return
+	}
+	inserted, err := s.signals.IngestOGE(r.Context(), &p)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"inserted":   inserted,
+		"positions":  len(p.Positions),
+		"filer":      p.Filer,
+		"filingDate": p.FilingDate,
+	})
+}
+
 // POST /api/signals/refresh-congress — background ingest, returns 202.
 func (s *Server) handleRefreshCongress(w http.ResponseWriter, r *http.Request) {
 	if s.signals == nil {

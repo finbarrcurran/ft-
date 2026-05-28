@@ -221,6 +221,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/signals/{id}/ack", s.requireUser(s.handleAckSignal))
 	s.mux.HandleFunc("POST /api/signals/refresh-insiders", s.requireUser(s.handleRefreshInsiders))
 	s.mux.HandleFunc("POST /api/signals/refresh-congress", s.requireUser(s.handleRefreshCongress))
+	// v1.21C — OGE Form 278e manual upload.
+	s.mux.HandleFunc("POST /api/signals/upload-oge", s.requireUser(s.handleUploadOGE))
 	s.mux.HandleFunc("POST /api/signals/refresh-eo", s.requireUser(s.handleRefreshEO))
 	s.mux.HandleFunc("POST /api/signals/refresh-committees", s.requireUser(s.handleRefreshCommittees))
 	s.mux.HandleFunc("GET /api/signals/universe", s.requireUser(s.handleSignalsUniverse))
