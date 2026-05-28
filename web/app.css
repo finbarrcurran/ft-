@@ -3361,3 +3361,83 @@ input.autofilled, select.autofilled {
   padding: 0.3rem 0.2rem 0;
   font-size: 0.78rem;
 }
+
+/* === v1.15 F&G dial gauge + heatmap strip + BTC band label === */
+
+/* F&G card layout */
+.ci-card-fg { min-width: 280px; }
+.ci-card-fg-body {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 0.6rem;
+  align-items: center;
+}
+.ci-card-fg-meta { display: flex; flex-direction: column; gap: 0.4rem; }
+.ci-fg-gauge { display: block; }
+
+/* BTC chart band classification badge */
+.ci-chart-band {
+  margin-left: auto;
+  margin-right: 0.6rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(136,136,136,0.18);
+}
+.ci-chart-band.gain { background: rgba(31,110,46,0.28);  color: #6bd47c; }
+.ci-chart-band.loss { background: rgba(207,58,58,0.28);  color: #ee8a8a; }
+.ci-chart-band.dim  { background: rgba(216,132,58,0.22); color: #e6a868; }
+
+/* Heatmap strip */
+.ci-heatmap-wrap {
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.8rem;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+}
+.ci-heatmap-head { font-size: 0.78rem; margin-bottom: 0.3rem; }
+.ci-heatmap {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.ci-hm-group {
+  display: flex;
+  gap: 0.2rem;
+  padding: 0.15rem;
+  background: rgba(255,255,255,0.02);
+  border-radius: 4px;
+}
+.ci-hm-cell {
+  min-width: 76px;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  cursor: default;
+  transition: transform 0.1s ease;
+}
+.ci-hm-cell:hover { transform: translateY(-1px); }
+.ci-hm-label {
+  font-size: 0.7rem;
+  text-transform: capitalize;
+  color: rgba(255,255,255,0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+.ci-hm-val {
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ci-hm-strong-pos { background: rgba(31,110,46,0.55);  color: #cdf3d5; }
+.ci-hm-pos        { background: rgba(61,138,77,0.40);  color: #d2efd9; }
+.ci-hm-neutral    { background: rgba(136,136,136,0.28); color: #d9d9d9; }
+.ci-hm-neg        { background: rgba(216,132,58,0.45); color: #fbe1c5; }
+.ci-hm-strong-neg { background: rgba(207,58,58,0.55);  color: #fbd5d5; }
+.ci-hm-empty      { background: rgba(60,60,60,0.30);   color: #888;    opacity: 0.7; }

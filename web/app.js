@@ -6092,13 +6092,17 @@ function renderCIGauge(score, actionBand) {
   </svg>`;
 }
 
-// renderCIBTCChart returns an inline SVG line chart of BTC daily closes
-// on a log-y scale, with a 200-week MA overlay if enough data exists.
-// history is the array of {date, closeUsd} objects from
-// /api/crypto-indicators/btc-history.
+// renderCIBTCChart — multi-indicator BTC visualisation. v1.15 upgrades
+// the original price-line chart to:
+//   • Background shading for the 3 Cowen log-bands (lower / mid / upper)
+//     computed from a log-linear regression on the full history
+//   • True 200-week MA (1400-day) overlay where data permits
+//   • BTC price line on top
+// history is the array of {date, closeUsd} from
+// /api/crypto-indicators/btc-history (typically ~730 days).
 function renderCIBTCChart(history) {
   const w = 720;
-  const h = 200;
+  const h = 220;
   const padL = 50;
   const padR = 12;
   const padT = 8;
@@ -6115,14 +6119,101 @@ function renderCIBTCChart(history) {
   const stepX = plotW / (history.length - 1);
   const yFor = (close) => padT + plotH - ((Math.log10(close) - logMin) / logRange) * plotH;
   const xFor = (i) => padL + i * stepX;
+
+  // ----- Log-linear regression for Cowen band shading ----------------
+  // Treat day 1 = the earliest sample. Fit log10(close) = a + b*log10(day).
+  // Then compute residual quintiles to map current price into a 5-band
+  // classification (we shade as 3 zones: lower / mid / upper for clarity).
+  let bandSegments = '';
+  let bandMidLogClose = null;
+  let bandLowerLogClose = null;
+  let bandUpperLogClose = null;
+  if (history.length >= 100) {
+    let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0, n = 0;
+    for (let i = 0; i < history.length; i++) {
+      const c = history[i].closeUsd;
+      if (c <= 0) continue;
+      const x = Math.log10(i + 1);
+      const y = Math.log10(c);
+      sumX += x; sumY += y; sumXX += x * x; sumXY += x * y;
+      n++;
+    }
+    if (n > 30) {
+      const meanX = sumX / n;
+      const meanY = sumY / n;
+      const denom = sumXX - n * meanX * meanX;
+      if (denom !== 0) {
+        const slope = (sumXY - n * meanX * meanY) / denom;
+        const intercept = meanY - slope * meanX;
+        const residuals = [];
+        for (let i = 0; i < history.length; i++) {
+          const c = history[i].closeUsd;
+          if (c <= 0) continue;
+          residuals.push(Math.log10(c) - (intercept + slope * Math.log10(i + 1)));
+        }
+        residuals.sort((a, b) => a - b);
+        const q = (p) => residuals[Math.max(0, Math.min(residuals.length - 1, Math.floor(p * (residuals.length - 1))))];
+        const qLower = q(0.20);
+        const qUpper = q(0.80);
+        // Compute the actual log-close for each band boundary at every
+        // x-position so the shading follows the trend slope (not flat).
+        const lowerPath = [];
+        const midPath  = [];
+        for (let i = 0; i < history.length; i++) {
+          const predLog = intercept + slope * Math.log10(i + 1);
+          const lowerY  = yFor(Math.pow(10, predLog + qLower));
+          const upperY  = yFor(Math.pow(10, predLog + qUpper));
+          lowerPath.push(`${i === 0 ? 'M' : 'L'}${xFor(i).toFixed(1)},${lowerY.toFixed(1)}`);
+          midPath.push(`${i === 0 ? 'M' : 'L'}${xFor(i).toFixed(1)},${upperY.toFixed(1)}`);
+        }
+        // Build 3 polygons:
+        //   green band (lower)  — from chart top of lower line down to chart bottom
+        //   yellow band (mid)   — between lower and upper
+        //   red band (upper)    — from chart top down to upper line
+        const top = padT;
+        const bot = padT + plotH;
+        const closePath = (linePath, baseY) => {
+          // Close a line path into a polygon by going right→left at baseY.
+          const rightX = xFor(history.length - 1);
+          const leftX = xFor(0);
+          return `${linePath.join(' ')} L${rightX.toFixed(1)},${baseY} L${leftX.toFixed(1)},${baseY} Z`;
+        };
+        // Red zone: above upper line (chart top → upper). midPath holds upper.
+        const redPath = `M${xFor(0).toFixed(1)},${top} L${xFor(history.length - 1).toFixed(1)},${top} ` +
+          midPath.slice().reverse().join(' ').replace(/M/g, 'L').replace(/^L/, ' ') + ' Z';
+        // Yellow zone: between upper and lower.
+        const yellowPath = midPath.join(' ') + ' ' +
+          lowerPath.slice().reverse().join(' ').replace(/M/g, 'L') + ' Z';
+        // Green zone: below lower line (lower → chart bottom).
+        const greenPath = closePath(lowerPath, bot);
+        bandSegments = `
+          <path d="${redPath}"    fill="#cf3a3a" opacity="0.10" />
+          <path d="${yellowPath}" fill="#d8843a" opacity="0.08" />
+          <path d="${greenPath}"  fill="#3d8a4d" opacity="0.10" />
+        `;
+        // For the chart-head label, classify the latest close.
+        const latestI = history.length - 1;
+        const predLogLatest = intercept + slope * Math.log10(latestI + 1);
+        const latestResidual = Math.log10(history[latestI].closeUsd) - predLogLatest;
+        bandLowerLogClose = latestResidual <= qLower;
+        bandUpperLogClose = latestResidual >= qUpper;
+        bandMidLogClose = !bandLowerLogClose && !bandUpperLogClose;
+      }
+    }
+  }
+  const bandLabel = bandLowerLogClose ? 'Lower band' : bandUpperLogClose ? 'Upper band' : bandMidLogClose ? 'Mid band' : '';
+  const bandClass = bandLowerLogClose ? 'gain' : bandUpperLogClose ? 'loss' : 'dim';
+
+  // ----- Price line --------------------------------------------------
   const path = history
     .map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(i).toFixed(1)},${yFor(p.closeUsd).toFixed(1)}`)
     .join(' ');
 
-  // Compute a simple 50-bar moving average overlay (visually clean at
-  // 2-year zoom) — proxy for trend without needing 200-week data here.
+  // ----- 200-week MA (1400-day SMA) when we have ≥1400 daily samples;
+  // otherwise fall back to 50-bar MA so the chart never looks empty.
+  const maWindow = history.length >= 1400 ? 1400 : 50;
+  const maLabel = maWindow === 1400 ? '200-week MA' : '50-bar MA';
   const maPath = [];
-  const maWindow = 50;
   for (let i = 0; i < history.length; i++) {
     if (i < maWindow - 1) continue;
     let sum = 0;
@@ -6155,15 +6246,121 @@ function renderCIBTCChart(history) {
   return `<div class="ci-chart-wrap">
     <div class="ci-chart-head">
       <strong>BTC-USD</strong>
-      <span class="dim">log-scale · 50-bar MA overlay · ${history.length} days</span>
+      <span class="dim">log-scale · Cowen band shading · ${maLabel} · ${history.length} days</span>
+      ${bandLabel ? `<span class="ci-chart-band ${bandClass}">${bandLabel}</span>` : ''}
       <span class="ci-chart-latest">$${latestClose >= 1000 ? (latestClose / 1000).toFixed(1) + 'k' : latestClose.toFixed(0)}</span>
     </div>
-    <svg class="ci-chart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="BTC price log chart">
+    <svg class="ci-chart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="BTC price log chart with Cowen band shading">
+      ${bandSegments}
       ${yLabels}
       ${xLabels}
+      ${maPath.length ? `<path d="${maPath.join(' ')}" fill="none" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.7" />` : ''}
       <path d="${path}" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-linejoin="round" />
-      ${maPath.length ? `<path d="${maPath.join(' ')}" fill="none" stroke="#3d8a4d" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.7" />` : ''}
     </svg>
+  </div>`;
+}
+
+// renderCIFearGreedGauge — half-circle dial for the 0-100 Crypto Fear &
+// Greed reading. v1.15 replaces the plain text card in the sentiment
+// bucket. Colour zones: red (0-25 Extreme Fear), orange (25-45 Fear),
+// yellow (45-55 Neutral), light green (55-75 Greed), dark green
+// (75-100 Extreme Greed).
+function renderCIFearGreedGauge(value, label) {
+  const r = 70;
+  const cx = 95;
+  const cy = 85;
+  const arcWidth = 14;
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  const angle = (Math.PI * v) / 100; // 0..π from left to right
+  const needleX = cx - r * Math.cos(angle);
+  const needleY = cy - r * Math.sin(angle);
+
+  const arc = (a1, a2, color) => {
+    const x1 = cx - r * Math.cos(a1);
+    const y1 = cy - r * Math.sin(a1);
+    const x2 = cx - r * Math.cos(a2);
+    const y2 = cy - r * Math.sin(a2);
+    const large = a2 - a1 > Math.PI ? 1 : 0;
+    return `<path d="M${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${large} 1 ${x2.toFixed(1)},${y2.toFixed(1)}" stroke="${color}" stroke-width="${arcWidth}" fill="none" stroke-linecap="butt" />`;
+  };
+  // 5 colour zones across the half-circle: 0-25 / 25-45 / 45-55 / 55-75 / 75-100
+  const segs = [
+    arc(0,             Math.PI * 0.25, '#cf3a3a'),  // extreme fear
+    arc(Math.PI * 0.25, Math.PI * 0.45, '#d8843a'), // fear
+    arc(Math.PI * 0.45, Math.PI * 0.55, '#c7b450'), // neutral
+    arc(Math.PI * 0.55, Math.PI * 0.75, '#3d8a4d'), // greed
+    arc(Math.PI * 0.75, Math.PI,        '#1f6e2e'), // extreme greed
+  ].join('');
+
+  // Needle colour = zone colour
+  const needleColor =
+    v < 25 ? '#cf3a3a' :
+    v < 45 ? '#d8843a' :
+    v < 55 ? '#c7b450' :
+    v < 75 ? '#3d8a4d' : '#1f6e2e';
+  const valueColor = needleColor;
+
+  // Friendly classification (falls back to numeric ranges if label missing)
+  const classification = label || (
+    v < 25 ? 'Extreme Fear' :
+    v < 45 ? 'Fear' :
+    v < 55 ? 'Neutral' :
+    v < 75 ? 'Greed' : 'Extreme Greed'
+  );
+
+  return `<svg class="ci-fg-gauge" width="190" height="115" viewBox="0 0 190 115" aria-label="Fear & Greed dial">
+    ${segs}
+    <line x1="${cx}" y1="${cy}" x2="${needleX.toFixed(1)}" y2="${needleY.toFixed(1)}" stroke="${needleColor}" stroke-width="2.5" stroke-linecap="round" />
+    <circle cx="${cx}" cy="${cy}" r="4" fill="${needleColor}" />
+    <text x="${cx}" y="${(cy - 14).toFixed(0)}" font-size="22" font-weight="600" fill="${valueColor}" text-anchor="middle">${Math.round(v)}</text>
+    <text x="12"  y="105" font-size="9" fill="#888">0</text>
+    <text x="${cx}" y="105" font-size="9" fill="#888" text-anchor="middle">${classification}</text>
+    <text x="178" y="105" font-size="9" fill="#888" text-anchor="end">100</text>
+  </svg>`;
+}
+
+// renderCIHeatmap — single-row horizontal strip, one cell per indicator,
+// colour-coded by current score. Grouped visually by bucket via small
+// gaps. Hover any cell for full name + exact score. v1.15.
+function renderCIHeatmap(indicators) {
+  if (!Array.isArray(indicators) || indicators.length === 0) return '';
+  // Order: cowen → pal → universal → sentiment.
+  const order = { cowen: 1, pal: 2, universal: 3, sentiment: 4 };
+  const ind = [...indicators].sort((a, b) => {
+    const ao = order[a.bucket] || 9;
+    const bo = order[b.bucket] || 9;
+    if (ao !== bo) return ao - bo;
+    return a.id.localeCompare(b.id);
+  });
+  const cellFor = (i) => {
+    const s = i.currentScore == null ? null : Number(i.currentScore);
+    let cls = 'ci-hm-empty';
+    if (s != null) {
+      if (s >= 0.4)       cls = 'ci-hm-strong-pos';
+      else if (s >= 0.1)  cls = 'ci-hm-pos';
+      else if (s <= -0.4) cls = 'ci-hm-strong-neg';
+      else if (s <= -0.1) cls = 'ci-hm-neg';
+      else                cls = 'ci-hm-neutral';
+    }
+    const shortLabel = (i.id || '').replace(/^[a-z]+_/, '').replace(/_/g, ' ').replace(/-/g, ' ').slice(0, 14);
+    const tip = `${i.displayName}${s != null ? ` · score ${s.toFixed(2)}` : ' · no data'}`;
+    return `<div class="ci-hm-cell ci-hm-bucket-${i.bucket} ${cls}" title="${escapeHTML(tip)}">
+      <div class="ci-hm-label">${escapeHTML(shortLabel)}</div>
+      <div class="ci-hm-val">${s != null ? (s > 0 ? '+' : '') + s.toFixed(2) : '—'}</div>
+    </div>`;
+  };
+  // Build cells with bucket separators (a thin gap between buckets).
+  const groups = { cowen: [], pal: [], universal: [], sentiment: [] };
+  for (const i of ind) {
+    if (groups[i.bucket]) groups[i.bucket].push(cellFor(i));
+  }
+  const html = ['cowen', 'pal', 'universal', 'sentiment']
+    .filter((b) => groups[b].length)
+    .map((b) => `<div class="ci-hm-group ci-hm-group-${b}" data-bucket-label="${b}">${groups[b].join('')}</div>`)
+    .join('');
+  return `<div class="ci-heatmap-wrap">
+    <div class="ci-heatmap-head"><span class="dim">All indicators · current score</span></div>
+    <div class="ci-heatmap">${html}</div>
   </div>`;
 }
 
@@ -6396,15 +6593,35 @@ async function renderCryptoIndicators() {
     </div>
   ` : '';
 
-  // Wrap sentiment renderBucket with the inline F&G note.
+  // ----- Sentiment bucket — F&G card now hosts the dial gauge --------
+  // v1.15: the Fear & Greed card renders a proper half-circle dial
+  // instead of just a number. Other future sentiment indicators (if any
+  // are added) still render as standard cards.
   const sentimentBucket = `
     <section class="ci-bucket">
       <h3 class="ci-bucket-head">${escapeHTML(bucketLabels.sentiment || 'Sentiment')}</h3>
-      ${sentimentExtra}
       <div class="ci-card-row">${(byBucket.sentiment || []).map((i) => {
-        const val = i.currentValue != null ? Number(i.currentValue).toFixed(2) : (fgValue != null ? String(fgValue) : '—');
+        const isFearGreed = i.id === 'sentiment_fear_greed';
+        const val = i.currentValue != null ? Number(i.currentValue) : (fgValue != null ? Number(fgValue) : null);
         const score = renderCIScoreChip(i.currentScore);
         const spark = renderCISparkline(i.history || [], 'value', { width: 100, height: 28 });
+        if (isFearGreed && val != null) {
+          return `
+            <div class="ci-card ci-card-v2 ci-card-fg">
+              <div class="ci-card-head">
+                <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
+                <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
+              </div>
+              <div class="ci-card-body ci-card-fg-body">
+                ${renderCIFearGreedGauge(val, fgLabel)}
+                <div class="ci-card-fg-meta">
+                  ${score}
+                  <div class="ci-card-spark">${spark}</div>
+                </div>
+              </div>
+            </div>
+          `;
+        }
         return `
           <div class="ci-card ci-card-v2">
             <div class="ci-card-head">
@@ -6413,7 +6630,7 @@ async function renderCryptoIndicators() {
             </div>
             <div class="ci-card-body">
               <div class="ci-card-val-row">
-                <span class="ci-card-val">${val}</span>
+                <span class="ci-card-val">${val != null ? val.toFixed(2) : '—'}</span>
                 ${score}
               </div>
               <div class="ci-card-spark">${spark}</div>
@@ -6424,13 +6641,17 @@ async function renderCryptoIndicators() {
     </section>
   `;
 
+  // v1.15 — at-a-glance heatmap strip beneath the hero.
+  const heatmapHTML = renderCIHeatmap(indicators);
+
   content.innerHTML = `
     <div class="crypto-indicators-tab">
       <div class="ci-toolbar">
         <button class="btn-ghost" id="ci-refresh" title="Fetch latest readings from FRED + CoinGecko + DefiLlama + Farside + F&G">⟳ Refresh now</button>
-        <span class="dim" style="font-size:0.78rem">Auto-syncs daily at 00:30 UTC · all indicators automated (v1.12)</span>
+        <span class="dim" style="font-size:0.78rem">Auto-syncs daily at 00:30 UTC · all indicators automated (v1.15)</span>
       </div>
       ${heroHTML}
+      ${heatmapHTML}
       ${renderBucket('cowen')}
       ${renderBucket('pal')}
       ${renderBucket('universal')}
