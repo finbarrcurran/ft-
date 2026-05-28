@@ -19,17 +19,42 @@ func New(db *sql.DB) *Service { return &Service{DB: db} }
 
 // IndicatorRow is the API shape — one row per indicator, latest reading.
 type IndicatorRow struct {
-	ID            string   `json:"id"`
-	Bucket        string   `json:"bucket"`
-	DisplayName   string   `json:"displayName"`
-	Unit          string   `json:"unit,omitempty"`
-	Source        string   `json:"source"`
-	CurrentValue  *float64 `json:"currentValue,omitempty"`
-	CurrentScore  *float64 `json:"currentScore,omitempty"`
-	Trend4w       *float64 `json:"trend4w,omitempty"`
-	UpdatedAt     *int64   `json:"updatedAt,omitempty"`
-	FetchError    string   `json:"fetchError,omitempty"`
-	Tooltip       string   `json:"tooltip"`
+	ID           string         `json:"id"`
+	Bucket       string         `json:"bucket"`
+	DisplayName  string         `json:"displayName"`
+	Unit         string         `json:"unit,omitempty"`
+	Source       string         `json:"source"`
+	CurrentValue *float64       `json:"currentValue,omitempty"`
+	CurrentScore *float64       `json:"currentScore,omitempty"`
+	Trend4w      *float64       `json:"trend4w,omitempty"`
+	UpdatedAt    *int64         `json:"updatedAt,omitempty"`
+	FetchError   string         `json:"fetchError,omitempty"`
+	Tooltip      string         `json:"tooltip"`
+	History      []HistoryPoint `json:"history,omitempty"` // last 30 daily snapshots, oldest first
+}
+
+// HistoryPoint is one day of snapshot history per indicator. Used by the
+// frontend to render per-card sparklines.
+type HistoryPoint struct {
+	Date  string   `json:"date"`            // ISO YYYY-MM-DD
+	Value *float64 `json:"value,omitempty"` // raw_value from crypto_indicator_snapshots
+	Score *float64 `json:"score,omitempty"` // score from crypto_indicator_snapshots
+}
+
+// BTCHistoryPoint is one day of BTC closes used by the BTC log-band chart
+// at the top of the cowen bucket.
+type BTCHistoryPoint struct {
+	Date  string  `json:"date"`     // ISO YYYY-MM-DD
+	Close float64 `json:"closeUsd"` // USD close price
+}
+
+// CompositeHistoryPoint is one day of composite + sub-scores used by the
+// hero gauge trend on the crypto-indicators tab.
+type CompositeHistoryPoint struct {
+	Date           string   `json:"date"`
+	CompositeScore float64  `json:"compositeScore"`
+	BTCPriceUSD    *float64 `json:"btcPriceUsd,omitempty"`
+	ActionBand     string   `json:"actionBand"`
 }
 
 // CompositeSnapshot mirrors the crypto_composite_snapshots row shape +
@@ -99,6 +124,117 @@ func (s *Service) ListIndicators(ctx context.Context) ([]IndicatorRow, error) {
 		}
 		r.Tooltip = TooltipFor(r.ID)
 		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Attach 30 days of snapshot history per indicator for sparklines.
+	if err := s.attachHistory(ctx, out, 30); err != nil {
+		// Non-fatal — sparklines just won't render. Log via the caller
+		// since Service has no logger; the API client can still use
+		// current values.
+		_ = err
+	}
+	return out, nil
+}
+
+// attachHistory loads the last `days` of snapshot history for every row
+// in `rows` and attaches it to each .History field. Single query batched
+// across all indicators to keep this O(1) HTTP per ListIndicators call.
+func (s *Service) attachHistory(ctx context.Context, rows []IndicatorRow, days int) error {
+	if len(rows) == 0 || days < 2 {
+		return nil
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
+	q, err := s.DB.QueryContext(ctx, `
+		SELECT indicator_id, snapshot_date, raw_value, score
+		  FROM crypto_indicator_snapshots
+		 WHERE snapshot_date >= ?
+		 ORDER BY indicator_id, snapshot_date ASC`, cutoff)
+	if err != nil {
+		return err
+	}
+	defer q.Close()
+	byID := map[string][]HistoryPoint{}
+	for q.Next() {
+		var id, date string
+		var raw, score sql.NullFloat64
+		if err := q.Scan(&id, &date, &raw, &score); err != nil {
+			return err
+		}
+		hp := HistoryPoint{Date: date}
+		if raw.Valid {
+			v := raw.Float64
+			hp.Value = &v
+		}
+		if score.Valid {
+			v := score.Float64
+			hp.Score = &v
+		}
+		byID[id] = append(byID[id], hp)
+	}
+	for i := range rows {
+		rows[i].History = byID[rows[i].ID]
+	}
+	return q.Err()
+}
+
+// BTCPriceHistory returns the most recent `days` of BTC daily closes
+// from btc_price_history. Used by the BTC log-band chart at the top of
+// the cowen bucket. Empty slice if seed hasn't run yet.
+func (s *Service) BTCPriceHistory(ctx context.Context, days int) ([]BTCHistoryPoint, error) {
+	if days < 1 {
+		days = 730
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT snapshot_date, close_usd
+		   FROM btc_price_history
+		  WHERE snapshot_date >= ?
+		  ORDER BY snapshot_date ASC`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []BTCHistoryPoint{}
+	for rows.Next() {
+		var p BTCHistoryPoint
+		if err := rows.Scan(&p.Date, &p.Close); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// CompositeHistory returns the most recent `days` of composite snapshots
+// for the hero gauge trend display.
+func (s *Service) CompositeHistory(ctx context.Context, days int) ([]CompositeHistoryPoint, error) {
+	if days < 1 {
+		days = 90
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT snapshot_date, composite_score, btc_price_usd, action_band
+		   FROM crypto_composite_snapshots
+		  WHERE snapshot_date >= ?
+		  ORDER BY snapshot_date ASC`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CompositeHistoryPoint{}
+	for rows.Next() {
+		var p CompositeHistoryPoint
+		var btc sql.NullFloat64
+		if err := rows.Scan(&p.Date, &p.CompositeScore, &btc, &p.ActionBand); err != nil {
+			return nil, err
+		}
+		if btc.Valid {
+			v := btc.Float64
+			p.BTCPriceUSD = &v
+		}
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }

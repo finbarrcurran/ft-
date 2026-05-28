@@ -10,10 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"ft/internal/config"
+	"ft/internal/cryptoindicators"
 	"ft/internal/domain"
 	"ft/internal/llm"
 	"ft/internal/refresh"
-	"ft/internal/cryptoindicators"
 	"ft/internal/scorecards"
 	"ft/internal/signals"
 	"ft/internal/store"
@@ -29,10 +29,10 @@ import (
 const sessionCookieName = "ft_session"
 
 type Server struct {
-	cfg        *config.Config
-	store      *store.Store
-	refresh    *refresh.Service
-	llm        *llm.Service        // Spec 9c.1; nil-safe — handlers guard
+	cfg              *config.Config
+	store            *store.Store
+	refresh          *refresh.Service
+	llm              *llm.Service              // Spec 9c.1; nil-safe — handlers guard
 	scorecards       *scorecards.Service       // Spec 9g
 	theses           *theses.Engine            // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
 	cryptoIndicators *cryptoindicators.Service // Spec 9e Phase 1
@@ -50,7 +50,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		theses: theses.New(st.DB, cfg.ThesisRepoDir, cfg.ThesisRepoOwner,
 			cfg.ThesisRepoName, cfg.GitHubToken),
 		cryptoIndicators: cryptoindicators.New(st.DB), // Spec 9e Phase 1
-		signals:          signals.New(st.DB),           // Spec 9k Phase A
+		signals:          signals.New(st.DB),          // Spec 9k Phase A
 		mux:              http.NewServeMux(),
 	}
 	s.routes()
@@ -208,6 +208,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/crypto-indicators", s.requireUser(s.handleListCryptoIndicators))
 	s.mux.HandleFunc("GET /api/crypto-indicators/composite/latest", s.requireUser(s.handleCryptoIndicatorsComposite))
 	s.mux.HandleFunc("POST /api/crypto-indicators/refresh", s.requireUser(s.handleRefreshCryptoIndicators))
+	// v1.12 — Phase 2 visual upgrade: chart data feeds.
+	s.mux.HandleFunc("GET /api/crypto-indicators/btc-history", s.requireUser(s.handleCryptoIndicatorsBTCHistory))
+	s.mux.HandleFunc("GET /api/crypto-indicators/composite/history", s.requireUser(s.handleCryptoIndicatorsCompositeHistory))
 
 	// Spec 9k Phase A + B — Political & Insider Signal endpoints.
 	s.mux.HandleFunc("GET /api/signals", s.requireUser(s.handleListSignals))

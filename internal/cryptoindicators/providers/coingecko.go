@@ -25,6 +25,11 @@ func doWithRetry(ctx context.Context, client *http.Client, url string) ([]byte, 
 		if err != nil {
 			return nil, 0, err
 		}
+		// Browser-like User-Agent — many providers (Farside via Cloudflare,
+		// some CoinGecko endpoints) 403 a bare Go default. Setting one UA
+		// across all retries keeps the request consistent.
+		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; FT/1.0; +https://ft.curranhouse.dev)")
+		req.Header.Set("Accept", "text/html,application/json,*/*")
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, 0, err

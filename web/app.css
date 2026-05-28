@@ -3284,3 +3284,73 @@ input.autofilled, select.autofilled {
   background: rgb(var(--color-loss) / 0.22);
   color: rgb(var(--color-loss));
 }
+
+/* === v1.12 Crypto Indicators visual upgrade === */
+.ci-hero-v2 {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 1.5rem;
+  align-items: center;
+  padding: 1.2rem 1.4rem;
+  background: var(--card-bg, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+.ci-hero-left { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+.ci-hero-num-row { display: flex; align-items: center; gap: 0.6rem; }
+.ci-hero-num { font-size: 2rem; font-weight: 600; }
+.ci-hero-right { display: flex; flex-direction: column; gap: 0.8rem; }
+.ci-hero-trend { display: flex; flex-direction: column; gap: 0.25rem; }
+.ci-hero-spark { padding: 0.2rem 0; }
+.ci-hero-subs { display: flex; flex-wrap: wrap; gap: 0.8rem; font-size: 0.85rem; }
+.ci-hero-notes { font-size: 0.78rem; margin-top: 0.4rem; }
+.ci-gauge { display: block; }
+
+.ci-card-v2 { display: flex; flex-direction: column; min-height: 110px; }
+.ci-card-v2 .ci-card-body { display: flex; flex-direction: column; gap: 0.4rem; padding-top: 0.4rem; }
+.ci-card-val-row { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.ci-card-val { font-size: 1.15rem; font-weight: 600; }
+.ci-card-unit { font-size: 0.75rem; }
+.ci-card-spark { margin: 0.2rem 0; }
+.ci-card-meta { display: flex; gap: 0.6rem; align-items: center; font-size: 0.78rem; }
+
+.ci-chip {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: rgba(136,136,136,0.18);
+  color: #ccc;
+}
+.ci-chip-strong-pos { background: rgba(31,110,46,0.28);  color: #6bd47c; }
+.ci-chip-pos        { background: rgba(61,138,77,0.22);  color: #87cf92; }
+.ci-chip-neutral    { background: rgba(136,136,136,0.20); color: #bbb;    }
+.ci-chip-neg        { background: rgba(216,132,58,0.22); color: #e6a868; }
+.ci-chip-strong-neg { background: rgba(207,58,58,0.28);  color: #ee8a8a; }
+.ci-chip-empty      { opacity: 0.5; }
+
+.ci-spark { vertical-align: middle; }
+.ci-spark-up   path, .ci-spark-up   circle { color: #6bd47c; }
+.ci-spark-down path, .ci-spark-down circle { color: #ee8a8a; }
+.ci-spark-empty { font-size: 0.85rem; }
+
+.ci-chart-wrap {
+  margin: 0.6rem 0 0.8rem;
+  padding: 0.6rem 0.8rem;
+  background: rgba(0,0,0,0.15);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+}
+.ci-chart-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+}
+.ci-chart-latest { margin-left: auto; font-weight: 600; color: #f59e0b; }
+.ci-chart { display: block; max-width: 100%; }
+.ci-chart-empty { padding: 1rem; text-align: center; }
+.ci-btc-chart { margin-bottom: 0.6rem; }

@@ -5978,11 +5978,10 @@ if (state.perfWindow == null) state.perfWindow = 'all';
 
 // ---------- Spec 9e Phase 1: Crypto Indicators tab ----------------------
 //
-// Hero composite gauge + 4 bucket sections + footer disclaimer. Phase 1
-// ships the skeleton; the gauge SVG, bucket cards and Top/Worst table
-// get their visual polish in Phase 3 (v1.8.2). Data providers ship in
-// Phase 2 (v1.8.1) — until then, current_value/current_score are NULL
-// and the composite is 0 / NEUTRAL.
+// Visual upgrade landed v1.12 (2026-05-28): hero SVG gauge replaces the
+// linear bar, every indicator card carries a 30-day sparkline + colored
+// score chip, BTC log-band chart added to the cowen bucket header, and
+// the composite trend renders as a mini-sparkline next to the gauge.
 
 const CI_BAND_COLOR = {
   strong_accumulate: 'gain',
@@ -5992,16 +5991,194 @@ const CI_BAND_COLOR = {
   distribute_wait:   'loss',
 };
 
+// ----- visual helpers ---------------------------------------------------
+
+// renderCISparkline returns inline SVG for a 30-day indicator trend.
+// history is the array of {date, value, score} objects from the API;
+// key is 'value' or 'score'. Returns an empty placeholder if history
+// has fewer than 2 usable points.
+function renderCISparkline(history, key = 'value', opts = {}) {
+  const w = opts.width || 90;
+  const h = opts.height || 24;
+  const stroke = opts.stroke || 'currentColor';
+  if (!Array.isArray(history) || history.length < 2) {
+    return `<span class="ci-spark-empty dim">—</span>`;
+  }
+  const pts = history
+    .map((p) => (p[key] != null ? Number(p[key]) : null))
+    .filter((v) => v != null && Number.isFinite(v));
+  if (pts.length < 2) return `<span class="ci-spark-empty dim">—</span>`;
+  const min = Math.min(...pts);
+  const max = Math.max(...pts);
+  const range = max - min || 1;
+  const stepX = w / (pts.length - 1);
+  const path = pts
+    .map((v, i) => {
+      const x = i * stepX;
+      const y = h - ((v - min) / range) * (h - 2) - 1;
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  const lastX = (pts.length - 1) * stepX;
+  const lastY = h - ((pts[pts.length - 1] - min) / range) * (h - 2) - 1;
+  const direction = pts[pts.length - 1] >= pts[0] ? 'up' : 'down';
+  return `<svg class="ci-spark ci-spark-${direction}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <path d="${path}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" />
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="1.8" fill="${stroke}" />
+  </svg>`;
+}
+
+// renderCIScoreChip returns a coloured pill for a -1..+1 indicator score.
+// Green for clearly bullish, red for clearly bearish, amber for neutral.
+function renderCIScoreChip(score) {
+  if (score == null) return `<span class="ci-chip ci-chip-empty">—</span>`;
+  const s = Number(score);
+  let cls = 'ci-chip-neutral';
+  if (s >= 0.4) cls = 'ci-chip-strong-pos';
+  else if (s >= 0.1) cls = 'ci-chip-pos';
+  else if (s <= -0.4) cls = 'ci-chip-strong-neg';
+  else if (s <= -0.1) cls = 'ci-chip-neg';
+  const sign = s > 0 ? '+' : '';
+  return `<span class="ci-chip ${cls}" title="Score ${s.toFixed(2)}">${sign}${s.toFixed(2)}</span>`;
+}
+
+// renderCIGauge returns an SVG arc gauge for the composite score on a
+// -100..+100 scale. Color follows the action band.
+function renderCIGauge(score, actionBand) {
+  const r = 60;
+  const cx = 80;
+  const cy = 75;
+  const arcWidth = 12;
+  // Half-circle gauge spans 180° (from 180° at left to 360°/0° at right).
+  // Position the needle at score-derived angle.
+  const s = Math.max(-100, Math.min(100, Number(score) || 0));
+  const angle = Math.PI * (s + 100) / 200; // 0..π from left to right
+  const needleX = cx - r * Math.cos(angle);
+  const needleY = cy - r * Math.sin(angle);
+
+  // Background arc — full half-circle, segmented by band thirds.
+  const arc = (a1, a2, color) => {
+    const x1 = cx - r * Math.cos(a1);
+    const y1 = cy - r * Math.sin(a1);
+    const x2 = cx - r * Math.cos(a2);
+    const y2 = cy - r * Math.sin(a2);
+    const large = a2 - a1 > Math.PI ? 1 : 0;
+    return `<path d="M${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${large} 1 ${x2.toFixed(1)},${y2.toFixed(1)}" stroke="${color}" stroke-width="${arcWidth}" fill="none" stroke-linecap="butt" />`;
+  };
+  const segments = [
+    arc(0,             Math.PI * 0.2, '#cf3a3a'),  // -100..-60 distribute (red)
+    arc(Math.PI * 0.2, Math.PI * 0.4, '#d8843a'),  // -60..-20  caution    (amber)
+    arc(Math.PI * 0.4, Math.PI * 0.6, '#888'),     // -20..+20  neutral    (grey)
+    arc(Math.PI * 0.6, Math.PI * 0.8, '#3d8a4d'),  // +20..+60  accumulate (green)
+    arc(Math.PI * 0.8, Math.PI,       '#1f6e2e'),  // +60..+100 strong     (deep green)
+  ].join('');
+
+  const bandColors = {
+    strong_accumulate: '#1f6e2e',
+    accumulate:        '#3d8a4d',
+    neutral:           '#888',
+    caution:           '#d8843a',
+    distribute_wait:   '#cf3a3a',
+  };
+  const needleColor = bandColors[actionBand] || '#aaa';
+
+  return `<svg class="ci-gauge" width="160" height="100" viewBox="0 0 160 100" aria-label="Composite gauge">
+    ${segments}
+    <line x1="${cx}" y1="${cy}" x2="${needleX.toFixed(1)}" y2="${needleY.toFixed(1)}" stroke="${needleColor}" stroke-width="2.5" stroke-linecap="round" />
+    <circle cx="${cx}" cy="${cy}" r="4" fill="${needleColor}" />
+    <text x="8"  y="92" font-size="9" fill="#888">-100</text>
+    <text x="76" y="92" font-size="9" fill="#888" text-anchor="middle">0</text>
+    <text x="146" y="92" font-size="9" fill="#888" text-anchor="end">+100</text>
+  </svg>`;
+}
+
+// renderCIBTCChart returns an inline SVG line chart of BTC daily closes
+// on a log-y scale, with a 200-week MA overlay if enough data exists.
+// history is the array of {date, closeUsd} objects from
+// /api/crypto-indicators/btc-history.
+function renderCIBTCChart(history) {
+  const w = 720;
+  const h = 200;
+  const padL = 50;
+  const padR = 12;
+  const padT = 8;
+  const padB = 24;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  if (!Array.isArray(history) || history.length < 30) {
+    return `<div class="ci-chart-empty dim">BTC price history loading…</div>`;
+  }
+  const closes = history.map((p) => p.closeUsd).filter((v) => v > 0);
+  const logMin = Math.log10(Math.min(...closes) * 0.9);
+  const logMax = Math.log10(Math.max(...closes) * 1.1);
+  const logRange = logMax - logMin || 1;
+  const stepX = plotW / (history.length - 1);
+  const yFor = (close) => padT + plotH - ((Math.log10(close) - logMin) / logRange) * plotH;
+  const xFor = (i) => padL + i * stepX;
+  const path = history
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(i).toFixed(1)},${yFor(p.closeUsd).toFixed(1)}`)
+    .join(' ');
+
+  // Compute a simple 50-bar moving average overlay (visually clean at
+  // 2-year zoom) — proxy for trend without needing 200-week data here.
+  const maPath = [];
+  const maWindow = 50;
+  for (let i = 0; i < history.length; i++) {
+    if (i < maWindow - 1) continue;
+    let sum = 0;
+    for (let j = i - maWindow + 1; j <= i; j++) sum += history[j].closeUsd;
+    const avg = sum / maWindow;
+    maPath.push(`${maPath.length === 0 ? 'M' : 'L'}${xFor(i).toFixed(1)},${yFor(avg).toFixed(1)}`);
+  }
+
+  // Y-axis labels at min/mid/max of the log range.
+  const yLabels = [logMin, (logMin + logMax) / 2, logMax]
+    .map((lv) => Math.pow(10, lv))
+    .map((v, idx) => {
+      const y = padT + plotH * (1 - idx / 2);
+      const text = v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v.toFixed(0)}`;
+      return `<text x="${padL - 6}" y="${(y + 3).toFixed(0)}" font-size="9" fill="#888" text-anchor="end">${text}</text>
+              <line x1="${padL}" y1="${y.toFixed(0)}" x2="${(w - padR).toFixed(0)}" y2="${y.toFixed(0)}" stroke="#2a2a2a" stroke-width="0.5" stroke-dasharray="2,3" />`;
+    })
+    .join('');
+
+  // X-axis labels at first/middle/last dates.
+  const xLabels = [0, Math.floor(history.length / 2), history.length - 1]
+    .map((i) => {
+      const d = history[i].date;
+      return `<text x="${xFor(i).toFixed(0)}" y="${(h - 8).toFixed(0)}" font-size="9" fill="#888" text-anchor="middle">${d}</text>`;
+    })
+    .join('');
+
+  const latestClose = history[history.length - 1].closeUsd;
+
+  return `<div class="ci-chart-wrap">
+    <div class="ci-chart-head">
+      <strong>BTC-USD</strong>
+      <span class="dim">log-scale · 50-bar MA overlay · ${history.length} days</span>
+      <span class="ci-chart-latest">$${latestClose >= 1000 ? (latestClose / 1000).toFixed(1) + 'k' : latestClose.toFixed(0)}</span>
+    </div>
+    <svg class="ci-chart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="BTC price log chart">
+      ${yLabels}
+      ${xLabels}
+      <path d="${path}" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-linejoin="round" />
+      ${maPath.length ? `<path d="${maPath.join(' ')}" fill="none" stroke="#3d8a4d" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.7" />` : ''}
+    </svg>
+  </div>`;
+}
+
 async function renderCryptoIndicators() {
   const content = $('#content');
   content.innerHTML = `<div class="empty"><div>Loading crypto indicators…</div></div>`;
 
-  let listResp, compResp, fg;
+  let listResp, compResp, fg, btcHist, compHist;
   try {
-    [listResp, compResp, fg] = await Promise.all([
+    [listResp, compResp, fg, btcHist, compHist] = await Promise.all([
       api('/api/crypto-indicators'),
       api('/api/crypto-indicators/composite/latest'),
-      api('/api/feargreed').catch(() => null), // reuse existing endpoint
+      api('/api/feargreed').catch(() => null),
+      api('/api/crypto-indicators/btc-history?days=730').catch(() => ({ history: [] })),
+      api('/api/crypto-indicators/composite/history?days=90').catch(() => ({ history: [] })),
     ]);
   } catch (err) {
     content.innerHTML = `<div class="empty"><div class="loss">error: ${escapeHTML(err.message)}</div></div>`;
@@ -6013,6 +6190,8 @@ async function renderCryptoIndicators() {
   const comp = (compResp && compResp.composite) || { compositeScore: 0, actionBand: 'neutral', subScores: {}, effectiveWeights: {} };
   const bandLabel = (compResp && compResp.bandLabel) || 'NEUTRAL';
   const bandClass = CI_BAND_COLOR[comp.actionBand] || 'dim';
+  const btcHistory = (btcHist && btcHist.history) || [];
+  const compHistory = (compHist && compHist.history) || [];
 
   // Group indicators by bucket.
   const byBucket = { cowen: [], pal: [], universal: [], sentiment: [] };
@@ -6020,81 +6199,102 @@ async function renderCryptoIndicators() {
     if (byBucket[i.bucket]) byBucket[i.bucket].push(i);
   }
 
-  // Hero composite gauge — Phase 3 will replace this with an SVG.
+  // ----- Hero composite with SVG gauge --------------------------------
   const dispScore = Number(comp.compositeScore || 0).toFixed(1);
   const subChip = (label, key) => {
     const v = comp[key];
     if (v == null) return `<span class="ci-sub dim">${label} —</span>`;
+    const cls = v >= 0.1 ? 'gain' : v <= -0.1 ? 'loss' : 'dim';
     const sign = v >= 0 ? '+' : '';
-    return `<span class="ci-sub">${label} ${sign}${Number(v).toFixed(2)}</span>`;
+    return `<span class="ci-sub"><span class="dim">${label}</span> <span class="${cls}">${sign}${Number(v).toFixed(2)}</span></span>`;
   };
+  const compSpark = renderCISparkline(
+    compHistory.map((p) => ({ value: p.compositeScore })),
+    'value',
+    { width: 120, height: 32 },
+  );
   const heroHTML = `
-    <div class="ci-hero">
-      <div class="ci-hero-head">
-        <span class="dim">Composite Score</span>
-        <span class="ci-band ${bandClass}">${escapeHTML(bandLabel)}</span>
-      </div>
-      <div class="ci-hero-num ${bandClass}">${dispScore}</div>
-      <div class="ci-hero-scale">
-        <span class="dim">-100</span>
-        <div class="ci-hero-bar">
-          <div class="ci-hero-marker" style="left: ${Math.max(0, Math.min(100, (Number(dispScore) + 100) / 2))}%"></div>
+    <div class="ci-hero ci-hero-v2">
+      <div class="ci-hero-left">
+        ${renderCIGauge(Number(dispScore), comp.actionBand)}
+        <div class="ci-hero-num-row">
+          <span class="ci-hero-num ${bandClass}">${dispScore}</span>
+          <span class="ci-band ${bandClass}">${escapeHTML(bandLabel)}</span>
         </div>
-        <span class="dim">+100</span>
       </div>
-      <div class="ci-hero-subs">
-        ${subChip('Cowen',     'cowenSubscore')}
-        ${subChip('Pal',       'palSubscore')}
-        ${subChip('Universal', 'universalSubscore')}
-        ${subChip('Sentiment', 'sentimentSubscore')}
+      <div class="ci-hero-right">
+        <div class="ci-hero-trend">
+          <span class="dim">90-day composite trend</span>
+          <div class="ci-hero-spark">${compSpark}</div>
+        </div>
+        <div class="ci-hero-subs">
+          ${subChip('Cowen',     'cowenSubscore')}
+          ${subChip('Pal',       'palSubscore')}
+          ${subChip('Universal', 'universalSubscore')}
+          ${subChip('Sentiment', 'sentimentSubscore')}
+        </div>
+        ${comp.notes ? `<div class="dim ci-hero-notes">${escapeHTML(comp.notes)}</div>` : ''}
       </div>
-      ${comp.notes ? `<div class="dim" style="margin-top:0.5rem; font-size:0.8rem">${escapeHTML(comp.notes)}</div>` : ''}
     </div>
   `;
 
-  // Bucket rendering. Phase 3 ships the proper card grid; Phase 1 is a
-  // simple list so the data shape is visible.
+  // ----- BTC log-band chart (cowen bucket header) ---------------------
+  const btcChartHTML = btcHistory.length >= 30
+    ? `<div class="ci-btc-chart">${renderCIBTCChart(btcHistory)}</div>`
+    : '';
+
+  // ----- Bucket card rendering with sparklines + chips ----------------
   const renderBucket = (bucketKey) => {
     const rows = byBucket[bucketKey] || [];
     const label = bucketLabels[bucketKey] || bucketKey;
     if (rows.length === 0) return '';
-    const items = rows.map(i => {
-      const val = i.currentValue != null ? Number(i.currentValue).toFixed(2) : '—';
-      const score = i.currentScore != null
-        ? `<span class="${i.currentScore >= 0 ? 'gain' : 'loss'}">${Number(i.currentScore).toFixed(2)}</span>`
-        : '<span class="dim">—</span>';
+    const items = rows.map((i) => {
+      const val = i.currentValue != null
+        ? Number(i.currentValue).toFixed(i.currentValue < 1 && i.currentValue > -1 ? 4 : 2)
+        : '—';
+      const score = renderCIScoreChip(i.currentScore);
       const trend = i.trend4w != null
-        ? `${i.trend4w > 0.5 ? '▲' : i.trend4w < -0.5 ? '▼' : '▬'} ${Number(i.trend4w).toFixed(1)}%`
+        ? `<span class="${i.trend4w > 0.5 ? 'gain' : i.trend4w < -0.5 ? 'loss' : 'dim'}">${i.trend4w > 0.5 ? '▲' : i.trend4w < -0.5 ? '▼' : '▬'} ${Number(i.trend4w).toFixed(1)}%</span>`
         : '<span class="dim">—</span>';
       const stale = !i.currentValue && !i.fetchError
         ? '<span class="ci-pill stale">awaiting data</span>'
         : i.fetchError
           ? `<span class="ci-pill err" title="${escapeHTML(i.fetchError)}">⚠ error</span>`
           : '';
+      const spark = renderCISparkline(i.history || [], 'value', { width: 100, height: 28 });
       return `
-        <div class="ci-card">
+        <div class="ci-card ci-card-v2">
           <div class="ci-card-head">
             <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
             <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
           </div>
-          <div class="ci-card-grid">
-            <div><span class="dim">Value</span> ${val} ${i.unit ? `<span class="dim">${escapeHTML(i.unit)}</span>` : ''}</div>
-            <div><span class="dim">4w</span> ${trend}</div>
-            <div><span class="dim">Score</span> ${score}</div>
-            <div>${stale}</div>
+          <div class="ci-card-body">
+            <div class="ci-card-val-row">
+              <span class="ci-card-val">${val}</span>
+              ${i.unit ? `<span class="dim ci-card-unit">${escapeHTML(i.unit)}</span>` : ''}
+              ${score}
+            </div>
+            <div class="ci-card-spark">${spark}</div>
+            <div class="ci-card-meta">
+              <span class="dim">4w</span> ${trend}
+              ${stale}
+            </div>
           </div>
         </div>
       `;
     }).join('');
+    const chartHead = bucketKey === 'cowen' ? btcChartHTML : '';
     return `
       <section class="ci-bucket">
         <h3 class="ci-bucket-head">${escapeHTML(label)}</h3>
+        ${chartHead}
         <div class="ci-card-row">${items}</div>
       </section>
     `;
   };
 
-  // Sentiment bucket: render Crypto F&G inline (Spec 9e D11 — moved here).
+  // Sentiment bucket renders identically now (uses same renderBucket).
+  // Keep live F&G inline note for clarity on origin.
   const fgValue = fg && (fg.value != null ? fg.value : null);
   const fgLabel = fg && fg.valueClassification ? fg.valueClassification : (fg && fg.classification ? fg.classification : '');
   const sentimentExtra = fgValue != null ? `
@@ -6105,34 +6305,45 @@ async function renderCryptoIndicators() {
     </div>
   ` : '';
 
+  // Wrap sentiment renderBucket with the inline F&G note.
+  const sentimentBucket = `
+    <section class="ci-bucket">
+      <h3 class="ci-bucket-head">${escapeHTML(bucketLabels.sentiment || 'Sentiment')}</h3>
+      ${sentimentExtra}
+      <div class="ci-card-row">${(byBucket.sentiment || []).map((i) => {
+        const val = i.currentValue != null ? Number(i.currentValue).toFixed(2) : (fgValue != null ? String(fgValue) : '—');
+        const score = renderCIScoreChip(i.currentScore);
+        const spark = renderCISparkline(i.history || [], 'value', { width: 100, height: 28 });
+        return `
+          <div class="ci-card ci-card-v2">
+            <div class="ci-card-head">
+              <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
+              <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
+            </div>
+            <div class="ci-card-body">
+              <div class="ci-card-val-row">
+                <span class="ci-card-val">${val}</span>
+                ${score}
+              </div>
+              <div class="ci-card-spark">${spark}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}</div>
+    </section>
+  `;
+
   content.innerHTML = `
     <div class="crypto-indicators-tab">
       <div class="ci-toolbar">
         <button class="btn-ghost" id="ci-refresh" title="Fetch latest readings from FRED + CoinGecko + DefiLlama + Farside + F&G">⟳ Refresh now</button>
-        <span class="dim" style="font-size:0.78rem">Auto-syncs daily at 00:30 UTC · all indicators automated (v1.9.1)</span>
+        <span class="dim" style="font-size:0.78rem">Auto-syncs daily at 00:30 UTC · all indicators automated (v1.12)</span>
       </div>
       ${heroHTML}
       ${renderBucket('cowen')}
       ${renderBucket('pal')}
       ${renderBucket('universal')}
-      <section class="ci-bucket">
-        <h3 class="ci-bucket-head">${escapeHTML(bucketLabels.sentiment || 'Sentiment')}</h3>
-        ${sentimentExtra}
-        <div class="ci-card-row">${(byBucket.sentiment || []).map(i => `
-          <div class="ci-card">
-            <div class="ci-card-head">
-              <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
-              <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
-            </div>
-            <div class="ci-card-grid">
-              <div><span class="dim">Value</span> ${i.currentValue != null ? Number(i.currentValue).toFixed(2) : (fgValue != null ? fgValue : '—')}</div>
-              <div><span class="dim">Score</span> ${i.currentScore != null
-                ? `<span class="${i.currentScore >= 0 ? 'gain' : 'loss'}">${Number(i.currentScore).toFixed(2)}</span>`
-                : '<span class="dim">—</span>'}</div>
-            </div>
-          </div>
-        `).join('')}</div>
-      </section>
+      ${sentimentBucket}
       <div class="ci-footer dim">
         Decision support only. Not financial advice. Composite tracks correlation, not causation.
       </div>
@@ -6176,8 +6387,6 @@ async function renderCryptoIndicators() {
     btn.textContent = '⟳ Refreshing…';
     try {
       await api('/api/crypto-indicators/refresh', { method: 'POST' });
-      // Tiny pause so the spinner is visible even on fast networks,
-      // then re-render.
       setTimeout(() => renderCryptoIndicators(), 400);
     } catch (err) {
       btn.disabled = false;
@@ -6186,7 +6395,6 @@ async function renderCryptoIndicators() {
     }
   });
 }
-
 // ---------- Spec 9k Phase A: Signals tab -------------------------------
 //
 // Insider Form 4 MVP. Congress + EO arrive in 9k.B; full UI polish (row

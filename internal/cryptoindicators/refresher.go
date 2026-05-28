@@ -43,10 +43,13 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 	fred := providers.NewFREDClient(r.FREDApiKey)
 	llama := providers.NewDefiLlamaClient()
 	farside := providers.NewFarsideClient()
+	yh := providers.NewYahooClient()
 
 	// Make sure btc_price_history is seeded before computing Cowen
 	// indicators. Best-effort — Cowen indicators tolerate missing data.
-	if err := r.Service.SeedBTCHistory(ctx, cg); err != nil {
+	// Yahoo replaced CoinGecko on 2026-05-28 (CoinGecko returns 401 on
+	// the free-tier historical endpoint).
+	if err := r.Service.SeedBTCHistory(ctx, yh); err != nil {
 		slog.Warn("crypto indicators: BTC history seed failed", "err", err)
 	}
 

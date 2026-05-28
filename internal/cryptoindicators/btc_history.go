@@ -11,12 +11,18 @@ import (
 )
 
 // SeedBTCHistory does a one-shot full backfill of BTC daily closes from
-// CoinGecko (~3500 rows back to 2013) if btc_price_history is empty.
-// Idempotent — re-running with the table already populated is a no-op.
+// Yahoo Finance (~4000 rows back to mid-2014) if btc_price_history is
+// empty. Idempotent — re-running with the table already populated is a
+// no-op.
+//
+// Migrated from CoinGecko to Yahoo on 2026-05-28 after CoinGecko's free
+// public endpoint started returning HTTP 401 on /coins/btc/market_chart
+// with long day-windows. Yahoo's chart endpoint is unauthenticated and
+// has equivalent coverage.
 //
 // Called from the refresher's daily run. Initial deploy: ~one big call.
-// Subsequent days: appendOnly() handles the delta.
-func (s *Service) SeedBTCHistory(ctx context.Context, cg *providers.CoinGeckoClient) error {
+// Subsequent days: AppendBTCHistory() handles the delta.
+func (s *Service) SeedBTCHistory(ctx context.Context, yh *providers.YahooClient) error {
 	var count int
 	if err := s.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM btc_price_history`).Scan(&count); err != nil {
@@ -24,10 +30,10 @@ func (s *Service) SeedBTCHistory(ctx context.Context, cg *providers.CoinGeckoCli
 	}
 	if count > 100 {
 		// Already seeded; just top-up recent days.
-		return s.AppendBTCHistory(ctx, cg)
+		return s.AppendBTCHistory(ctx, yh)
 	}
-	slog.Info("btc_price_history: seeding full history from CoinGecko")
-	rows, err := cg.FetchBTCDailyHistory(ctx)
+	slog.Info("btc_price_history: seeding full history from Yahoo Finance")
+	rows, err := yh.FetchBTCDailyHistory(ctx)
 	if err != nil {
 		return fmt.Errorf("fetch BTC history: %w", err)
 	}
@@ -51,16 +57,12 @@ func (s *Service) SeedBTCHistory(ctx context.Context, cg *providers.CoinGeckoCli
 	return nil
 }
 
-// AppendBTCHistory tops up the last ~30 days from CoinGecko in case the
-// cron has been off, or to catch the latest close. Cheap — same endpoint
-// but a smaller window would be ideal; CoinGecko free tier doesn't
-// support arbitrary date ranges for non-Pro callers, so we fetch the
-// last ~30 days via days=30 and upsert.
-func (s *Service) AppendBTCHistory(ctx context.Context, cg *providers.CoinGeckoClient) error {
-	// Re-using FetchBTCDailyHistory is overkill (gets all of history). We
-	// could be smarter, but the cost is one extra MB of JSON per day from
-	// CoinGecko — negligible vs the rate-limit concern. Keep it simple.
-	rows, err := cg.FetchBTCDailyHistory(ctx)
+// AppendBTCHistory tops up daily BTC closes from Yahoo to catch the
+// latest data. Yahoo returns the full history on every call but the
+// upsert (INSERT OR REPLACE keyed on snapshot_date) makes this a cheap
+// no-op for unchanged days. Worst case is ~1MB of JSON daily; acceptable.
+func (s *Service) AppendBTCHistory(ctx context.Context, yh *providers.YahooClient) error {
+	rows, err := yh.FetchBTCDailyHistory(ctx)
 	if err != nil {
 		return fmt.Errorf("append BTC history: %w", err)
 	}
@@ -112,11 +114,11 @@ func (s *Service) BTCHistory(ctx context.Context) ([]providers.BTCMarketChartDay
 // price-history-derived Cowen indicators. Returned by ComputeCowen so
 // the refresher upserts them in one go.
 type CowenIndicators struct {
-	LogBand         string   // "lower" | "mid_lower" | "mid" | "mid_upper" | "upper" | ""
-	LogBandValue    *float64 // residual in band-width units (for display)
-	PriceVs200WMA   *float64 // current_close / 200wma (ratio)
-	RiskProxy       *float64 // 0..1, mean of normalised inputs (per Spec 9e §D8)
-	Latest          time.Time
+	LogBand       string   // "lower" | "mid_lower" | "mid" | "mid_upper" | "upper" | ""
+	LogBandValue  *float64 // residual in band-width units (for display)
+	PriceVs200WMA *float64 // current_close / 200wma (ratio)
+	RiskProxy     *float64 // 0..1, mean of normalised inputs (per Spec 9e §D8)
+	Latest        time.Time
 }
 
 // ComputeCowen runs the Cowen indicator math on the BTC history.

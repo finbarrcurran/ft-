@@ -153,7 +153,84 @@ func (s *Server) handleCryptoIndicatorsComposite(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"composite":   snap,
-		"bandLabel":   cryptoindicators.BandLabel(snap.ActionBand),
+		"composite": snap,
+		"bandLabel": cryptoindicators.BandLabel(snap.ActionBand),
 	})
 }
+
+// GET /api/crypto-indicators/btc-history?days=730  (v1.12 — Phase 2b)
+//
+// Returns daily BTC closes from btc_price_history. Used by the BTC
+// log-band chart at the top of the cowen bucket. Default 2 years
+// (matches what's visually useful at the chart resolution we render).
+func (s *Server) handleCryptoIndicatorsBTCHistory(w http.ResponseWriter, r *http.Request) {
+	if s.cryptoIndicators == nil {
+		writeError(w, http.StatusNotFound, "crypto indicators not initialised")
+		return
+	}
+	days := 730
+	if d := r.URL.Query().Get("days"); d != "" {
+		if v, err := parsePositiveInt(d, 10000); err == nil {
+			days = v
+		}
+	}
+	rows, err := s.cryptoIndicators.BTCPriceHistory(r.Context(), days)
+	if err != nil {
+		mapStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"history": rows,
+		"days":    days,
+	})
+}
+
+// GET /api/crypto-indicators/composite/history?days=90  (v1.12 — Phase 2c)
+//
+// Returns daily composite snapshots for the hero gauge trend display.
+func (s *Server) handleCryptoIndicatorsCompositeHistory(w http.ResponseWriter, r *http.Request) {
+	if s.cryptoIndicators == nil {
+		writeError(w, http.StatusNotFound, "crypto indicators not initialised")
+		return
+	}
+	days := 90
+	if d := r.URL.Query().Get("days"); d != "" {
+		if v, err := parsePositiveInt(d, 730); err == nil {
+			days = v
+		}
+	}
+	rows, err := s.cryptoIndicators.CompositeHistory(r.Context(), days)
+	if err != nil {
+		mapStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"history": rows,
+		"days":    days,
+	})
+}
+
+// parsePositiveInt parses a query-string integer in (0, max]. Returns
+// the integer or an error.
+func parsePositiveInt(s string, max int) (int, error) {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, errInvalidInt
+		}
+		n = n*10 + int(c-'0')
+		if n > max {
+			return max, nil
+		}
+	}
+	if n < 1 {
+		return 0, errInvalidInt
+	}
+	return n, nil
+}
+
+var errInvalidInt = errInvalidIntT{}
+
+type errInvalidIntT struct{}
+
+func (errInvalidIntT) Error() string { return "not a positive integer" }
