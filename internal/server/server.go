@@ -213,6 +213,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/crypto-indicators/composite/history", s.requireUser(s.handleCryptoIndicatorsCompositeHistory))
 	// v1.14 — ETF flow daily bar chart in universal bucket.
 	s.mux.HandleFunc("GET /api/crypto-indicators/etf-flow/history", s.requireUser(s.handleCryptoIndicatorsETFFlowHistory))
+	// v1.20 — one-shot historical backfill from FRED + alt.me + local BTC + Farside.
+	s.mux.HandleFunc("POST /api/crypto-indicators/backfill", s.requireUser(s.handleCryptoIndicatorsBackfill))
 
 	// Spec 9k Phase A + B — Political & Insider Signal endpoints.
 	s.mux.HandleFunc("GET /api/signals", s.requireUser(s.handleListSignals))

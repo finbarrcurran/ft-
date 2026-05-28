@@ -73,6 +73,65 @@ func (c *FREDClient) FetchSeriesAbsoluteTrend(ctx context.Context, seriesID stri
 	return c.fetchSeries(ctx, seriesID, true)
 }
 
+// FREDHistoricalPoint is one (date, value) observation, used by the v1.20
+// backfill to populate historical snapshots from FRED.
+type FREDHistoricalPoint struct {
+	Date  time.Time
+	Value float64
+}
+
+// FetchHistoricalSeries returns ALL non-missing observations for a FRED
+// series from `start` to now, sorted chronologically (oldest first).
+// Used by the v1.20 crypto-indicators backfill to fill historical
+// snapshots from FRED's full archive (DXY back to 2006, DGS2 back to
+// 1976, CFNAI back to 1967 — we cap at ~3 years for sanity).
+func (c *FREDClient) FetchHistoricalSeries(ctx context.Context, seriesID string, start time.Time) ([]FREDHistoricalPoint, error) {
+	if c.APIKey == "" {
+		return nil, fmt.Errorf("FRED_API_KEY not set")
+	}
+	q := url.Values{}
+	q.Set("series_id", seriesID)
+	q.Set("api_key", c.APIKey)
+	q.Set("file_type", "json")
+	q.Set("observation_start", start.Format("2006-01-02"))
+	q.Set("sort_order", "asc")
+	q.Set("limit", "5000")
+	u := "https://api.stlouisfed.org/fred/series/observations?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("FRED fetch %s: %w", seriesID, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("FRED %s HTTP %d", seriesID, resp.StatusCode)
+	}
+	var data fredResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("FRED decode %s: %w", seriesID, err)
+	}
+	out := make([]FREDHistoricalPoint, 0, len(data.Observations))
+	for _, o := range data.Observations {
+		if o.Value == "" || o.Value == "." {
+			continue
+		}
+		v, err := strconv.ParseFloat(o.Value, 64)
+		if err != nil {
+			continue
+		}
+		t, err := time.Parse("2006-01-02", o.Date)
+		if err != nil {
+			continue
+		}
+		out = append(out, FREDHistoricalPoint{Date: t, Value: v})
+	}
+	return out, nil
+}
+
 func (c *FREDClient) fetchSeries(ctx context.Context, seriesID string, absoluteTrend bool) Reading {
 	if c.APIKey == "" {
 		return Reading{Err: "FRED_API_KEY not set on server"}

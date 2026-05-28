@@ -196,6 +196,36 @@ func (s *Server) handleCryptoIndicatorsBTCHistory(w http.ResponseWriter, r *http
 	})
 }
 
+// POST /api/crypto-indicators/backfill?days=730  (v1.20)
+//
+// One-shot historical backfill of crypto_indicator_snapshots +
+// crypto_composite_snapshots from FRED + alternative.me + local BTC
+// history + local Farside JSON cache. Idempotent (INSERT OR REPLACE).
+// Takes ~30-60 seconds for 730 days depending on FRED throttling.
+// Returns a summary of what was written.
+func (s *Server) handleCryptoIndicatorsBackfill(w http.ResponseWriter, r *http.Request) {
+	if s.cryptoIndicators == nil {
+		writeError(w, http.StatusNotFound, "crypto indicators not initialised")
+		return
+	}
+	days := 730
+	if d := r.URL.Query().Get("days"); d != "" {
+		if v, err := parsePositiveInt(d, 1825); err == nil {
+			days = v
+		}
+	}
+	// Generous timeout — backfill makes ~4 external calls plus N local
+	// snapshots; total wall time is dominated by FRED (~5-15s).
+	ctx, cancel := contextWithTimeout(r, 240)
+	defer cancel()
+	res, err := s.cryptoIndicators.Backfill(ctx, days, s.cfg.FREDApiKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 // GET /api/crypto-indicators/composite/history?days=90  (v1.12 — Phase 2c)
 //
 // Returns daily composite snapshots for the hero gauge trend display.
