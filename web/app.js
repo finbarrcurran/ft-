@@ -77,6 +77,31 @@ function pct(v, decimals = 1) {
   return `<span class="${cls}">${v > 0 ? '+' : ''}${f.format(v)}%</span>`;
 }
 
+// distToSlCell — v1.19A. Pct of current price from the (effective) stop
+// loss. Amber chip when within 5% of trigger; red chip when within 2%
+// or already breached. Negative dist = current price has crossed below
+// the stop (alarm state).
+function distToSlCell(v) {
+  if (v == null || Number.isNaN(v)) return '<span class="dim">—</span>';
+  const f = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const formatted = `${v > 0 ? '+' : ''}${f.format(v)}%`;
+  // Color/state thresholds: alarm <= 0 (breached or at SL); red 0–2%;
+  // amber 2–5%; otherwise plain green.
+  let chip = 'gain';
+  let title = `Distance to stop-loss: ${formatted}`;
+  if (v <= 0) {
+    chip = 'sl-alarm';
+    title = `Stop-loss BREACHED — current is at or below the SL price (${formatted}). Re-evaluate immediately.`;
+  } else if (v < 2) {
+    chip = 'sl-red';
+    title = `Within 2% of stop-loss (${formatted}) — high risk of trigger.`;
+  } else if (v < 5) {
+    chip = 'sl-amber';
+    title = `Within 5% of stop-loss (${formatted}) — monitor.`;
+  }
+  return `<span class="dist-sl-chip ${chip}" title="${escapeHTML(title)}">${formatted}</span>`;
+}
+
 function escapeHTML(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -184,18 +209,36 @@ function scoreCell(score, clickable, kind, id) {
     }
     return '<span class="dim">—</span>';
   }
+  const isThesis = score.source === 'thesis';
   const stale = score.staleDays > 90;
   const cls = ['score-badge'];
   cls.push(score.passes ? 'pass' : 'fail');
   if (stale) cls.push('stale');
   if (clickable) cls.push('clickable');
+  if (isThesis) cls.push('thesis-source');
   const tickMark = score.passes ? ' ✓' : '';
   const staleMark = stale ? ` ⚠ ${score.staleDays}d` : '';
-  const tooltip = `Scored ${score.scoredAt.slice(0,10)} · framework: ${escapeHTML(score.frameworkId)}${hint}`;
+  // v1.19B — 🔒 prefix when the score came from a locked thesis
+  // (theses_index). Tooltip switches to thesis context. Click-through
+  // to GitHub when a URL is present.
+  const lockIcon = isThesis ? '🔒 ' : '';
+  let tooltip;
+  if (isThesis) {
+    const subType = score.subType ? ` · ${score.subType}` : '';
+    tooltip = `Locked thesis (${score.adapter}${subType}) on ${score.lockedDate || score.scoredAt?.slice(0,10) || 'unknown date'}${score.githubUrl ? ' · click to view on GitHub' : ''}${hint}`;
+  } else {
+    tooltip = `Scored ${score.scoredAt?.slice(0,10) || '—'} · framework: ${escapeHTML(score.frameworkId)}${hint}`;
+  }
   const attrs = clickable
     ? `data-rescore-kind="${escapeHTML(kind)}" data-rescore-id="${id}"`
     : '';
-  return `<span class="${cls.join(' ')}" ${attrs} title="${tooltip}">${score.totalScore}/${score.maxScore}${tickMark}${staleMark}</span>`;
+  if (isThesis && score.githubUrl) {
+    // Wrap in an anchor so the locked-thesis row links straight to the
+    // canonical MD file. Stop click bubbling so the rescore handler
+    // doesn't fire underneath.
+    return `<a href="${escapeHTML(score.githubUrl)}" target="_blank" rel="noopener" class="${cls.join(' ')}" ${attrs} title="${tooltip}" onclick="event.stopPropagation()">${lockIcon}${score.totalScore}/${score.maxScore}${tickMark}${staleMark}</a>`;
+  }
+  return `<span class="${cls.join(' ')}" ${attrs} title="${tooltip}">${lockIcon}${score.totalScore}/${score.maxScore}${tickMark}${staleMark}</span>`;
 }
 
 // marketCell — Spec 5 D3. Per-row market column from {open, onBreak, nextChange, nextChangeKind, name, tzName}.
@@ -2318,7 +2361,7 @@ async function renderStocks() {
         <td class="num">${dash(r.rsi14, fmtNum2)}</td>
         <td class="num">${proposedSL}</td>
         <td class="num">${proposedTP}</td>
-        <td class="num">${pct(m.distanceToSlPct, 1)}</td>
+        <td class="num">${distToSlCell(m.distanceToSlPct)}</td>
         ${vol12mCell}
         <td>${earningsCell(r.earningsDate)}</td>
         <td>${exDivCell(r.exDividendDate)}</td>
