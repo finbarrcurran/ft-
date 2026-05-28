@@ -6457,6 +6457,211 @@ function renderCICompositeExpanded(history, rangeLabel) {
   </div>`;
 }
 
+// renderCIModalChart — full-width line chart for the drill-down modal.
+// Primary indicator is plotted in its native units (left Y-axis). Up to
+// 2 compare indicators can be overlaid; each compare line is normalised
+// to a 0..1 range within the visible window and plotted using a shared
+// right-side normalised axis so the SHAPE of trends is comparable even
+// when the underlying units differ (e.g., overlaying DXY against
+// stablecoin supply ROC).
+function renderCIModalChart(primary, comparedList) {
+  const w = 960;
+  const h = 280;
+  const padL = 60;
+  const padR = 60;
+  const padT = 18;
+  const padB = 30;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+
+  const series = [{ ...primary, role: 'primary' }, ...comparedList.map((c) => ({ ...c, role: 'compare' }))];
+
+  // Build per-series numeric series (filter null/missing).
+  const buckets = series.map((s, idx) => {
+    const hist = (s.history || []).filter((p) => p.value != null);
+    const vals = hist.map((p) => Number(p.value));
+    const min = vals.length ? Math.min(...vals) : 0;
+    const max = vals.length ? Math.max(...vals) : 1;
+    const colors = ['#f59e0b', '#60a5fa', '#a78bfa']; // primary + 2 compares
+    return {
+      ...s,
+      hist,
+      vals,
+      min,
+      max,
+      range: (max - min) || (Math.abs(max) * 0.02) || 1,
+      color: colors[idx] || '#888',
+    };
+  });
+
+  if (!buckets[0].hist.length) {
+    return `<div class="ci-chart-empty dim">No history data yet for this indicator.</div>`;
+  }
+
+  // Primary Y-axis uses primary's real units. Find a consistent X-axis
+  // across all series (use the date axis from the primary).
+  const primaryB = buckets[0];
+  const xCount = primaryB.hist.length;
+  const stepX = xCount > 1 ? plotW / (xCount - 1) : plotW;
+  const xFor = (i) => padL + i * stepX;
+  const yForPrimary = (v) => padT + plotH - ((v - primaryB.min) / primaryB.range) * (plotH - 4) - 2;
+  const yForNorm = (v, b) => padT + plotH - ((v - b.min) / b.range) * (plotH - 4) - 2;
+
+  // Build paths.
+  const paths = buckets.map((b, idx) => {
+    if (!b.hist.length) return '';
+    const yFn = idx === 0 ? yForPrimary : (v) => yForNorm(v, b);
+    // Align compare series to primary index by date matching where possible;
+    // simpler: just plot at its own index spacing.
+    const compStepX = b.hist.length > 1 ? plotW / (b.hist.length - 1) : plotW;
+    const xCompFor = (i) => padL + i * compStepX;
+    const xUse = idx === 0 ? xFor : xCompFor;
+    const pts = b.hist.map((p, i) => `${i === 0 ? 'M' : 'L'}${xUse(i).toFixed(1)},${yFn(Number(p.value)).toFixed(1)}`);
+    const sw = idx === 0 ? 2.0 : 1.4;
+    const dash = idx === 0 ? '' : (idx === 1 ? '0' : '3,2');
+    const opacity = idx === 0 ? 1.0 : 0.85;
+    return `<path d="${pts.join(' ')}" fill="none" stroke="${b.color}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round" opacity="${opacity}" ${dash ? `stroke-dasharray="${dash}"` : ''} />`;
+  }).join('');
+
+  // Y-axis labels for the primary (real units).
+  const fmtVal = (v) => Math.abs(v) >= 1000
+    ? `${(v / 1000).toFixed(1)}k`
+    : Math.abs(v) >= 10
+      ? v.toFixed(1)
+      : v.toFixed(3).replace(/\.?0+$/, '');
+  const yLabels = [primaryB.min, (primaryB.min + primaryB.max) / 2, primaryB.max].map((v, idx) => {
+    const y = padT + plotH * (1 - idx / 2);
+    return `<text x="${padL - 6}" y="${(y + 3).toFixed(0)}" font-size="9" fill="#888" text-anchor="end">${fmtVal(v)}</text>
+            <line x1="${padL}" y1="${y.toFixed(0)}" x2="${(w - padR).toFixed(0)}" y2="${y.toFixed(0)}" stroke="#2a2a2a" stroke-width="0.5" stroke-dasharray="2,3" />`;
+  }).join('');
+
+  // X-axis: first / middle / last date from primary.
+  const xLabels = [0, Math.floor(xCount / 2), xCount - 1].map((i) => {
+    const d = primaryB.hist[i]?.date || '';
+    return `<text x="${xFor(i).toFixed(0)}" y="${(h - 10).toFixed(0)}" font-size="9" fill="#888" text-anchor="middle">${escapeHTML(d)}</text>`;
+  }).join('');
+
+  // Legend (top, in-chart).
+  const legend = buckets.map((b, idx) => {
+    const last = b.vals.length ? b.vals[b.vals.length - 1] : null;
+    const lab = b.role === 'primary' ? (b.displayName || b.id) : (b.displayName || b.id) + ' (norm)';
+    const lastFmt = last != null ? fmtVal(last) : '—';
+    const x = w - padR + 6;
+    const y = padT + 6 + idx * 16;
+    return `<g>
+      <line x1="${x.toFixed(0)}" y1="${y.toFixed(0)}" x2="${(x + 14).toFixed(0)}" y2="${y.toFixed(0)}" stroke="${b.color}" stroke-width="${idx === 0 ? 2.0 : 1.4}" />
+      <text x="${(x + 18).toFixed(0)}" y="${(y + 3).toFixed(0)}" font-size="9" fill="#ccc">${escapeHTML(lab)} ${lastFmt}</text>
+    </g>`;
+  }).join('');
+
+  return `<svg class="ci-modal-chart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="Indicator drill-down chart">
+    ${yLabels}
+    ${xLabels}
+    ${paths}
+    ${legend}
+  </svg>`;
+}
+
+// renderCIModal — full drill-down modal HTML for a single indicator.
+// Includes header + current state + big chart with optional compare
+// overlay + methodology + recent samples table. Closes on Esc / backdrop
+// click / X button (wired up in renderCryptoIndicators).
+function renderCIModal(indicator, allIndicators, compareIds) {
+  if (!indicator) return '';
+  const i = indicator;
+  const score = renderCIScoreChip(i.currentScore);
+  const trend = i.trend4w != null
+    ? `<span class="${i.trend4w > 0.5 ? 'gain' : i.trend4w < -0.5 ? 'loss' : 'dim'}">${i.trend4w > 0.5 ? '▲' : i.trend4w < -0.5 ? '▼' : '▬'} ${Number(i.trend4w).toFixed(1)}% 4w</span>`
+    : '<span class="dim">no 4w trend</span>';
+  const lastUpdated = i.updatedAt
+    ? new Date(i.updatedAt * 1000).toLocaleString()
+    : 'unknown';
+  const valStr = i.currentValue != null
+    ? Number(i.currentValue).toFixed(Math.abs(i.currentValue) < 1 ? 4 : 2)
+    : '—';
+
+  // Compare dropdown options: every indicator except the primary and
+  // already-selected compares.
+  const compareIndicators = (compareIds || [])
+    .map((id) => allIndicators.find((x) => x.id === id))
+    .filter(Boolean);
+  const compareOptions = allIndicators
+    .filter((x) => x.id !== i.id && !compareIds.includes(x.id))
+    .map((x) => `<option value="${escapeHTML(x.id)}">${escapeHTML(x.displayName)} (${escapeHTML(x.bucket)})</option>`)
+    .join('');
+  const compareCanAdd = compareIds.length < 2;
+
+  // Recent samples table (last 20 entries from history, newest first).
+  const samples = (i.history || []).slice().reverse().slice(0, 20);
+  const samplesRows = samples.map((p) => {
+    const v = p.value != null ? Number(p.value).toFixed(Math.abs(p.value) < 1 ? 4 : 2) : '—';
+    const s = p.score != null ? renderCIScoreChip(p.score) : '<span class="dim">—</span>';
+    return `<tr><td>${escapeHTML(p.date)}</td><td class="num">${v}</td><td>${s}</td></tr>`;
+  }).join('');
+  const samplesTable = samples.length
+    ? `<table class="ci-modal-table">
+        <thead><tr><th>Date</th><th class="num">Value</th><th>Score</th></tr></thead>
+        <tbody>${samplesRows}</tbody>
+      </table>`
+    : `<p class="dim">No snapshot history yet — the daily 00:30 UTC cron writes one row per day.</p>`;
+
+  return `
+    <div class="ci-modal-backdrop" id="ci-modal-backdrop">
+      <div class="ci-modal" role="dialog" aria-modal="true" aria-labelledby="ci-modal-title">
+        <div class="ci-modal-head">
+          <div class="ci-modal-title-wrap">
+            <span class="ci-modal-bucket-pill ci-hm-bucket-${i.bucket}">${escapeHTML(i.bucket)}</span>
+            <strong id="ci-modal-title">${escapeHTML(i.displayName)}</strong>
+            <span class="dim" style="font-size:0.78rem">${escapeHTML(i.id)}</span>
+          </div>
+          <button class="ci-modal-close" id="ci-modal-close" aria-label="Close" title="Close (Esc)">×</button>
+        </div>
+        <div class="ci-modal-body">
+          <div class="ci-modal-current">
+            <div class="ci-modal-val-block">
+              <div class="ci-modal-val">${valStr}<span class="ci-modal-val-unit dim"> ${i.unit ? escapeHTML(i.unit) : ''}</span></div>
+              <div class="ci-modal-meta">${score} ${trend} <span class="dim">· last updated ${escapeHTML(lastUpdated)}</span></div>
+              ${i.fetchError ? `<div class="loss" style="font-size:0.82rem; margin-top:0.3rem">⚠ ${escapeHTML(i.fetchError)}</div>` : ''}
+            </div>
+          </div>
+
+          <div class="ci-modal-chart-wrap">
+            ${renderCIModalChart(i, compareIndicators)}
+          </div>
+
+          <div class="ci-modal-compare">
+            <label class="dim" style="font-size:0.82rem">Compare with:</label>
+            ${compareCanAdd ? `
+              <select id="ci-modal-compare-add" class="ci-range-select">
+                <option value="">— Add an indicator —</option>
+                ${compareOptions}
+              </select>
+            ` : '<span class="dim" style="font-size:0.78rem">2 compares max</span>'}
+            <div class="ci-modal-compare-pills">
+              ${compareIndicators.map((c) => `
+                <span class="ci-modal-compare-pill">
+                  ${escapeHTML(c.displayName)}
+                  <button class="ci-modal-compare-remove" data-id="${escapeHTML(c.id)}" title="Remove">×</button>
+                </span>
+              `).join('')}
+            </div>
+          </div>
+
+          <div class="ci-modal-section">
+            <h4 class="ci-modal-h4">Methodology</h4>
+            <p class="ci-modal-p">${escapeHTML(i.tooltip || 'No methodology note yet for this indicator.')}</p>
+          </div>
+
+          <div class="ci-modal-section">
+            <h4 class="ci-modal-h4">Recent samples</h4>
+            ${samplesTable}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // renderCIMacroMiniChart — small line chart for an indicator's value
 // history (typically pal-bucket macro readings like DXY, US 2Y, CFNAI).
 // Used by the macro strip above the pal bucket and by the stablecoin
@@ -6657,6 +6862,8 @@ const CI_RANGE_OPTIONS = [
 if (!state.cryptoIndicators) state.cryptoIndicators = {};
 if (!state.cryptoIndicators.rangeKey) state.cryptoIndicators.rangeKey = '90d';
 if (state.cryptoIndicators.heroExpanded == null) state.cryptoIndicators.heroExpanded = false;
+if (state.cryptoIndicators.modalIndicatorId == null) state.cryptoIndicators.modalIndicatorId = null;
+if (!Array.isArray(state.cryptoIndicators.compareIds)) state.cryptoIndicators.compareIds = [];
 
 function ciRangeDays() {
   const opt = CI_RANGE_OPTIONS.find((o) => o.key === state.cryptoIndicators.rangeKey);
@@ -6796,7 +7003,7 @@ async function renderCryptoIndicators() {
         ? `<div class="ci-card-mini-chart">${renderCIStablecoinChart(i)}</div>`
         : `<div class="ci-card-spark">${spark}</div>`;
       return `
-        <div class="ci-card ci-card-v2 ${isWideChart ? 'ci-card-wide' : ''}">
+        <div class="ci-card ci-card-v2 ${isWideChart ? 'ci-card-wide' : ''} ci-card-clickable" data-indicator-id="${escapeHTML(i.id)}" tabindex="0" role="button" aria-label="Open ${escapeHTML(i.displayName)} details">
           <div class="ci-card-head">
             <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
             <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
@@ -6861,7 +7068,7 @@ async function renderCryptoIndicators() {
         const spark = renderCISparkline(i.history || [], 'value', { width: 100, height: 28 });
         if (isFearGreed && val != null) {
           return `
-            <div class="ci-card ci-card-v2 ci-card-fg">
+            <div class="ci-card ci-card-v2 ci-card-fg ci-card-clickable" data-indicator-id="${escapeHTML(i.id)}" tabindex="0" role="button" aria-label="Open ${escapeHTML(i.displayName)} details">
               <div class="ci-card-head">
                 <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
                 <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
@@ -6877,7 +7084,7 @@ async function renderCryptoIndicators() {
           `;
         }
         return `
-          <div class="ci-card ci-card-v2">
+          <div class="ci-card ci-card-v2 ci-card-clickable" data-indicator-id="${escapeHTML(i.id)}" tabindex="0" role="button" aria-label="Open ${escapeHTML(i.displayName)} details">
             <div class="ci-card-head">
               <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
               <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
@@ -6904,6 +7111,15 @@ async function renderCryptoIndicators() {
     return `<option value="${o.key}"${sel}>${escapeHTML(o.label)}</option>`;
   }).join('');
 
+  // v1.18 — drill-down modal HTML (rendered only when an indicator is
+  // selected; null modalIndicatorId = no modal).
+  const modalIndicator = state.cryptoIndicators.modalIndicatorId
+    ? indicators.find((x) => x.id === state.cryptoIndicators.modalIndicatorId)
+    : null;
+  const modalHTML = modalIndicator
+    ? renderCIModal(modalIndicator, indicators, state.cryptoIndicators.compareIds)
+    : '';
+
   content.innerHTML = `
     <div class="crypto-indicators-tab">
       <div class="ci-toolbar">
@@ -6912,7 +7128,7 @@ async function renderCryptoIndicators() {
           Range:
           <select id="ci-range" class="ci-range-select">${rangeOpts}</select>
         </label>
-        <span class="dim" style="font-size:0.78rem; margin-left:auto">Auto-syncs daily at 00:30 UTC · v1.17</span>
+        <span class="dim" style="font-size:0.78rem; margin-left:auto">Auto-syncs daily at 00:30 UTC · v1.18 · click any card for details</span>
       </div>
       ${heroHTML}
       ${heatmapHTML}
@@ -6924,6 +7140,7 @@ async function renderCryptoIndicators() {
         Decision support only. Not financial advice. Composite tracks correlation, not causation.
       </div>
     </div>
+    ${modalHTML}
   `;
 
   $('#ci-ism-upload')?.addEventListener('click', () => $('#ci-ism-file').click());
@@ -6967,6 +7184,69 @@ async function renderCryptoIndicators() {
     state.cryptoIndicators.heroExpanded = !state.cryptoIndicators.heroExpanded;
     renderCryptoIndicators();
   });
+
+  // v1.18 — drill-down modal: card click opens modal
+  document.querySelectorAll('.ci-card-clickable').forEach((card) => {
+    const openModal = () => {
+      const id = card.getAttribute('data-indicator-id');
+      if (!id) return;
+      state.cryptoIndicators.modalIndicatorId = id;
+      state.cryptoIndicators.compareIds = [];
+      renderCryptoIndicators();
+    };
+    card.addEventListener('click', openModal);
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openModal();
+      }
+    });
+  });
+
+  // v1.18 — modal close handlers (X button, backdrop click, Escape)
+  if (state.cryptoIndicators.modalIndicatorId) {
+    const closeModal = () => {
+      state.cryptoIndicators.modalIndicatorId = null;
+      state.cryptoIndicators.compareIds = [];
+      renderCryptoIndicators();
+    };
+    $('#ci-modal-close')?.addEventListener('click', closeModal);
+    $('#ci-modal-backdrop')?.addEventListener('click', (e) => {
+      // Only close when the backdrop itself is the click target — not its children.
+      if (e.target === e.currentTarget) closeModal();
+    });
+    // Single global Esc listener; safe to re-attach because we keyed by
+    // a marker function reference is overwritten on each render.
+    document.removeEventListener('keydown', window.__ciModalEsc || (() => {}));
+    window.__ciModalEsc = (e) => { if (e.key === 'Escape') closeModal(); };
+    document.addEventListener('keydown', window.__ciModalEsc);
+
+    // Compare-indicator dropdown: add a compare
+    $('#ci-modal-compare-add')?.addEventListener('change', (e) => {
+      const id = e.target.value;
+      if (!id) return;
+      const arr = state.cryptoIndicators.compareIds || [];
+      if (!arr.includes(id) && arr.length < 2) {
+        state.cryptoIndicators.compareIds = [...arr, id];
+        renderCryptoIndicators();
+      }
+    });
+    // Compare-indicator remove buttons
+    document.querySelectorAll('.ci-modal-compare-remove').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-id');
+        state.cryptoIndicators.compareIds = (state.cryptoIndicators.compareIds || []).filter((x) => x !== id);
+        renderCryptoIndicators();
+      });
+    });
+  } else {
+    // Ensure stray Esc listener from a previous open is removed.
+    if (window.__ciModalEsc) {
+      document.removeEventListener('keydown', window.__ciModalEsc);
+      window.__ciModalEsc = null;
+    }
+  }
 
   $('#ci-refresh')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;

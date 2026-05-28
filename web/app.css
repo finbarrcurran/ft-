@@ -3527,3 +3527,153 @@ input.autofilled, select.autofilled {
 .ci-hero-left:hover .ci-hero-expand-hint { opacity: 1; }
 .ci-hero-expanded-chart { margin-bottom: 1rem; }
 .ci-comp-expanded { background: rgba(0,0,0,0.20); }
+
+/* === v1.18 — drill-down modal + clickable cards === */
+.ci-card-clickable {
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.ci-card-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+}
+.ci-card-clickable:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+.ci-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1.5rem;
+  backdrop-filter: blur(2px);
+}
+.ci-modal {
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  width: min(1100px, 95vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+}
+.ci-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1.2rem;
+  border-bottom: 1px solid #2a2a2a;
+}
+.ci-modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.ci-modal-title-wrap strong {
+  font-size: 1.05rem;
+}
+.ci-modal-bucket-pill {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: lowercase;
+  background: rgba(136,136,136,0.20);
+  color: #ddd;
+}
+.ci-hm-bucket-cowen.ci-modal-bucket-pill { background: rgba(96,165,250,0.20); color: #cfe2ff; }
+.ci-hm-bucket-pal.ci-modal-bucket-pill { background: rgba(249,115,22,0.20); color: #ffd9b8; }
+.ci-hm-bucket-universal.ci-modal-bucket-pill { background: rgba(52,211,153,0.20); color: #c2f0dc; }
+.ci-hm-bucket-sentiment.ci-modal-bucket-pill { background: rgba(167,139,250,0.20); color: #ddd0fa; }
+
+.ci-modal-close {
+  background: transparent;
+  border: none;
+  color: #ccc;
+  font-size: 1.4rem;
+  cursor: pointer;
+  padding: 0.2rem 0.6rem;
+  line-height: 1;
+  border-radius: 4px;
+}
+.ci-modal-close:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.ci-modal-body { padding: 1rem 1.2rem 1.2rem; display: flex; flex-direction: column; gap: 1rem; }
+
+.ci-modal-current { display: flex; align-items: baseline; }
+.ci-modal-val-block { display: flex; flex-direction: column; gap: 0.3rem; }
+.ci-modal-val { font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ci-modal-val-unit { font-size: 0.85rem; font-weight: 400; }
+.ci-modal-meta { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 0.82rem; }
+
+.ci-modal-chart-wrap {
+  background: rgba(0,0,0,0.20);
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 0.6rem;
+}
+.ci-modal-chart { display: block; width: 100%; }
+
+.ci-modal-compare {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  background: rgba(0,0,0,0.15);
+  border-radius: 6px;
+}
+.ci-modal-compare-pills { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.ci-modal-compare-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-size: 0.78rem;
+}
+.ci-modal-compare-remove {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  border-radius: 3px;
+}
+.ci-modal-compare-remove:hover { background: rgba(255,255,255,0.10); color: #fff; }
+
+.ci-modal-section { display: flex; flex-direction: column; gap: 0.4rem; }
+.ci-modal-h4 { font-size: 0.95rem; margin: 0; }
+.ci-modal-p { font-size: 0.85rem; color: #bbb; margin: 0; line-height: 1.5; }
+
+.ci-modal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.ci-modal-table thead th {
+  text-align: left;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid #2a2a2a;
+  background: rgba(0,0,0,0.20);
+  font-weight: 500;
+  color: #aaa;
+}
+.ci-modal-table th.num, .ci-modal-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ci-modal-table tbody td {
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid #1f1f1f;
+}
+.ci-modal-table tbody tr:hover { background: rgba(255,255,255,0.03); }
