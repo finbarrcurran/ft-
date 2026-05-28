@@ -87,10 +87,29 @@ type CompositeSnapshot struct {
 	EffectiveWeights  map[string]float64 `json:"effectiveWeights,omitempty"`
 }
 
-// ListIndicators returns the latest reading for every indicator, joined
-// with the embedded definition (for display_name, unit, tooltip).
-// Ordered by bucket → display_name for stable rendering.
-func (s *Service) ListIndicators(ctx context.Context) ([]IndicatorRow, error) {
+// ListIndicatorsWithHistory is like ListIndicators but takes the per-row
+// history window as a parameter. Used by /api/crypto-indicators when the
+// caller wants to override the default 30-day sparkline window (e.g.,
+// the time-range selector dropdown in v1.17).
+func (s *Service) ListIndicatorsWithHistory(ctx context.Context, days int) ([]IndicatorRow, error) {
+	if days < 2 {
+		days = 30
+	}
+	if days > 1825 {
+		days = 1825
+	}
+	out, err := s.listIndicatorsCore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.attachHistory(ctx, out, days)
+	return out, nil
+}
+
+// listIndicatorsCore returns indicator rows WITHOUT attaching history.
+// Internal helper shared by ListIndicators (30-day default) and
+// ListIndicatorsWithHistory (caller-specified window).
+func (s *Service) listIndicatorsCore(ctx context.Context) ([]IndicatorRow, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, bucket, display_name, unit, source,
 		       current_value, current_score, trend_4w, updated_at,
@@ -107,7 +126,6 @@ func (s *Service) ListIndicators(ctx context.Context) ([]IndicatorRow, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
 	out := []IndicatorRow{}
 	for rows.Next() {
 		var r IndicatorRow
@@ -140,17 +158,17 @@ func (s *Service) ListIndicators(ctx context.Context) ([]IndicatorRow, error) {
 		r.Tooltip = TooltipFor(r.ID)
 		out = append(out, r)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	// Attach 30 days of snapshot history per indicator for sparklines.
-	if err := s.attachHistory(ctx, out, 30); err != nil {
-		// Non-fatal — sparklines just won't render. Log via the caller
-		// since Service has no logger; the API client can still use
-		// current values.
-		_ = err
-	}
-	return out, nil
+	return out, rows.Err()
+}
+
+// ListIndicators returns the latest reading for every indicator with the
+// default 30-day per-indicator history window attached. Callers wanting
+// a different window (e.g., the v1.17 time-range selector dropdown)
+// should use ListIndicatorsWithHistory(ctx, days).
+//
+// Ordered by bucket → display_name for stable rendering.
+func (s *Service) ListIndicators(ctx context.Context) ([]IndicatorRow, error) {
+	return s.ListIndicatorsWithHistory(ctx, 30)
 }
 
 // attachHistory loads the last `days` of snapshot history for every row

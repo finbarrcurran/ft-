@@ -6364,6 +6364,99 @@ function renderCIHeatmap(indicators) {
   </div>`;
 }
 
+// renderCICompositeExpanded — multi-line chart of composite + 4 sub-scores
+// over the selected time range. Surfaced when the hero gauge is clicked
+// (v1.17). Composite plotted on a -100..+100 axis (normalised to -1..+1
+// scale by dividing by 100 so all five lines share one Y-axis cleanly);
+// sub-scores already live on -1..+1.
+function renderCICompositeExpanded(history, rangeLabel) {
+  const w = 960;
+  const h = 240;
+  const padL = 44;
+  const padR = 90; // legend column on the right
+  const padT = 18;
+  const padB = 28;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  if (!Array.isArray(history) || history.length < 2) {
+    return `<div class="ci-chart-empty dim">Composite history will populate as the daily 00:30 UTC cron writes more snapshots…</div>`;
+  }
+  // Build series. Composite normalised to -1..+1 so it shares the axis.
+  const series = [
+    { key: 'composite',  label: 'Composite (÷ 100)', color: '#f59e0b', width: 2.0, dash: '',     get: (p) => (p.compositeScore != null ? p.compositeScore / 100 : null) },
+    { key: 'cowen',      label: 'Cowen',             color: '#60a5fa', width: 1.4, dash: '',     get: (p) => p.cowenSubscore },
+    { key: 'pal',        label: 'Pal',               color: '#f97316', width: 1.4, dash: '',     get: (p) => p.palSubscore },
+    { key: 'universal',  label: 'Universal',         color: '#34d399', width: 1.4, dash: '',     get: (p) => p.universalSubscore },
+    { key: 'sentiment',  label: 'Sentiment',         color: '#a78bfa', width: 1.4, dash: '',     get: (p) => p.sentimentSubscore },
+  ];
+
+  const yMin = -1, yMax = 1;
+  const range = yMax - yMin;
+  const stepX = plotW / (history.length - 1);
+  const yFor = (v) => padT + plotH - ((v - yMin) / range) * plotH;
+  const xFor = (i) => padL + i * stepX;
+  const zeroY = yFor(0);
+
+  // Y-axis labels at -1, -0.5, 0, +0.5, +1.
+  const yLabels = [-1, -0.5, 0, 0.5, 1].map((v) => {
+    const y = yFor(v);
+    const text = v === 0 ? '0' : (v > 0 ? '+' : '') + v.toFixed(1);
+    return `<text x="${padL - 6}" y="${(y + 3).toFixed(0)}" font-size="9" fill="#888" text-anchor="end">${text}</text>
+            <line x1="${padL}" y1="${y.toFixed(0)}" x2="${(w - padR).toFixed(0)}" y2="${y.toFixed(0)}" stroke="#2a2a2a" stroke-width="0.5" stroke-dasharray="${v === 0 ? '0' : '2,3'}" />`;
+  }).join('');
+
+  // X-axis labels at first / middle / last dates.
+  const xLabels = [0, Math.floor(history.length / 2), history.length - 1].map((i) => {
+    return `<text x="${xFor(i).toFixed(0)}" y="${(h - 8).toFixed(0)}" font-size="9" fill="#888" text-anchor="middle">${history[i].date}</text>`;
+  }).join('');
+
+  // Build paths per series.
+  const paths = series.map((s) => {
+    let started = false;
+    const pts = [];
+    history.forEach((p, i) => {
+      const v = s.get(p);
+      if (v == null) return;
+      pts.push(`${started ? 'L' : 'M'}${xFor(i).toFixed(1)},${yFor(v).toFixed(1)}`);
+      started = true;
+    });
+    if (pts.length === 0) return '';
+    return `<path d="${pts.join(' ')}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linejoin="round" stroke-linecap="round" ${s.dash ? `stroke-dasharray="${s.dash}"` : ''} />`;
+  }).join('');
+
+  // Legend (right column).
+  const legendStartY = padT + 6;
+  const legend = series.map((s, idx) => {
+    const last = [...history].reverse().find((p) => s.get(p) != null);
+    const lastV = last ? s.get(last) : null;
+    const y = legendStartY + idx * 18;
+    const lastFmt = lastV != null
+      ? (s.key === 'composite'
+          ? `${(lastV * 100).toFixed(1)}`
+          : (lastV > 0 ? '+' : '') + lastV.toFixed(2))
+      : '—';
+    return `<g>
+      <line x1="${(w - padR + 6).toFixed(0)}" y1="${y.toFixed(0)}" x2="${(w - padR + 22).toFixed(0)}" y2="${y.toFixed(0)}" stroke="${s.color}" stroke-width="${s.width}" />
+      <text x="${(w - padR + 26).toFixed(0)}" y="${(y + 3).toFixed(0)}" font-size="10" fill="#ccc">${s.label}</text>
+      <text x="${(w - 4).toFixed(0)}" y="${(y + 3).toFixed(0)}" font-size="10" fill="${s.color}" text-anchor="end" font-weight="600">${lastFmt}</text>
+    </g>`;
+  }).join('');
+
+  return `<div class="ci-chart-wrap ci-comp-expanded">
+    <div class="ci-chart-head">
+      <strong>Composite + sub-score history</strong>
+      <span class="dim">${escapeHTML(rangeLabel)} · ${history.length} snapshots</span>
+    </div>
+    <svg class="ci-chart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="Composite + sub-score multi-line chart">
+      ${yLabels}
+      <line x1="${padL}" y1="${zeroY.toFixed(0)}" x2="${(w - padR).toFixed(0)}" y2="${zeroY.toFixed(0)}" stroke="#444" stroke-width="0.5" />
+      ${paths}
+      ${xLabels}
+      ${legend}
+    </svg>
+  </div>`;
+}
+
 // renderCIMacroMiniChart — small line chart for an indicator's value
 // history (typically pal-bucket macro readings like DXY, US 2Y, CFNAI).
 // Used by the macro strip above the pal bucket and by the stablecoin
@@ -6553,19 +6646,45 @@ function renderCIETFFlowChart(history) {
   </div>`;
 }
 
+// v1.17 — time range selector state. Persisted across re-renders.
+const CI_RANGE_OPTIONS = [
+  { key: '30d',  days: 30,   label: '30 days' },
+  { key: '90d',  days: 90,   label: '90 days' },
+  { key: '6mo',  days: 180,  label: '6 months' },
+  { key: '1y',   days: 365,  label: '1 year' },
+  { key: 'all',  days: 1825, label: 'All' },
+];
+if (!state.cryptoIndicators) state.cryptoIndicators = {};
+if (!state.cryptoIndicators.rangeKey) state.cryptoIndicators.rangeKey = '90d';
+if (state.cryptoIndicators.heroExpanded == null) state.cryptoIndicators.heroExpanded = false;
+
+function ciRangeDays() {
+  const opt = CI_RANGE_OPTIONS.find((o) => o.key === state.cryptoIndicators.rangeKey);
+  return opt ? opt.days : 90;
+}
+
 async function renderCryptoIndicators() {
   const content = $('#content');
   content.innerHTML = `<div class="empty"><div>Loading crypto indicators…</div></div>`;
 
+  // v1.17 — every time-series call now parameterised by the selected range.
+  const days = ciRangeDays();
+  // BTC chart benefits from a long window even at short ranges (so the
+  // log-band regression is fit on enough history); we cap min at 180 days
+  // and bypass for "all".
+  const btcDays = Math.max(180, days);
+  // ETF cap at 90 days (Farside JSON cache caps at 90 days of detail).
+  const etfDays = Math.min(90, Math.max(30, days));
+
   let listResp, compResp, fg, btcHist, compHist, etfHist;
   try {
     [listResp, compResp, fg, btcHist, compHist, etfHist] = await Promise.all([
-      api('/api/crypto-indicators'),
+      api(`/api/crypto-indicators?historyDays=${days}`),
       api('/api/crypto-indicators/composite/latest'),
       api('/api/feargreed').catch(() => null),
-      api('/api/crypto-indicators/btc-history?days=730').catch(() => ({ history: [] })),
-      api('/api/crypto-indicators/composite/history?days=90').catch(() => ({ history: [] })),
-      api('/api/crypto-indicators/etf-flow/history?days=30').catch(() => ({ history: [] })),
+      api(`/api/crypto-indicators/btc-history?days=${btcDays}`).catch(() => ({ history: [] })),
+      api(`/api/crypto-indicators/composite/history?days=${days}`).catch(() => ({ history: [] })),
+      api(`/api/crypto-indicators/etf-flow/history?days=${etfDays}`).catch(() => ({ history: [] })),
     ]);
   } catch (err) {
     content.innerHTML = `<div class="empty"><div class="loss">error: ${escapeHTML(err.message)}</div></div>`;
@@ -6611,18 +6730,21 @@ async function renderCryptoIndicators() {
     'value',
     { width: 120, height: 32 },
   );
+  const heroExpanded = !!state.cryptoIndicators.heroExpanded;
+  const rangeLabel = (CI_RANGE_OPTIONS.find((o) => o.key === state.cryptoIndicators.rangeKey) || {}).label || `${days} days`;
   const heroHTML = `
-    <div class="ci-hero ci-hero-v2">
-      <div class="ci-hero-left">
+    <div class="ci-hero ci-hero-v2 ${heroExpanded ? 'ci-hero-expanded' : ''}" id="ci-hero">
+      <div class="ci-hero-left" id="ci-hero-gauge" title="Click to ${heroExpanded ? 'collapse' : 'expand'} composite history">
         ${renderCIGauge(Number(dispScore), comp.actionBand)}
         <div class="ci-hero-num-row">
           <span class="ci-hero-num ${bandClass}">${dispScore}</span>
           <span class="ci-band ${bandClass}">${escapeHTML(bandLabel)}</span>
         </div>
+        <div class="ci-hero-expand-hint dim">${heroExpanded ? '▼ collapse' : '▲ expand'}</div>
       </div>
       <div class="ci-hero-right">
         <div class="ci-hero-trend">
-          <span class="dim">90-day composite trend</span>
+          <span class="dim">${escapeHTML(rangeLabel)} composite trend</span>
           <div class="ci-hero-spark">${compSpark}</div>
         </div>
         <div class="ci-hero-subs ci-hero-subs-v2">
@@ -6634,6 +6756,7 @@ async function renderCryptoIndicators() {
         ${comp.notes ? `<div class="dim ci-hero-notes">${escapeHTML(comp.notes)}</div>` : ''}
       </div>
     </div>
+    ${heroExpanded ? `<div class="ci-hero-expanded-chart">${renderCICompositeExpanded(compHistory, rangeLabel)}</div>` : ''}
   `;
 
   // ----- BTC log-band chart (cowen bucket header) ---------------------
@@ -6775,11 +6898,21 @@ async function renderCryptoIndicators() {
   // v1.15 — at-a-glance heatmap strip beneath the hero.
   const heatmapHTML = renderCIHeatmap(indicators);
 
+  // v1.17 — time range dropdown options.
+  const rangeOpts = CI_RANGE_OPTIONS.map((o) => {
+    const sel = o.key === state.cryptoIndicators.rangeKey ? ' selected' : '';
+    return `<option value="${o.key}"${sel}>${escapeHTML(o.label)}</option>`;
+  }).join('');
+
   content.innerHTML = `
     <div class="crypto-indicators-tab">
       <div class="ci-toolbar">
         <button class="btn-ghost" id="ci-refresh" title="Fetch latest readings from FRED + CoinGecko + DefiLlama + Farside + F&G">⟳ Refresh now</button>
-        <span class="dim" style="font-size:0.78rem">Auto-syncs daily at 00:30 UTC · all indicators automated (v1.15)</span>
+        <label class="ci-range-wrap dim" style="font-size:0.78rem">
+          Range:
+          <select id="ci-range" class="ci-range-select">${rangeOpts}</select>
+        </label>
+        <span class="dim" style="font-size:0.78rem; margin-left:auto">Auto-syncs daily at 00:30 UTC · v1.17</span>
       </div>
       ${heroHTML}
       ${heatmapHTML}
@@ -6821,6 +6954,18 @@ async function renderCryptoIndicators() {
     } catch (err) {
       alert('Upload failed: ' + err.message);
     }
+  });
+
+  // v1.17 — time range selector
+  $('#ci-range')?.addEventListener('change', (e) => {
+    state.cryptoIndicators.rangeKey = e.target.value;
+    renderCryptoIndicators();
+  });
+
+  // v1.17 — hero gauge expand/collapse
+  $('#ci-hero-gauge')?.addEventListener('click', () => {
+    state.cryptoIndicators.heroExpanded = !state.cryptoIndicators.heroExpanded;
+    renderCryptoIndicators();
   });
 
   $('#ci-refresh')?.addEventListener('click', async (e) => {

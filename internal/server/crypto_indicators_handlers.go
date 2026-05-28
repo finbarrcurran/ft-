@@ -24,20 +24,31 @@ func contextWithTimeout(r *http.Request, seconds int) (context.Context, context.
 	return context.WithTimeout(r.Context(), time.Duration(seconds)*time.Second)
 }
 
-// GET /api/crypto-indicators
+// GET /api/crypto-indicators?historyDays=N  (historyDays added in v1.17)
+//
+// Returns all indicators plus their per-indicator history window. Default
+// historyDays=30 (sparkline-sized); the v1.17 time-range selector passes
+// 90 / 180 / 365 / 1825 etc. depending on the chosen dropdown value.
 func (s *Server) handleListCryptoIndicators(w http.ResponseWriter, r *http.Request) {
 	if s.cryptoIndicators == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"indicators": []any{}, "available": false})
 		return
 	}
-	rows, err := s.cryptoIndicators.ListIndicators(r.Context())
+	historyDays := 30
+	if d := r.URL.Query().Get("historyDays"); d != "" {
+		if v, err := parsePositiveInt(d, 1825); err == nil {
+			historyDays = v
+		}
+	}
+	rows, err := s.cryptoIndicators.ListIndicatorsWithHistory(r.Context(), historyDays)
 	if err != nil {
 		mapStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"indicators": rows,
-		"available":  true,
+		"indicators":  rows,
+		"available":   true,
+		"historyDays": historyDays,
 		"bucketLabels": map[string]string{
 			"cowen":     cryptoindicators.BucketLabel("cowen"),
 			"pal":       cryptoindicators.BucketLabel("pal"),
