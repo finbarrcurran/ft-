@@ -82,15 +82,20 @@ func (s *Server) handleRefreshInsiders(w http.ResponseWriter, r *http.Request) {
 		defer s.signals.FinishInsiderIngest()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
+		// v1.21A — run firehose first (latest filings across market),
+		// then per-ticker (every Form 4 for our universe). Per-ticker
+		// catches NOW + AVGO + everything we explicitly watch.
 		if _, err := s.signals.IngestInsiders(ctx); err != nil {
-			// IngestInsiders already logs the error via slog.
+			_ = err
+		}
+		if _, err := s.signals.IngestInsidersPerTicker(ctx); err != nil {
 			_ = err
 		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"started": true,
 		"running": true,
-		"message": "insider ingest started in background — refresh in 30-60s",
+		"message": "insider ingest started (firehose + per-ticker) — refresh in 60-90s",
 	})
 }
 

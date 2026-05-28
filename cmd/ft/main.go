@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"ft/internal/auth"
 	"ft/internal/config"
+	"ft/internal/cryptoindicators"
 	"ft/internal/frameworks"
 	"ft/internal/health"
 	"ft/internal/llm"
@@ -25,13 +26,12 @@ import (
 	"ft/internal/performance"
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
-	"ft/internal/cryptoindicators"
 	"ft/internal/sector_rotation"
-	"ft/internal/signals"
-	"ft/internal/theses"
 	"ft/internal/server"
+	"ft/internal/signals"
 	"ft/internal/store"
 	"ft/internal/technicals"
+	"ft/internal/theses"
 	"log/slog"
 	"net/http"
 	"os"
@@ -334,6 +334,14 @@ func runServe() {
 				slog.Error("signals: insider ingest", "err", err)
 			}
 			slog.Info("signals: insider ingest complete", "inserted", inserted)
+			// v1.21A — per-ticker pass for our universe (catches Form 4
+			// filings the firehose missed because they fell outside the
+			// last-100-filings window between ticks).
+			ins2, err := sigSvc.IngestInsidersPerTicker(ctx)
+			if err != nil {
+				slog.Error("signals: per-ticker insider ingest", "err", err)
+			}
+			slog.Info("signals: per-ticker insider ingest complete", "inserted", ins2)
 		})
 		scheduleAt(bgCtx, 23, 10, func() {
 			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Minute)

@@ -38,15 +38,19 @@ import (
 //   - Exponential backoff on 429/503
 
 const (
-	secAtomURL       = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&output=atom&count=100"
-	secUserAgent     = "FT-Dashboard fin@curranhouse.dev"
-	secMinReqGap     = 130 * time.Millisecond // ~7.7 req/sec — under 10/sec ceiling
+	secAtomURL   = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&output=atom&count=100"
+	secUserAgent = "FT-Dashboard fin@curranhouse.dev"
+	secMinReqGap = 130 * time.Millisecond // ~7.7 req/sec — under 10/sec ceiling
 )
 
-// IngestInsiders fetches the current Form 4 ATOM feed and processes every
-// entry. Returns the number of new rows inserted (deduplicated by
-// accession number). Called from the daily 23:00 UTC cron + the manual
-// refresh endpoint.
+// IngestInsiders fetches the current Form 4 ATOM feed (firehose: last 100
+// filings across all companies) and processes every entry. Returns the
+// number of new rows inserted (deduplicated by accession number). Called
+// from the daily 23:00 UTC cron + the manual refresh endpoint.
+//
+// v1.21A — kept alongside IngestInsidersPerTicker. Firehose catches
+// breaking filings that don't yet have a CIK we know about; per-ticker
+// catches everything for tickers we explicitly watch (NOW, AVGO, etc.).
 //
 // Errors per filing are logged but don't abort the batch.
 func (s *Service) IngestInsiders(ctx context.Context) (inserted int, retErr error) {
@@ -71,13 +75,120 @@ func (s *Service) IngestInsiders(ctx context.Context) (inserted int, retErr erro
 			"took", time.Since(t0).Round(time.Millisecond))
 	}()
 
-	for _, entry := range feed.Entries {
+	inserted = s.processAtomEntries(ctx, client, feed.Entries, thresholds)
+
+	// Cluster-buy escalation runs once per batch.
+	if _, err := s.PromoteClusterBuys(ctx); err != nil {
+		slog.Warn("signals: cluster-buy promotion", "err", err)
+	}
+	return inserted, nil
+}
+
+// IngestInsidersPerTicker runs the same Form 4 ingest as IngestInsiders
+// but driven from a per-CIK query for every ticker in the user's
+// universe (holdings + watchlist + sector ETFs), rather than the global
+// firehose. v1.21A.
+//
+// Rationale: the global ATOM feed returns the last 100 Form 4s across
+// the entire market — at hundreds of filings/day, anything not in the
+// last hour gets missed. Per-CIK query returns the most recent ~40
+// filings for THAT ticker, so we reliably catch every NOW (or any other
+// universe ticker) Form 4 even if higher-volume names dominated the
+// firehose between ticks.
+//
+// SEC rate-limit (10/sec) handled by the existing client throttle.
+// ~41 tickers × ~1 req/0.13s = ~6s wall time.
+func (s *Service) IngestInsidersPerTicker(ctx context.Context) (inserted int, retErr error) {
+	t0 := time.Now()
+	slog.Info("signals: per-ticker insider ingest started")
+	client := &secClient{HTTP: &http.Client{Timeout: 30 * time.Second}}
+
+	cikMap, err := client.fetchCIKMap(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("fetch CIK map: %w", err)
+	}
+	tickers, err := s.universeTickers(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("load universe: %w", err)
+	}
+	slog.Info("signals: per-ticker universe loaded", "tickers", len(tickers), "cik_map_size", len(cikMap))
+
+	thresholds := DefaultThresholds()
+	missing := 0
+	for _, t := range tickers {
 		select {
 		case <-ctx.Done():
 			return inserted, ctx.Err()
 		default:
 		}
+		cik, ok := cikMap[strings.ToUpper(t)]
+		if !ok {
+			missing++
+			continue
+		}
+		feed, err := client.fetchAtomFeedForCIK(ctx, cik)
+		if err != nil {
+			slog.Warn("signals: per-ticker ATOM fetch", "ticker", t, "cik", cik, "err", err)
+			continue
+		}
+		n := s.processAtomEntries(ctx, client, feed.Entries, thresholds)
+		if n > 0 {
+			slog.Info("signals: per-ticker hits", "ticker", t, "new", n)
+		}
+		inserted += n
+	}
+	// Cluster-buy escalation runs once per batch.
+	if _, err := s.PromoteClusterBuys(ctx); err != nil {
+		slog.Warn("signals: cluster-buy promotion", "err", err)
+	}
+	slog.Info("signals: per-ticker insider ingest finished",
+		"tickers_processed", len(tickers),
+		"tickers_missing_cik", missing,
+		"inserted", inserted,
+		"took", time.Since(t0).Round(time.Millisecond))
+	return inserted, nil
+}
 
+// universeTickers returns the deduplicated set of tickers we watch:
+// active stock holdings + active watchlist. Sector ETFs are excluded
+// (separate ingest if ever needed). v1.21A.
+func (s *Service) universeTickers(ctx context.Context) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT DISTINCT ticker FROM (
+		  SELECT ticker FROM stock_holdings
+		    WHERE deleted_at IS NULL AND ticker IS NOT NULL AND ticker != ''
+		  UNION
+		  SELECT ticker FROM watchlist
+		    WHERE deleted_at IS NULL AND ticker IS NOT NULL AND ticker != ''
+		)
+		ORDER BY ticker`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// processAtomEntries is the shared inner loop used by both
+// IngestInsiders (firehose) and IngestInsidersPerTicker (per-CIK).
+// Skips entries with non-"4" categories, dedupes by accession, fetches
+// form4.xml, extracts events, and inserts. Returns insert count.
+func (s *Service) processAtomEntries(ctx context.Context, client *secClient, entries []atomEntry, thresholds Thresholds) int {
+	inserted := 0
+	for _, entry := range entries {
+		select {
+		case <-ctx.Done():
+			return inserted
+		default:
+		}
 		// EDGAR's type=4 filter is loose — entries of other form types
 		// (497J, 4/A, etc.) sometimes leak through. Hard-filter here.
 		if entry.Category.Term != "" && entry.Category.Term != "4" {
@@ -87,7 +198,6 @@ func (s *Service) IngestInsiders(ctx context.Context) (inserted int, retErr erro
 		if !ok {
 			continue
 		}
-
 		// Skip if we already have this accession.
 		var existing int
 		_ = s.DB.QueryRowContext(ctx,
@@ -97,22 +207,18 @@ func (s *Service) IngestInsiders(ctx context.Context) (inserted int, retErr erro
 		if existing > 0 {
 			continue
 		}
-
 		filing, err := client.fetchForm4XML(ctx, cik, accession)
 		if err != nil {
 			slog.Warn("signals: fetch form4.xml", "accession", accession, "err", err)
 			continue
 		}
-
 		rows := extractInsiderEvents(filing, accession, entry.Updated)
 		issuerName := strings.TrimSpace(filing.Issuer.IssuerName)
 		for _, r := range rows {
 			r.UniverseHit = s.InUniverse(ctx, r.Ticker)
 			tier, reasons := InsiderTier(r, thresholds)
-
 			alarmJSON := reasonsToJSON(reasons)
 			actorRole := filing.actorRole()
-
 			res, err := s.DB.ExecContext(ctx, `
 				INSERT OR IGNORE INTO signal_events
 				  (signal_type, tier, event_date, filed_date,
@@ -138,12 +244,7 @@ func (s *Service) IngestInsiders(ctx context.Context) (inserted int, retErr erro
 			}
 		}
 	}
-
-	// Cluster-buy escalation runs once per batch.
-	if _, err := s.PromoteClusterBuys(ctx); err != nil {
-		slog.Warn("signals: cluster-buy promotion", "err", err)
-	}
-	return inserted, nil
+	return inserted
 }
 
 // ----- ATOM feed parsing -------------------------------------------------
@@ -236,15 +337,68 @@ func (c *secClient) fetchAtomFeed(ctx context.Context) (*atomFeed, error) {
 	return &feed, nil
 }
 
+// fetchAtomFeedForCIK pulls the most recent ~40 Form 4 filings for a
+// specific issuer CIK. Used by IngestInsidersPerTicker. v1.21A.
+func (c *secClient) fetchAtomFeedForCIK(ctx context.Context, cik string) (*atomFeed, error) {
+	u := fmt.Sprintf(
+		"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=%s&type=4&dateb=&owner=include&count=40&output=atom",
+		cik,
+	)
+	body, err := c.do(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	dec := xml.NewDecoder(bytes.NewReader(body))
+	dec.CharsetReader = charset.NewReaderLabel
+	var feed atomFeed
+	if err := dec.Decode(&feed); err != nil {
+		return nil, fmt.Errorf("parse atom for CIK %s: %w", cik, err)
+	}
+	return &feed, nil
+}
+
+// fetchCIKMap pulls SEC's official ticker→CIK mapping
+// (https://www.sec.gov/files/company_tickers.json) and returns a map
+// keyed by UPPER-CASE ticker → 10-digit-padded CIK string. v1.21A.
+//
+// The file is ~800KB, ~10k tickers — pulled once per ingest run, not
+// cached across runs (so newly-added tickers don't lag).
+func (c *secClient) fetchCIKMap(ctx context.Context) (map[string]string, error) {
+	body, err := c.do(ctx, "https://www.sec.gov/files/company_tickers.json")
+	if err != nil {
+		return nil, err
+	}
+	// Shape: {"0":{"cik_str":1373715,"ticker":"NOW","title":"SERVICENOW, INC."}, ...}
+	var raw map[string]struct {
+		CIKStr int    `json:"cik_str"`
+		Ticker string `json:"ticker"`
+		Title  string `json:"title"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("parse company_tickers.json: %w", err)
+	}
+	out := make(map[string]string, len(raw))
+	for _, v := range raw {
+		if v.Ticker == "" || v.CIKStr == 0 {
+			continue
+		}
+		out[strings.ToUpper(v.Ticker)] = fmt.Sprintf("%010d", v.CIKStr)
+	}
+	return out, nil
+}
+
 // ATOM link patterns we see:
-//   https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001045810&type=4&dateb=&owner=include&count=40
-//   https://www.sec.gov/Archives/edgar/data/1045810/000104581026000123/0001045810-26-000123-index.htm
+//
+//	https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001045810&type=4&dateb=&owner=include&count=40
+//	https://www.sec.gov/Archives/edgar/data/1045810/000104581026000123/0001045810-26-000123-index.htm
+//
 // And the <id> URN:
-//   urn:tag:sec.gov,2008:accession-number=0001045810-26-000123
+//
+//	urn:tag:sec.gov,2008:accession-number=0001045810-26-000123
 var (
-	accFromURNRe   = regexp.MustCompile(`accession-number=([\d\-]+)`)
-	accFromURLRe   = regexp.MustCompile(`/Archives/edgar/data/(\d+)/([\d]+)/`)
-	cikFromAnyURL  = regexp.MustCompile(`CIK=(\d+)`)
+	accFromURNRe  = regexp.MustCompile(`accession-number=([\d\-]+)`)
+	accFromURLRe  = regexp.MustCompile(`/Archives/edgar/data/(\d+)/([\d]+)/`)
+	cikFromAnyURL = regexp.MustCompile(`CIK=(\d+)`)
 )
 
 func parseAccessionAndCIK(link, id string) (accession, cik string, ok bool) {
@@ -274,37 +428,37 @@ func parseAccessionAndCIK(link, id string) (accession, cik string, ok bool) {
 // ----- form4.xml parsing -------------------------------------------------
 
 type form4Document struct {
-	XMLName            xml.Name             `xml:"ownershipDocument"`
-	Issuer             form4Issuer          `xml:"issuer"`
-	ReportingOwner     form4ReportingOwner  `xml:"reportingOwner"`
-	NonDerivativeTable form4NonDerivative   `xml:"nonDerivativeTable"`
+	XMLName            xml.Name            `xml:"ownershipDocument"`
+	Issuer             form4Issuer         `xml:"issuer"`
+	ReportingOwner     form4ReportingOwner `xml:"reportingOwner"`
+	NonDerivativeTable form4NonDerivative  `xml:"nonDerivativeTable"`
 }
 type form4Issuer struct {
-	IssuerCIK      string `xml:"issuerCik"`
-	IssuerName     string `xml:"issuerName"`
-	TradingSymbol  string `xml:"issuerTradingSymbol"`
+	IssuerCIK     string `xml:"issuerCik"`
+	IssuerName    string `xml:"issuerName"`
+	TradingSymbol string `xml:"issuerTradingSymbol"`
 }
 type form4ReportingOwner struct {
-	OwnerID   form4OwnerID   `xml:"reportingOwnerId"`
-	OwnerRel  form4OwnerRel  `xml:"reportingOwnerRelationship"`
+	OwnerID  form4OwnerID  `xml:"reportingOwnerId"`
+	OwnerRel form4OwnerRel `xml:"reportingOwnerRelationship"`
 }
 type form4OwnerID struct {
-	CIK         string `xml:"rptOwnerCik"`
-	OwnerName   string `xml:"rptOwnerName"`
+	CIK       string `xml:"rptOwnerCik"`
+	OwnerName string `xml:"rptOwnerName"`
 }
 type form4OwnerRel struct {
-	IsDirector       string `xml:"isDirector"`
-	IsOfficer        string `xml:"isOfficer"`
-	IsTenPercent     string `xml:"isTenPercentOwner"`
-	OfficerTitle     string `xml:"officerTitle"`
+	IsDirector   string `xml:"isDirector"`
+	IsOfficer    string `xml:"isOfficer"`
+	IsTenPercent string `xml:"isTenPercentOwner"`
+	OfficerTitle string `xml:"officerTitle"`
 }
 type form4NonDerivative struct {
 	Transactions []form4NonDerivTxn `xml:"nonDerivativeTransaction"`
 }
 type form4NonDerivTxn struct {
-	TransactionDate     form4Value `xml:"transactionDate>value"`
-	TransactionCoding   form4Coding `xml:"transactionCoding"`
-	TransactionAmounts  form4Amounts `xml:"transactionAmounts"`
+	TransactionDate    form4Value   `xml:"transactionDate>value"`
+	TransactionCoding  form4Coding  `xml:"transactionCoding"`
+	TransactionAmounts form4Amounts `xml:"transactionAmounts"`
 }
 type form4Coding struct {
 	TransactionCode string `xml:"transactionCode"`
