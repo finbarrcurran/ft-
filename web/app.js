@@ -6167,18 +6167,99 @@ function renderCIBTCChart(history) {
   </div>`;
 }
 
+// renderCIETFFlowChart returns inline SVG of daily BTC spot-ETF net
+// aggregate flow (USD millions). One bar per day. Green for net inflows,
+// red for outflows, grey for zero. Mirrors the BTC log-band chart that
+// sits at the top of the cowen bucket — this one sits at the top of the
+// universal bucket. Data from /api/crypto-indicators/etf-flow/history
+// which reads the Playwright-scraped Farside JSON cache.
+function renderCIETFFlowChart(history) {
+  const w = 720;
+  const h = 180;
+  const padL = 60;
+  const padR = 12;
+  const padT = 12;
+  const padB = 28;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  if (!Array.isArray(history) || history.length < 2) {
+    return `<div class="ci-chart-empty dim">ETF flow history loading…</div>`;
+  }
+  const values = history.map((p) => Number(p.totalM) || 0);
+  // Symmetric Y range around zero so both directions read fairly.
+  const maxAbs = Math.max(...values.map((v) => Math.abs(v)), 1);
+  const yFor = (v) => padT + plotH / 2 - (v / maxAbs) * (plotH / 2 - 4);
+  const zeroY = padT + plotH / 2;
+  const barGap = 2;
+  const barW = Math.max(2, (plotW - barGap * (history.length - 1)) / history.length);
+
+  const bars = history
+    .map((p, i) => {
+      const v = Number(p.totalM) || 0;
+      const x = padL + i * (barW + barGap);
+      const y = v >= 0 ? yFor(v) : zeroY;
+      const hgt = Math.max(1, Math.abs(yFor(v) - zeroY));
+      const color = v > 0 ? '#3d8a4d' : v < 0 ? '#cf3a3a' : '#666';
+      const title = `${p.date}: ${v >= 0 ? '+' : ''}${v.toFixed(1)}M`;
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${hgt.toFixed(1)}" fill="${color}" opacity="0.85"><title>${title}</title></rect>`;
+    })
+    .join('');
+
+  const yLabel = (v, y) => {
+    const sign = v > 0 ? '+' : v < 0 ? '−' : '';
+    const abs = Math.abs(v);
+    const text = abs >= 1000 ? `${sign}${(abs / 1000).toFixed(1)}B` : `${sign}${abs.toFixed(0)}M`;
+    return `<text x="${padL - 6}" y="${(y + 3).toFixed(0)}" font-size="9" fill="#888" text-anchor="end">${text}</text>`;
+  };
+  const yLabels = [
+    yLabel(maxAbs, padT + 4),
+    yLabel(0, zeroY),
+    yLabel(-maxAbs, padT + plotH - 4),
+  ].join('');
+
+  const xLabels = [0, Math.floor(history.length / 2), history.length - 1]
+    .map((i) => {
+      const x = padL + i * (barW + barGap) + barW / 2;
+      return `<text x="${x.toFixed(0)}" y="${(h - 8).toFixed(0)}" font-size="9" fill="#888" text-anchor="middle">${history[i].date}</text>`;
+    })
+    .join('');
+
+  const sum = values.reduce((s, v) => s + v, 0);
+  const inflowDays = values.filter((v) => v > 0).length;
+  const outflowDays = values.filter((v) => v < 0).length;
+  const latest = values[values.length - 1];
+
+  return `<div class="ci-chart-wrap">
+    <div class="ci-chart-head">
+      <strong>BTC Spot-ETF Daily Net Flow</strong>
+      <span class="dim">${history.length}-day window · USD millions</span>
+      <span class="ci-chart-latest ${sum >= 0 ? 'gain' : 'loss'}">${sum >= 0 ? '+' : ''}${sum.toFixed(0)}M total</span>
+    </div>
+    <svg class="ci-chart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="ETF flow bar chart">
+      ${yLabels}
+      <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${(w - padR).toFixed(0)}" y2="${zeroY.toFixed(1)}" stroke="#444" stroke-width="0.5" />
+      ${bars}
+      ${xLabels}
+    </svg>
+    <div class="ci-chart-foot dim">
+      ${inflowDays} inflow / ${outflowDays} outflow days · latest ${latest >= 0 ? '+' : ''}${latest.toFixed(1)}M
+    </div>
+  </div>`;
+}
+
 async function renderCryptoIndicators() {
   const content = $('#content');
   content.innerHTML = `<div class="empty"><div>Loading crypto indicators…</div></div>`;
 
-  let listResp, compResp, fg, btcHist, compHist;
+  let listResp, compResp, fg, btcHist, compHist, etfHist;
   try {
-    [listResp, compResp, fg, btcHist, compHist] = await Promise.all([
+    [listResp, compResp, fg, btcHist, compHist, etfHist] = await Promise.all([
       api('/api/crypto-indicators'),
       api('/api/crypto-indicators/composite/latest'),
       api('/api/feargreed').catch(() => null),
       api('/api/crypto-indicators/btc-history?days=730').catch(() => ({ history: [] })),
       api('/api/crypto-indicators/composite/history?days=90').catch(() => ({ history: [] })),
+      api('/api/crypto-indicators/etf-flow/history?days=30').catch(() => ({ history: [] })),
     ]);
   } catch (err) {
     content.innerHTML = `<div class="empty"><div class="loss">error: ${escapeHTML(err.message)}</div></div>`;
@@ -6192,6 +6273,7 @@ async function renderCryptoIndicators() {
   const bandClass = CI_BAND_COLOR[comp.actionBand] || 'dim';
   const btcHistory = (btcHist && btcHist.history) || [];
   const compHistory = (compHist && compHist.history) || [];
+  const etfHistory = (etfHist && etfHist.history) || [];
 
   // Group indicators by bucket.
   const byBucket = { cowen: [], pal: [], universal: [], sentiment: [] };
@@ -6243,6 +6325,11 @@ async function renderCryptoIndicators() {
     ? `<div class="ci-btc-chart">${renderCIBTCChart(btcHistory)}</div>`
     : '';
 
+  // ----- ETF flow bar chart (universal bucket header) -----------------
+  const etfChartHTML = etfHistory.length >= 2
+    ? `<div class="ci-etf-chart">${renderCIETFFlowChart(etfHistory)}</div>`
+    : '';
+
   // ----- Bucket card rendering with sparklines + chips ----------------
   const renderBucket = (bucketKey) => {
     const rows = byBucket[bucketKey] || [];
@@ -6283,7 +6370,11 @@ async function renderCryptoIndicators() {
         </div>
       `;
     }).join('');
-    const chartHead = bucketKey === 'cowen' ? btcChartHTML : '';
+    const chartHead = bucketKey === 'cowen'
+      ? btcChartHTML
+      : bucketKey === 'universal'
+        ? etfChartHTML
+        : '';
     return `
       <section class="ci-bucket">
         <h3 class="ci-bucket-head">${escapeHTML(label)}</h3>

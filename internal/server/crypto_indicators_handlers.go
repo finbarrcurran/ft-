@@ -210,6 +210,34 @@ func (s *Server) handleCryptoIndicatorsCompositeHistory(w http.ResponseWriter, r
 	})
 }
 
+// GET /api/crypto-indicators/etf-flow/history?days=30  (v1.14)
+//
+// Returns daily BTC spot-ETF aggregate net flow from the Playwright-
+// scraped Farside JSON cache. Used by the ETF flow bar chart at the top
+// of the universal bucket. Returns empty array if the cache has not yet
+// been populated by the daily 00:25 UTC cron.
+func (s *Server) handleCryptoIndicatorsETFFlowHistory(w http.ResponseWriter, r *http.Request) {
+	if s.cryptoIndicators == nil {
+		writeError(w, http.StatusNotFound, "crypto indicators not initialised")
+		return
+	}
+	days := 30
+	if d := r.URL.Query().Get("days"); d != "" {
+		if v, err := parsePositiveInt(d, 365); err == nil {
+			days = v
+		}
+	}
+	rows, err := s.cryptoIndicators.ETFFlowHistory(r.Context(), days)
+	if err != nil {
+		mapStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"history": rows,
+		"days":    days,
+	})
+}
+
 // parsePositiveInt parses a query-string integer in (0, max]. Returns
 // the integer or an error.
 func parsePositiveInt(s string, max int) (int, error) {

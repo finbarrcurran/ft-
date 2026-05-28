@@ -3354,3 +3354,10 @@ input.autofilled, select.autofilled {
 .ci-chart { display: block; max-width: 100%; }
 .ci-chart-empty { padding: 1rem; text-align: center; }
 .ci-btc-chart { margin-bottom: 0.6rem; }
+
+/* === v1.14 ETF flow bar chart === */
+.ci-etf-chart { margin-bottom: 0.6rem; }
+.ci-chart-foot {
+  padding: 0.3rem 0.2rem 0;
+  font-size: 0.78rem;
+}

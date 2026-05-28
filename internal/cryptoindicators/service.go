@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -55,6 +56,15 @@ type CompositeHistoryPoint struct {
 	CompositeScore float64  `json:"compositeScore"`
 	BTCPriceUSD    *float64 `json:"btcPriceUsd,omitempty"`
 	ActionBand     string   `json:"actionBand"`
+}
+
+// ETFFlowPoint is one day of BTC spot-ETF aggregate net flow in USD
+// millions. Sourced from the Playwright-scraped Farside JSON cache at
+// /var/lib/ft/data/farside/etf-flow.json. Used by the ETF flow bar chart
+// at the top of the universal bucket.
+type ETFFlowPoint struct {
+	Date   string  `json:"date"`   // ISO YYYY-MM-DD
+	TotalM float64 `json:"totalM"` // USD millions; negative = net outflow
 }
 
 // CompositeSnapshot mirrors the crypto_composite_snapshots row shape +
@@ -237,6 +247,56 @@ func (s *Service) CompositeHistory(ctx context.Context, days int) ([]CompositeHi
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// ETFFlowHistory returns the most recent `days` of BTC spot-ETF aggregate
+// net flow from the Playwright-scraped Farside JSON cache. Returned in
+// chronological order (oldest first) so the frontend bar chart renders
+// left-to-right naturally.
+//
+// Returns an empty slice (NOT an error) if the cache file is missing —
+// caller treats this as "awaiting first fetch" rather than an error
+// state. The file is written daily by /home/curran/scripts/farside-fetch.js
+// via the /etc/cron.d/ft-farside-fetch cron at 00:25 UTC.
+func (s *Service) ETFFlowHistory(ctx context.Context, days int) ([]ETFFlowPoint, error) {
+	if days < 1 {
+		days = 30
+	}
+	const cachePath = "/var/lib/ft/data/farside/etf-flow.json"
+	raw, err := os.ReadFile(cachePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ETFFlowPoint{}, nil
+		}
+		return nil, err
+	}
+	var cached struct {
+		FetchedAt time.Time `json:"fetchedAt"`
+		Rows      []struct {
+			Date   string  `json:"date"`
+			TotalM float64 `json:"totalM"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(raw, &cached); err != nil {
+		return nil, fmt.Errorf("parse etf-flow.json: %w", err)
+	}
+	// Source file is sorted newest-first; reverse to chronological for
+	// the chart, then take the last `days` (most recent N).
+	n := len(cached.Rows)
+	if n == 0 {
+		return []ETFFlowPoint{}, nil
+	}
+	take := days
+	if take > n {
+		take = n
+	}
+	out := make([]ETFFlowPoint, 0, take)
+	// Walk from index take-1 down to 0 (which gives oldest-first of the
+	// most recent `take` rows since source is newest-first).
+	for i := take - 1; i >= 0; i-- {
+		out = append(out, ETFFlowPoint{Date: cached.Rows[i].Date, TotalM: cached.Rows[i].TotalM})
+	}
+	return out, nil
 }
 
 // LatestComposite returns the most recent composite snapshot, computed

@@ -211,6 +211,8 @@ func (s *Server) routes() {
 	// v1.12 — Phase 2 visual upgrade: chart data feeds.
 	s.mux.HandleFunc("GET /api/crypto-indicators/btc-history", s.requireUser(s.handleCryptoIndicatorsBTCHistory))
 	s.mux.HandleFunc("GET /api/crypto-indicators/composite/history", s.requireUser(s.handleCryptoIndicatorsCompositeHistory))
+	// v1.14 — ETF flow daily bar chart in universal bucket.
+	s.mux.HandleFunc("GET /api/crypto-indicators/etf-flow/history", s.requireUser(s.handleCryptoIndicatorsETFFlowHistory))
 
 	// Spec 9k Phase A + B — Political & Insider Signal endpoints.
 	s.mux.HandleFunc("GET /api/signals", s.requireUser(s.handleListSignals))
