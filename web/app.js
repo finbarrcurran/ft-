@@ -6364,6 +6364,115 @@ function renderCIHeatmap(indicators) {
   </div>`;
 }
 
+// renderCIMacroMiniChart — small line chart for an indicator's value
+// history (typically pal-bucket macro readings like DXY, US 2Y, CFNAI).
+// Used by the macro strip above the pal bucket and by the stablecoin
+// card in the universal bucket. Includes axis labels (min/max/current).
+function renderCIMacroMiniChart(indicator, opts = {}) {
+  const w = opts.width || 230;
+  const h = opts.height || 60;
+  const padL = 6;
+  const padR = 6;
+  const padT = 8;
+  const padB = 18;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const hist = (indicator.history || []).filter((p) => p.value != null);
+  if (hist.length < 2) {
+    return `<svg class="ci-macro-mini" width="${w}" height="${h}"><text x="${w/2}" y="${h/2}" font-size="10" fill="#888" text-anchor="middle">awaiting data</text></svg>`;
+  }
+  const vals = hist.map((p) => Number(p.value));
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const range = max - min || Math.abs(max) * 0.02 || 1;
+  const stepX = plotW / (hist.length - 1);
+  const yFor = (v) => padT + plotH - ((v - min) / range) * plotH;
+  const xFor = (i) => padL + i * stepX;
+  const path = hist.map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(i).toFixed(1)},${yFor(Number(p.value)).toFixed(1)}`).join(' ');
+  const lastV = vals[vals.length - 1];
+  const direction = vals[vals.length - 1] >= vals[0] ? 'up' : 'down';
+  const stroke = direction === 'up' ? '#6bd47c' : '#ee8a8a';
+  const fmt = (v) => (Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(3)).replace(/\.?0+$/, '');
+  // Score chip + name + axis labels under the line.
+  return `<svg class="ci-macro-mini" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="${escapeHTML(indicator.displayName || indicator.id)} mini chart">
+    <path d="${path}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" />
+    <circle cx="${xFor(hist.length - 1).toFixed(1)}" cy="${yFor(lastV).toFixed(1)}" r="2" fill="${stroke}" />
+    <text x="${padL}" y="${(h - 4).toFixed(0)}" font-size="9" fill="#888">${fmt(min)}</text>
+    <text x="${(w - padR).toFixed(0)}" y="${(h - 4).toFixed(0)}" font-size="9" fill="#888" text-anchor="end">${fmt(max)}</text>
+  </svg>`;
+}
+
+// renderCIMacroStrip — a row of mini line charts for the pal-bucket
+// macro indicators (DXY, US 2Y, CFNAI). Goes above the standard pal
+// bucket cards as a contextual overview.
+function renderCIMacroStrip(palIndicators) {
+  if (!Array.isArray(palIndicators) || palIndicators.length === 0) return '';
+  const panels = palIndicators.map((i) => {
+    const val = i.currentValue != null ? Number(i.currentValue).toFixed(i.currentValue < 1 && i.currentValue > -1 ? 3 : 2) : '—';
+    const score = renderCIScoreChip(i.currentScore);
+    const trend = i.trend4w != null
+      ? `<span class="dim" style="font-size:0.72rem">${i.trend4w > 0 ? '▲' : i.trend4w < 0 ? '▼' : '▬'} ${Number(i.trend4w).toFixed(1)}% 4w</span>`
+      : '';
+    return `<div class="ci-macro-panel">
+      <div class="ci-macro-panel-head">
+        <span class="ci-macro-panel-title">${escapeHTML(i.displayName)}</span>
+        ${score}
+      </div>
+      <div class="ci-macro-panel-val">${val}<span class="dim ci-macro-panel-unit"> ${i.unit ? escapeHTML(i.unit) : ''}</span></div>
+      ${renderCIMacroMiniChart(i)}
+      ${trend ? `<div class="ci-macro-panel-foot">${trend}</div>` : ''}
+    </div>`;
+  }).join('');
+  return `<div class="ci-macro-strip">${panels}</div>`;
+}
+
+// renderCIStablecoinChart — bigger inline line chart for the stablecoin
+// supply indicator card in the universal bucket. Shows the 4w-ROC %
+// history (which is what the indicator value is — see definitions).
+function renderCIStablecoinChart(indicator) {
+  const w = 480;
+  const h = 90;
+  const padL = 8;
+  const padR = 8;
+  const padT = 8;
+  const padB = 18;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const hist = (indicator.history || []).filter((p) => p.value != null);
+  if (hist.length < 2) {
+    return `<svg class="ci-mini-chart" width="${w}" height="${h}"><text x="${w/2}" y="${h/2}" font-size="11" fill="#888" text-anchor="middle">awaiting data</text></svg>`;
+  }
+  const vals = hist.map((p) => Number(p.value));
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  // Make Y axis symmetric around zero IF the range straddles zero so
+  // sign reads naturally; otherwise standard min/max range.
+  const straddles = min < 0 && max > 0;
+  const padAbs = Math.max(Math.abs(min), Math.abs(max)) || 1;
+  const yMin = straddles ? -padAbs : min;
+  const yMax = straddles ? padAbs : max;
+  const range = (yMax - yMin) || 1;
+  const stepX = plotW / (hist.length - 1);
+  const yFor = (v) => padT + plotH - ((v - yMin) / range) * plotH;
+  const xFor = (i) => padL + i * stepX;
+  const path = hist.map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(i).toFixed(1)},${yFor(Number(p.value)).toFixed(1)}`).join(' ');
+  const lastV = vals[vals.length - 1];
+  const stroke = lastV >= 0 ? '#6bd47c' : '#ee8a8a';
+  const zeroY = straddles ? yFor(0) : null;
+  // Y-axis: label min/max + zero if visible.
+  const yLabels = [
+    `<text x="${padL}" y="${(padT + 6).toFixed(0)}" font-size="9" fill="#888">${yMax.toFixed(1)}</text>`,
+    `<text x="${padL}" y="${(h - 4).toFixed(0)}" font-size="9" fill="#888">${yMin.toFixed(1)}</text>`,
+    straddles ? `<text x="${padL}" y="${(zeroY + 3).toFixed(0)}" font-size="9" fill="#666">0</text>` : '',
+  ].join('');
+  return `<svg class="ci-mini-chart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="${escapeHTML(indicator.displayName)}">
+    ${yLabels}
+    ${straddles ? `<line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${(w - padR).toFixed(0)}" y2="${zeroY.toFixed(1)}" stroke="#3a3a3a" stroke-width="0.5" stroke-dasharray="2,2" />` : ''}
+    <path d="${path}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" />
+    <circle cx="${xFor(hist.length - 1).toFixed(1)}" cy="${yFor(lastV).toFixed(1)}" r="2.4" fill="${stroke}" />
+  </svg>`;
+}
+
 // renderCIETFFlowChart returns inline SVG of daily BTC spot-ETF net
 // aggregate flow (USD millions). One bar per day. Green for net inflows,
 // red for outflows, grey for zero. Mirrors the BTC log-band chart that
@@ -6478,14 +6587,24 @@ async function renderCryptoIndicators() {
     if (byBucket[i.bucket]) byBucket[i.bucket].push(i);
   }
 
-  // ----- Hero composite with SVG gauge --------------------------------
+  // ----- Hero composite with SVG gauge + per-bucket sub-sparklines ----
+  // v1.16: each sub-score chip now carries a 90-day sparkline of that
+  // bucket's score history alongside the current value.
   const dispScore = Number(comp.compositeScore || 0).toFixed(1);
-  const subChip = (label, key) => {
+  const subChip = (label, key, histKey) => {
     const v = comp[key];
-    if (v == null) return `<span class="ci-sub dim">${label} —</span>`;
+    const histPoints = (compHistory || []).map((p) => ({ value: p[histKey] }));
+    const spark = renderCISparkline(histPoints, 'value', { width: 60, height: 16 });
+    if (v == null) {
+      return `<span class="ci-sub dim ci-sub-row"><span class="ci-sub-label">${label}</span> <span class="ci-sub-spark">${spark}</span> <span class="ci-sub-val">—</span></span>`;
+    }
     const cls = v >= 0.1 ? 'gain' : v <= -0.1 ? 'loss' : 'dim';
     const sign = v >= 0 ? '+' : '';
-    return `<span class="ci-sub"><span class="dim">${label}</span> <span class="${cls}">${sign}${Number(v).toFixed(2)}</span></span>`;
+    return `<span class="ci-sub ci-sub-row">
+      <span class="ci-sub-label dim">${label}</span>
+      <span class="ci-sub-spark">${spark}</span>
+      <span class="ci-sub-val ${cls}">${sign}${Number(v).toFixed(2)}</span>
+    </span>`;
   };
   const compSpark = renderCISparkline(
     compHistory.map((p) => ({ value: p.compositeScore })),
@@ -6506,11 +6625,11 @@ async function renderCryptoIndicators() {
           <span class="dim">90-day composite trend</span>
           <div class="ci-hero-spark">${compSpark}</div>
         </div>
-        <div class="ci-hero-subs">
-          ${subChip('Cowen',     'cowenSubscore')}
-          ${subChip('Pal',       'palSubscore')}
-          ${subChip('Universal', 'universalSubscore')}
-          ${subChip('Sentiment', 'sentimentSubscore')}
+        <div class="ci-hero-subs ci-hero-subs-v2">
+          ${subChip('Cowen',     'cowenSubscore',     'cowenSubscore')}
+          ${subChip('Pal',       'palSubscore',       'palSubscore')}
+          ${subChip('Universal', 'universalSubscore', 'universalSubscore')}
+          ${subChip('Sentiment', 'sentimentSubscore', 'sentimentSubscore')}
         </div>
         ${comp.notes ? `<div class="dim ci-hero-notes">${escapeHTML(comp.notes)}</div>` : ''}
       </div>
@@ -6546,8 +6665,15 @@ async function renderCryptoIndicators() {
           ? `<span class="ci-pill err" title="${escapeHTML(i.fetchError)}">⚠ error</span>`
           : '';
       const spark = renderCISparkline(i.history || [], 'value', { width: 100, height: 28 });
+      // v1.16: stablecoin supply gets an inline bigger line chart in
+      // place of the standard sparkline (more visual room for a single
+      // composable indicator). All other cards keep the sparkline.
+      const isWideChart = i.id === 'universal_stablecoin_supply';
+      const sparkBlock = isWideChart
+        ? `<div class="ci-card-mini-chart">${renderCIStablecoinChart(i)}</div>`
+        : `<div class="ci-card-spark">${spark}</div>`;
       return `
-        <div class="ci-card ci-card-v2">
+        <div class="ci-card ci-card-v2 ${isWideChart ? 'ci-card-wide' : ''}">
           <div class="ci-card-head">
             <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
             <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
@@ -6558,7 +6684,7 @@ async function renderCryptoIndicators() {
               ${i.unit ? `<span class="dim ci-card-unit">${escapeHTML(i.unit)}</span>` : ''}
               ${score}
             </div>
-            <div class="ci-card-spark">${spark}</div>
+            ${sparkBlock}
             <div class="ci-card-meta">
               <span class="dim">4w</span> ${trend}
               ${stale}
@@ -6567,11 +6693,16 @@ async function renderCryptoIndicators() {
         </div>
       `;
     }).join('');
-    const chartHead = bucketKey === 'cowen'
-      ? btcChartHTML
-      : bucketKey === 'universal'
-        ? etfChartHTML
-        : '';
+    // v1.16: pal bucket gains a macro strip header showing all 3 pal
+    // indicators as compact mini line charts (above the standard cards).
+    let chartHead = '';
+    if (bucketKey === 'cowen') {
+      chartHead = btcChartHTML;
+    } else if (bucketKey === 'universal') {
+      chartHead = etfChartHTML;
+    } else if (bucketKey === 'pal') {
+      chartHead = renderCIMacroStrip(rows);
+    }
     return `
       <section class="ci-bucket">
         <h3 class="ci-bucket-head">${escapeHTML(label)}</h3>

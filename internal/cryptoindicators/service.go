@@ -50,12 +50,17 @@ type BTCHistoryPoint struct {
 }
 
 // CompositeHistoryPoint is one day of composite + sub-scores used by the
-// hero gauge trend on the crypto-indicators tab.
+// hero gauge trend AND the per-bucket sub-score sparklines (v1.16) on
+// the crypto-indicators tab.
 type CompositeHistoryPoint struct {
-	Date           string   `json:"date"`
-	CompositeScore float64  `json:"compositeScore"`
-	BTCPriceUSD    *float64 `json:"btcPriceUsd,omitempty"`
-	ActionBand     string   `json:"actionBand"`
+	Date              string   `json:"date"`
+	CompositeScore    float64  `json:"compositeScore"`
+	CowenSubscore     *float64 `json:"cowenSubscore,omitempty"`
+	PalSubscore       *float64 `json:"palSubscore,omitempty"`
+	UniversalSubscore *float64 `json:"universalSubscore,omitempty"`
+	SentimentSubscore *float64 `json:"sentimentSubscore,omitempty"`
+	BTCPriceUSD       *float64 `json:"btcPriceUsd,omitempty"`
+	ActionBand        string   `json:"actionBand"`
 }
 
 // ETFFlowPoint is one day of BTC spot-ETF aggregate net flow in USD
@@ -218,14 +223,16 @@ func (s *Service) BTCPriceHistory(ctx context.Context, days int) ([]BTCHistoryPo
 }
 
 // CompositeHistory returns the most recent `days` of composite snapshots
-// for the hero gauge trend display.
+// for the hero gauge trend display + the per-bucket sub-score sparklines.
 func (s *Service) CompositeHistory(ctx context.Context, days int) ([]CompositeHistoryPoint, error) {
 	if days < 1 {
 		days = 90
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02")
 	rows, err := s.DB.QueryContext(ctx,
-		`SELECT snapshot_date, composite_score, btc_price_usd, action_band
+		`SELECT snapshot_date, composite_score,
+		        cowen_subscore, pal_subscore, universal_subscore, sentiment_subscore,
+		        btc_price_usd, action_band
 		   FROM crypto_composite_snapshots
 		  WHERE snapshot_date >= ?
 		  ORDER BY snapshot_date ASC`, cutoff)
@@ -236,9 +243,25 @@ func (s *Service) CompositeHistory(ctx context.Context, days int) ([]CompositeHi
 	out := []CompositeHistoryPoint{}
 	for rows.Next() {
 		var p CompositeHistoryPoint
-		var btc sql.NullFloat64
-		if err := rows.Scan(&p.Date, &p.CompositeScore, &btc, &p.ActionBand); err != nil {
+		var cow, pal, uni, sen, btc sql.NullFloat64
+		if err := rows.Scan(&p.Date, &p.CompositeScore, &cow, &pal, &uni, &sen, &btc, &p.ActionBand); err != nil {
 			return nil, err
+		}
+		if cow.Valid {
+			v := cow.Float64
+			p.CowenSubscore = &v
+		}
+		if pal.Valid {
+			v := pal.Float64
+			p.PalSubscore = &v
+		}
+		if uni.Valid {
+			v := uni.Float64
+			p.UniversalSubscore = &v
+		}
+		if sen.Valid {
+			v := sen.Float64
+			p.SentimentSubscore = &v
 		}
 		if btc.Valid {
 			v := btc.Float64

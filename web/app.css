@@ -3441,3 +3441,62 @@ input.autofilled, select.autofilled {
 .ci-hm-neg        { background: rgba(216,132,58,0.45); color: #fbe1c5; }
 .ci-hm-strong-neg { background: rgba(207,58,58,0.55);  color: #fbd5d5; }
 .ci-hm-empty      { background: rgba(60,60,60,0.30);   color: #888;    opacity: 0.7; }
+
+/* === v1.16 — hero sub-sparklines, pal macro strip, stablecoin wide chart === */
+
+/* Hero sub-score rows now: label / sparkline / value in a 3-col grid */
+.ci-hero-subs-v2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem 1rem;
+  width: 100%;
+}
+.ci-sub-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 50px;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ci-sub-label { font-size: 0.78rem; }
+.ci-sub-spark { display: flex; align-items: center; }
+.ci-sub-val   { font-size: 0.85rem; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Pal macro strip — row of 3 mini chart panels above the cards */
+.ci-macro-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.8rem;
+}
+.ci-macro-panel {
+  padding: 0.5rem 0.7rem;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.ci-macro-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.ci-macro-panel-title {
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.ci-macro-panel-val {
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ci-macro-panel-unit { font-size: 0.7rem; font-weight: 400; }
+.ci-macro-panel-foot { font-size: 0.72rem; }
+.ci-macro-mini { display: block; width: 100%; }
+
+/* Stablecoin wide card — gives the inline chart proper room */
+.ci-card-wide { min-width: 320px; flex: 1 1 380px; }
+.ci-card-mini-chart { margin: 0.3rem 0 0.2rem; }
+.ci-mini-chart { display: block; max-width: 100%; }
