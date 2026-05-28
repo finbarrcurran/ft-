@@ -3,21 +3,47 @@ package providers
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// FarsideJSONPath is where the Playwright-based daily scraper writes the
+// pre-fetched ETF flow data. The scraper lives at
+// /home/curran/scripts/farside-fetch.js and runs as a cron job under the
+// curran user; FT reads the file at refresh time. This bypasses the
+// Cloudflare bot block that defeats FT's native Go HTTP client.
+const FarsideJSONPath = "/var/lib/ft/data/farside/etf-flow.json"
+
+// FarsideJSONMaxAge is the freshness window — older than this, FT treats
+// the cached file as stale and falls through to live HTTP scrape (which
+// will likely 403 but at least surfaces the staleness as an error).
+const FarsideJSONMaxAge = 36 * time.Hour
+
+// farsideCachedFile mirrors the JSON shape produced by farside-fetch.js.
+type farsideCachedFile struct {
+	FetchedAt  time.Time `json:"fetchedAt"`
+	Source     string    `json:"source"`
+	Rolling7dM *float64  `json:"rolling7dM"`
+	TotalRows  int       `json:"totalRows"`
+	Rows       []struct {
+		Date   string  `json:"date"`
+		TotalM float64 `json:"totalM"`
+	} `json:"rows"`
+}
+
 // FarsideClient scrapes Farside Investors for Bitcoin spot ETF net flows.
 //
 // Farside doesn't have an official API. They publish a CSV (or HTML table
 // that mirrors CSV columns) at:
 //
-//   https://farside.co.uk/bitcoin-etf-flow-all-data/
+//	https://farside.co.uk/bitcoin-etf-flow-all-data/
 //
 // Format per row (as of 2024-2026): Date, IBIT, FBTC, BITB, ARKB, BTCO,
 // EZBC, BRRR, HODL, BTCW, GBTC, BTC, Total
@@ -46,11 +72,26 @@ func NewFarsideClient() *FarsideClient {
 
 // FetchBTCETFFlow7d returns the trailing 7-day rolling sum of all BTC
 // spot ETF net flows in USD millions. Positive = net buying.
+//
+// Strategy (v1.13 — 2026-05-28):
+//
+//  1. First, try the local JSON file at FarsideJSONPath. This is written
+//     daily by the Playwright-based scraper (farside-fetch.js running
+//     as a curran cron job). The Playwright route is the only thing
+//     that gets past Cloudflare's bot management at farside.co.uk.
+//
+//  2. If the file is missing OR older than FarsideJSONMaxAge, fall
+//     through to the legacy direct HTTP scrape. This is expected to
+//     return 403 on most setups but is preserved as a fallback in case
+//     Cloudflare ever relaxes, or for environments without the scraper.
 func (c *FarsideClient) FetchBTCETFFlow7d(ctx context.Context) Reading {
+	if r, ok := readFarsideFromFile(); ok {
+		return r
+	}
 	url := "https://farside.co.uk/bitcoin-etf-flow-all-data/"
 	body, status, err := doWithRetry(ctx, c.HTTP, url)
 	if err != nil {
-		return Reading{Err: fmt.Sprintf("farside fetch (HTTP %d): %v", status, err)}
+		return Reading{Err: fmt.Sprintf("farside fetch (HTTP %d): %v — and no fresh cache at %s", status, err, FarsideJSONPath)}
 	}
 	// The page sometimes returns HTML (with a CSV-shaped table) or
 	// straight CSV depending on what they serve that day. Try CSV first;
@@ -86,6 +127,43 @@ func (c *FarsideClient) FetchBTCETFFlow7d(ctx context.Context) Reading {
 type farsideRow struct {
 	Date  time.Time
 	Total float64
+}
+
+// readFarsideFromFile loads the daily Playwright-scraped JSON cache and
+// returns the trailing 7d rolling sum if fresh. Returns (zero, false)
+// if the file is missing, unparseable, stale, or doesn't contain the
+// rolling sum. Caller falls through to direct HTTP scrape on false.
+func readFarsideFromFile() (Reading, bool) {
+	stat, err := os.Stat(FarsideJSONPath)
+	if err != nil {
+		return Reading{}, false
+	}
+	age := time.Since(stat.ModTime())
+	if age > FarsideJSONMaxAge {
+		return Reading{}, false
+	}
+	raw, err := os.ReadFile(FarsideJSONPath)
+	if err != nil {
+		return Reading{}, false
+	}
+	var f farsideCachedFile
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return Reading{}, false
+	}
+	if f.Rolling7dM != nil {
+		v := *f.Rolling7dM
+		return Reading{Value: &v}, true
+	}
+	// Fall back to recomputing from the rows array if rolling7dM was
+	// missing (defensive — scraper always writes it currently).
+	if len(f.Rows) < 7 {
+		return Reading{}, false
+	}
+	sum := 0.0
+	for i := 0; i < 7; i++ {
+		sum += f.Rows[i].TotalM
+	}
+	return Reading{Value: &sum}, true
 }
 
 // parseFarsideAsCSV tries to read the body as CSV. The first cell of the
