@@ -110,6 +110,10 @@ var adapterAliases = map[string]string{
 	"ai frontier tech":                   "ai_frontier_tech",
 	"frontier-tech":                      "ai_frontier_tech",
 	"frontier tech":                      "ai_frontier_tech",
+	"heavy-machinery":                    "heavy_machinery",
+	"heavy machinery":                    "heavy_machinery",
+	"heavy-machinery-equipment":          "heavy_machinery",
+	"heavy machinery equipment":          "heavy_machinery",
 	// Spec 9i — 4-pillar Asset-Hedge framework (GLD, SLV, IAU, future
 	// commodity hedge ETFs). Header line uses `Framework:` not `Adapter:`.
 	"asset-hedge":           "asset_hedge",
@@ -149,7 +153,8 @@ func NormaliseAdapter(raw string) string {
 	}{
 		{[]string{"industrial", "electrical", "equipment"}, "industrial_electrical_equipment"}, // MUST come before the contractor route
 		{[]string{"industrial", "electrical"}, "industrial_electrical"},
-		{[]string{"frontier"}, "ai_frontier_tech"}, // AI-Frontier-Tech (RGTI quantum-pre-commercial, IonQ, etc.)
+		{[]string{"heavy", "machinery"}, "heavy_machinery"}, // CAT, DE, Oshkosh — diversified-equipment-major sub-type
+		{[]string{"frontier"}, "ai_frontier_tech"},          // AI-Frontier-Tech (RGTI quantum-pre-commercial, IonQ, etc.)
 		{[]string{"quantum"}, "ai_frontier_tech"},
 		{[]string{"fusion"}, "ai_frontier_tech"},
 		{[]string{"semi"}, "ai_infra_semi"}, // catches "Semiconductor", "AI-Semi", etc.
