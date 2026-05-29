@@ -366,12 +366,13 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'stocks' ? 'active' : ''}" data-tab="stocks">Stocks &amp; ETFs</button>
         <button class="tab ${state.tab === 'crypto' ? 'active' : ''}" data-tab="crypto">Crypto</button>
         <button class="tab ${state.tab === 'crypto-indicators' ? 'active' : ''}" data-tab="crypto-indicators">Crypto Indicators</button>
+        <button class="tab ${state.tab === 'crypto-theses' ? 'active' : ''}" data-tab="crypto-theses">Crypto Theses</button>
         <button class="tab ${state.tab === 'signals' ? 'active' : ''}" data-tab="signals">Signals${state.signalsAlarmCount > 0 ? ` <span class="tab-badge loss">🔴 ${state.signalsAlarmCount}</span>` : ''}</button>
         <button class="tab ${state.tab === 'performance' ? 'active' : ''}" data-tab="performance">Performance</button>
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
         <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Sector Rotation</button>
         <button class="tab ${state.tab === 'scorecards' ? 'active' : ''}" data-tab="scorecards">Scorecards</button>
-        <button class="tab ${state.tab === 'theses' ? 'active' : ''}" data-tab="theses">Theses${state.thesesRevisionCount > 0 ? ` <span class="tab-badge warn">⚠ ${state.thesesRevisionCount}</span>` : ''}</button>
+        <button class="tab ${state.tab === 'theses' ? 'active' : ''}" data-tab="theses">Stock Theses${state.thesesRevisionCount > 0 ? ` <span class="tab-badge warn">⚠ ${state.thesesRevisionCount}</span>` : ''}</button>
         <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
         <button class="tab ${state.tab === 'news' ? 'active' : ''}" data-tab="news">News</button>
@@ -1396,6 +1397,8 @@ async function loadActiveTab() {
       renderCrypto();
     } else if (state.tab === 'crypto-indicators') {
       await renderCryptoIndicators();
+    } else if (state.tab === 'crypto-theses') {
+      await renderCryptoTheses();
     } else if (state.tab === 'signals') {
       await renderSignals();
     } else if (state.tab === 'performance') {
@@ -3443,7 +3446,7 @@ const MAINTENANCE_ITEMS = [
     id: 'mtnc_thesis_revision_scan',
     title: 'Scan revision-needed theses',
     cadence: 'Weekly',
-    detail: 'Theses tab → look for ⚠ badge. Earnings-revision trigger flags holdings whose thesis was locked before the latest earnings print. Refresh prompts as needed.',
+    detail: 'Stock Theses tab → look for ⚠ badge. Earnings-revision trigger flags holdings whose thesis was locked before the latest earnings print. Refresh prompts as needed.',
   },
   {
     id: 'mtnc_sector_universe_review',
@@ -9003,7 +9006,7 @@ async function openRevisionPromptModal(thesisId) {
       </div>
       <div class="rev-prompt-hint dim">
         Paste this into Gemini / Claude / ChatGPT. The model returns the revised thesis markdown. Save as
-        <code>${escapeHTML(payload.ticker)}_v${payload.nextVersion}_locked.md</code> and drop into the Theses tab.
+        <code>${escapeHTML(payload.ticker)}_v${payload.nextVersion}_locked.md</code> and drop into the Stock Theses tab.
       </div>
       <textarea class="rev-prompt-text" readonly>${escapeHTML(payload.prompt)}</textarea>
       <div class="rev-prompt-foot">
@@ -9397,5 +9400,259 @@ document.addEventListener('focusout', (ev) => {
   const t = ev.target.closest('.note-bubble');
   if (t) hideNoteBubble();
 });
+
+// ---------- Spec 9l: Crypto Theses tab — Repository view (D24) ---------
+//
+// Phase 1 ships the two-pane Adapter Repository (parallel to Spec 9g
+// Scorecards). 8 adapters seed as drafts via SeedIfEmpty on first run;
+// real adapter MDs replace placeholders via the Edit button when authored.
+//
+// Future phases (post-BTC adapter MD arrival from Claude.ai):
+//   - D25 Scoring Engine modal
+//   - D26 Cross-thesis table
+//   - D27 Per-thesis detail page
+//   - D29 Allocation Panel
+//   - D30 9e sell-window verdict badge
+
+let _cryptoAdapterListCache = null;
+
+async function renderCryptoTheses() {
+  const content = $('#content');
+  content.innerHTML = '<div class="empty">loading crypto adapters…</div>';
+
+  let list;
+  try {
+    const r = await api('/api/crypto/adapters');
+    list = r.adapters || [];
+    _cryptoAdapterListCache = list;
+  } catch (e) {
+    content.innerHTML = `<div class="empty"><div class="loss">crypto adapters failed: ${escapeHTML(e.message)}</div></div>`;
+    return;
+  }
+
+  // Pre-select: state.selectedCryptoAdapter → first locked → first row.
+  let selected = state.selectedCryptoAdapter
+    || list.find(a => a.status === 'locked')?.slug
+    || list[0]?.slug
+    || null;
+  state.selectedCryptoAdapter = selected;
+
+  const statusIcon = (a) => {
+    if (a.status === 'locked') return '🔒';
+    if (a.status === 'needs-review') return '🔄';
+    return '⚠';
+  };
+  const scorecardChip = (a) =>
+    a.scorecardType === 'monetary_12'
+      ? '<span class="ca-chip ca-chip-btc">/12 monetary</span>'
+      : '<span class="ca-chip ca-chip-alt">/18 alt</span>';
+
+  const leftPane = list.map(a => {
+    const cls = ['sc-row', 'ca-row'];
+    if (a.slug === selected) cls.push('active');
+    return `
+      <div class="${cls.join(' ')}" data-ca-slug="${escapeHTML(a.slug)}" tabindex="0">
+        <div class="sc-row-title">${escapeHTML(a.displayName)}</div>
+        <div class="sc-row-meta">
+          <span class="sc-version">v${escapeHTML(a.currentVersion)}</span>
+          <span class="sc-status">${statusIcon(a)} ${escapeHTML(a.status)}</span>
+          ${scorecardChip(a)}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  content.innerHTML = `
+    <div class="scorecards-layout">
+      <aside class="sc-left">
+        <h3 class="sc-pane-head">
+          Crypto Adapters
+          <span class="dim" style="font-size:0.72rem; font-weight:normal">(${list.length})</span>
+        </h3>
+        <div class="ct-doctrine-banner dim" style="font-size:0.72rem; padding:0.4rem 0.6rem; line-height:1.4">
+          Spec 9l Phase 1 — Repository view. Scoring Engine + per-coin theses arrive once locked adapter MDs land.
+        </div>
+        <div class="sc-list">${leftPane || '<p class="dim">No adapters seeded yet.</p>'}</div>
+      </aside>
+      <section class="sc-right" id="ca-right">
+        <div class="empty">loading…</div>
+      </section>
+    </div>
+  `;
+
+  // Wire left-pane clicks.
+  for (const row of content.querySelectorAll('.ca-row[data-ca-slug]')) {
+    const open = () => {
+      state.selectedCryptoAdapter = row.dataset.caSlug;
+      renderCryptoTheses();
+    };
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
+    });
+  }
+
+  if (selected) {
+    await loadCryptoAdapterRightPane(selected);
+  }
+}
+
+async function loadCryptoAdapterRightPane(slug) {
+  const right = $('#ca-right');
+  if (!right) return;
+  right.innerHTML = '<div class="empty">loading…</div>';
+
+  let payload;
+  try {
+    payload = await api(`/api/crypto/adapters/${encodeURIComponent(slug)}`);
+  } catch (e) {
+    right.innerHTML = `<div class="empty"><div class="loss">${escapeHTML(e.message)}</div></div>`;
+    return;
+  }
+  const a = payload.adapter || {};
+  const html = payload.html || '';
+
+  // Format primary data sources + kill criteria for the meta strip.
+  const dataSources = (a.primaryDataSources || []).map(s =>
+    `<span class="ca-meta-pill">${escapeHTML(s)}</span>`).join('') ||
+    '<span class="dim">no data sources declared</span>';
+  const killCriteria = (a.killCriteria || []).map(kc =>
+    `<li><strong>${escapeHTML(kc.slug)}</strong> — ${escapeHTML(kc.description || '')}</li>`).join('') ||
+    '<li class="dim">none authored yet (pending adapter MD)</li>';
+  const scorecardLabel = a.scorecardType === 'monetary_12'
+    ? '6-pillar Monetary-Asset Scorecard (/12)'
+    : '9-Q Crypto Operating Scorecard (/18)';
+  const lockedAt = a.lockedAt
+    ? new Date(a.lockedAt * 1000).toISOString().slice(0, 10)
+    : '<span class="dim">not locked</span>';
+
+  right.innerHTML = `
+    <div class="sc-detail">
+      <div class="sc-detail-head">
+        <div>
+          <h2 class="sc-title">${escapeHTML(a.displayName)} <span class="sc-version-pill">v${escapeHTML(a.currentVersion)}</span></h2>
+          <p class="dim sc-subtitle">${escapeHTML(a.shortDescription || '')}</p>
+        </div>
+        <div class="sc-actions">
+          <button class="btn-ghost" id="ca-edit-btn">Edit body</button>
+          <button class="btn-ghost" id="ca-versions-btn">History</button>
+        </div>
+      </div>
+      <div class="ca-meta-grid">
+        <div><span class="dim">Scorecard:</span> ${escapeHTML(scorecardLabel)}</div>
+        <div><span class="dim">Adapter type:</span> <code>${escapeHTML(a.adapterType)}</code></div>
+        <div><span class="dim">Status:</span> ${escapeHTML(a.status)}</div>
+        <div><span class="dim">Locked:</span> ${lockedAt}</div>
+        <div><span class="dim">Primary data sources:</span> ${dataSources}</div>
+      </div>
+      <details class="ca-kill-criteria">
+        <summary>Kill criteria (adapter-specific VETO triggers)</summary>
+        <ul>${killCriteria}</ul>
+      </details>
+      <article class="sc-body">${html}</article>
+    </div>
+  `;
+
+  $('#ca-edit-btn').addEventListener('click', () => openCryptoAdapterEditor(a));
+  $('#ca-versions-btn').addEventListener('click', () => openCryptoAdapterVersions(a.slug));
+}
+
+function openCryptoAdapterEditor(adapter) {
+  const slug = adapter.slug;
+  const current = adapter.markdownCurrent || '';
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h3>Edit adapter — ${escapeHTML(adapter.displayName)} <span class="sc-version-pill">v${escapeHTML(adapter.currentVersion)}</span></h3>
+        <button class="btn-ghost" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        <label class="dim" style="font-size:0.72rem">Markdown body</label>
+        <textarea id="ca-edit-textarea" class="ca-edit-textarea" rows="24" style="width:100%; font-family:monospace; font-size:0.85rem">${escapeHTML(current)}</textarea>
+        <div class="ca-edit-options" style="margin-top:0.8rem">
+          <label><input type="checkbox" id="ca-edit-newversion"> Save as new version</label>
+          <div id="ca-edit-newversion-fields" style="display:none; margin-top:0.5rem">
+            <input id="ca-edit-version-label" placeholder="new version label e.g. v1.1" style="margin-right:0.5rem" />
+            <input id="ca-edit-changelog" placeholder="changelog note" style="width:60%" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" data-close>Cancel</button>
+        <button class="btn" id="ca-edit-save">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  for (const c of modal.querySelectorAll('[data-close]')) c.addEventListener('click', close);
+
+  modal.querySelector('#ca-edit-newversion').addEventListener('change', (ev) => {
+    modal.querySelector('#ca-edit-newversion-fields').style.display = ev.target.checked ? 'block' : 'none';
+  });
+
+  modal.querySelector('#ca-edit-save').addEventListener('click', async () => {
+    const markdown = modal.querySelector('#ca-edit-textarea').value;
+    const newVerToggle = modal.querySelector('#ca-edit-newversion').checked;
+    const body = { markdown };
+    if (newVerToggle) {
+      body.asNewVersion = {
+        version: modal.querySelector('#ca-edit-version-label').value.trim(),
+        changelogNote: modal.querySelector('#ca-edit-changelog').value.trim(),
+      };
+      if (!body.asNewVersion.version) {
+        alert('New version label required.');
+        return;
+      }
+    }
+    try {
+      await api(`/api/crypto/adapters/${encodeURIComponent(slug)}`, {
+        method: 'PUT', body: JSON.stringify(body),
+      });
+      close();
+      renderCryptoTheses();
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+    }
+  });
+}
+
+async function openCryptoAdapterVersions(slug) {
+  let versions = [];
+  try {
+    const r = await api(`/api/crypto/adapters/${encodeURIComponent(slug)}/versions`);
+    versions = r.versions || [];
+  } catch (e) {
+    alert('History load failed: ' + e.message);
+    return;
+  }
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  const rows = versions.map(v => `
+    <tr>
+      <td><code>${escapeHTML(v.version)}</code></td>
+      <td>${new Date(v.createdAt * 1000).toISOString().slice(0, 16).replace('T', ' ')}</td>
+      <td>${escapeHTML(v.changelogNote || '')}</td>
+    </tr>
+  `).join('');
+  modal.innerHTML = `
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h3>Version history — <code>${escapeHTML(slug)}</code></h3>
+        <button class="btn-ghost" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        <table class="ca-version-table">
+          <thead><tr><th>Version</th><th>Created</th><th>Changelog</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="3" class="dim">No archived versions yet.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  for (const c of modal.querySelectorAll('[data-close]')) c.addEventListener('click', () => modal.remove());
+}
 
 boot();

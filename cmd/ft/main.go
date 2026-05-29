@@ -26,6 +26,7 @@ import (
 	"ft/internal/performance"
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
+	"ft/internal/cryptotheses"
 	"ft/internal/sector_rotation"
 	"ft/internal/server"
 	"ft/internal/signals"
@@ -199,6 +200,9 @@ func runServe() {
 		seedCtx, seedCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := scorecards.New(st.DB).SeedIfEmpty(seedCtx); err != nil {
 			slog.Warn("scorecards seed failed (continuing)", "err", err)
+		}
+		if err := cryptotheses.New(st.DB).SeedIfEmpty(seedCtx); err != nil {
+			slog.Warn("crypto adapters seed failed (continuing)", "err", err)
 		}
 		seedCancel()
 	}

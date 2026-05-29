@@ -3715,3 +3715,103 @@ input.autofilled, select.autofilled {
   background: rgba(245,158,11,0.10);
 }
 a.score-badge { display: inline-block; }
+
+/* ===== Spec 9l — Crypto Theses tab (D24 Repository view) ===== */
+
+/* Reuse sc-row / scorecards-layout / sc-left / sc-right / sc-detail
+   shapes. Only the crypto-specific additions live here. */
+
+.ca-row { position: relative; }
+
+.ca-chip {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  margin-left: 0.4rem;
+}
+.ca-chip-btc {
+  background: rgba(247,147,26,0.15);
+  color: #f7931a;
+  border: 1px solid rgba(247,147,26,0.35);
+}
+.ca-chip-alt {
+  background: rgba(99,102,241,0.12);
+  color: #818cf8;
+  border: 1px solid rgba(99,102,241,0.3);
+}
+
+.ct-doctrine-banner {
+  background: rgba(99,102,241,0.05);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 0.35rem;
+  margin: 0 0 0.6rem 0;
+}
+
+.ca-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 1.2rem;
+  margin: 0.8rem 0;
+  padding: 0.6rem 0.8rem;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 0.4rem;
+  font-size: 0.78rem;
+}
+.ca-meta-grid > div { white-space: nowrap; }
+.ca-meta-grid code {
+  background: rgba(255,255,255,0.05);
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.2rem;
+  font-size: 0.72rem;
+}
+
+.ca-meta-pill {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.35rem;
+  margin-right: 0.25rem;
+  background: rgba(255,255,255,0.05);
+  border-radius: 0.25rem;
+}
+
+.ca-kill-criteria {
+  margin: 0.6rem 0 1rem 0;
+  padding: 0.4rem 0.8rem;
+  background: rgba(239,68,68,0.04);
+  border: 1px solid rgba(239,68,68,0.15);
+  border-radius: 0.35rem;
+  font-size: 0.8rem;
+}
+.ca-kill-criteria summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #ef4444;
+}
+.ca-kill-criteria ul {
+  margin: 0.4rem 0 0 0;
+  padding-left: 1.3rem;
+}
+.ca-kill-criteria li { margin: 0.15rem 0; }
+
+.ca-edit-textarea {
+  background: rgba(0,0,0,0.25);
+  color: #e5e7eb;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 0.35rem;
+  padding: 0.6rem;
+}
+
+.ca-version-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.ca-version-table th, .ca-version-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.ca-version-table th { color: #9ca3af; font-weight: 600; }

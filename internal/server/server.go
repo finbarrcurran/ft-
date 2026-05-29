@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"ft/internal/config"
 	"ft/internal/cryptoindicators"
+	"ft/internal/cryptotheses"
 	"ft/internal/domain"
 	"ft/internal/llm"
 	"ft/internal/refresh"
@@ -34,6 +35,7 @@ type Server struct {
 	refresh          *refresh.Service
 	llm              *llm.Service              // Spec 9c.1; nil-safe — handlers guard
 	scorecards       *scorecards.Service       // Spec 9g
+	cryptoAdapters   *cryptotheses.Service     // Spec 9l
 	theses           *theses.Engine            // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
 	cryptoIndicators *cryptoindicators.Service // Spec 9e Phase 1
 	signals          *signals.Service          // Spec 9k Phase A
@@ -46,7 +48,8 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		store:      st,
 		refresh:    refresh.New(st),
 		llm:        llmSvc,
-		scorecards: scorecards.New(st.DB),
+		scorecards:     scorecards.New(st.DB),
+		cryptoAdapters: cryptotheses.New(st.DB),
 		theses: theses.New(st.DB, cfg.ThesisRepoDir, cfg.ThesisRepoOwner,
 			cfg.ThesisRepoName, cfg.GitHubToken),
 		cryptoIndicators: cryptoindicators.New(st.DB), // Spec 9e Phase 1
@@ -245,6 +248,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/scorecards/preview", s.requireUser(s.handleScorecardPreview))
 	s.mux.HandleFunc("GET /api/scorecards/{code}/versions", s.requireUserOrToken(s.handleScorecardVersions))
 	s.mux.HandleFunc("PUT /api/scorecards/{code}/status", s.requireUser(s.handleScorecardStatus))
+	// Spec 9l — Crypto Adapter Repository (D11)
+	s.mux.HandleFunc("GET /api/crypto/adapters", s.requireUserOrToken(s.handleCryptoAdaptersList))
+	s.mux.HandleFunc("GET /api/crypto/adapters/{slug}", s.requireUserOrToken(s.handleCryptoAdapterGet))
+	s.mux.HandleFunc("PUT /api/crypto/adapters/{slug}", s.requireUser(s.handleCryptoAdapterUpdate))
+	s.mux.HandleFunc("POST /api/crypto/adapters/preview", s.requireUser(s.handleCryptoAdapterPreview))
+	s.mux.HandleFunc("GET /api/crypto/adapters/{slug}/versions", s.requireUserOrToken(s.handleCryptoAdapterVersions))
+	s.mux.HandleFunc("GET /api/crypto/adapters/{slug}/versions/{ver}", s.requireUserOrToken(s.handleCryptoAdapterVersionGet))
+	s.mux.HandleFunc("PUT /api/crypto/adapters/{slug}/status", s.requireUser(s.handleCryptoAdapterStatus))
 
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))

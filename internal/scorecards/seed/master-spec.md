@@ -6,7 +6,7 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Last meaningful overhaul:** 2026-05-17 — initial author at the close of the Cross-Sector Investment Framework build (Specs 9f + 9g).
+> **Last meaningful overhaul:** 2026-05-29 — Spec 9l Phase 1 ships (Crypto Thesis Framework: 0031 migration + 8-adapter Repository view + tab rename). Most recent before that: 2026-05-28 Spec 9k Phase B (Signals tab — SEC EDGAR + capitol-trades + OGE).
 
 ---
 
@@ -27,6 +27,10 @@ Built in Go + SQLite + vanilla HTML/JS, no framework, no bundler. Runs in ~80 MB
 | 5 | Screener | 9b | S&P sample with filters; "+ watchlist" prefilled |
 | 6 | Sector Rotation | 9f | 34-row taxonomy (17 AI + 6 non-AI + 11 GICS), multi-window returns, RS vs SPY, tag pills, drag-reorder, weekly digest |
 | 7 | Scorecards | 9g | Adapter MD repository (Philosophy + Energy + Hydrocarbons + Master Spec). Two-pane viewer/editor |
+| — | Crypto Indicators | 9e | BTC-primary regime layer — Cowen 4-phase, Pal macro, ETF flows, F&G, stablecoin supply |
+| — | Crypto Theses | 9l | 8-adapter Repository (BTC + L1 + L2 + DeFi + Infra + DePIN + RWA + Speculative). Phase 1 = adapter repository only; Scoring Engine + per-coin theses pending locked adapter MDs |
+| — | Signals | 9k | Political + insider signal tab (SEC EDGAR per-ticker, capitol-trades, OGE) |
+| — | Stock Theses (was "Theses") | 15 | Renamed 2026-05-29 to disambiguate from new Crypto Theses sibling. Same GitHub-backed library + earnings-revision warnings |
 | 8 | Watchlist | 4, 9b, 12 | Names being considered, framework-scored, analyst Bear/Base/Bull, sortable, promotable |
 | 9 | Heatmap | 6, 9d | SVG treemap. Three modes: market_cap / my_holdings / pnl |
 | 10 | News | 2 D6, 12 D10 | NewsAPI feed + stocks F&G chip + macro calendar cards + filter mode |
@@ -61,6 +65,15 @@ Top bar: brand · market pill (clickable for all 7 exchanges, click-to-focus) ·
 | 0020 | `scorecards` | `sector_scorecards`, `sector_scorecard_versions`. Seeded 5 docs (Philosophy + Energy-Power + Hydrocarbons + Pharma + Master Spec) |
 | 0021 | `holding_theses` | `holding_theses` (one per kind+holding_id), `holding_thesis_versions` (append-only history) |
 | 0022 | `mapping_v1_1_retag` | Refresh-session re-tag of ORCL → `data_center_reits` and WPM → `precious_metals_gold` per Sector_Holdings_Mapping_v1.1 |
+| 0023 | `theses_index` | Spec 15 — GitHub-backed thesis library cache |
+| 0024 | `crypto_indicators` | Spec 9e Phase 1 — `crypto_indicators`, `crypto_indicator_snapshots`, `crypto_indicator_weights`, `crypto_composite_snapshots` |
+| 0025 | `btc_price_history` | Spec 9e — daily BTC OHLC for Cowen log-band + 200WMA |
+| 0026 | `pal_ism_to_cfnai` | Spec 9e — swap ISM proxy to CFNAI series |
+| 0027 | `signals` | Spec 9k Phase A — political + insider event store |
+| 0028 | `signals_issuer` | Spec 9k — issuer-side attribution columns |
+| 0029 | `signals_committee_seed` | Spec 9k — committee allow-list seed |
+| 0030 | `signal_events_oge` | Spec 9k Phase B — adds 'oge' to signal_type CHECK + 'HOLD' action |
+| 0031 | `crypto_theses` | Spec 9l Phase 1 — `crypto_adapters` + `crypto_adapter_versions` + `crypto_theses` + `crypto_thesis_history` + `crypto_thesis_dependencies` + `cascade_events` + `crypto_allocation_current` + `crypto_allocation_history`. 8 adapters seeded as drafts |
 
 ## 4. Background jobs
 
