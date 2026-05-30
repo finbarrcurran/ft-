@@ -3968,3 +3968,318 @@ a.score-badge { display: inline-block; }
   padding: 0.05rem 0.4rem;
   margin-left: 0.3rem;
 }
+/* ============================================================================
+   D25 Scoring Engine — Phase 2 (frontend styles)
+
+   New class prefix `d25-` for all rules added in 2026-05-30 evening Phase 2 work.
+   Follows existing FT color tokens + spacing conventions.
+============================================================================ */
+
+.d25-page {
+  padding: 1rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.d25-page-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+}
+
+.d25-page-head h2 {
+  margin: 0;
+  flex: 1;
+  font-size: 1.4rem;
+}
+
+.d25-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.d25-list-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.d25-form-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 1.5rem;
+}
+
+.d25-form-main {
+  min-width: 0;
+}
+
+.d25-summary-pane {
+  position: sticky;
+  top: 1rem;
+  align-self: flex-start;
+}
+
+.d25-summary-card {
+  background: var(--card-bg, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.d25-summary-card h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim, #888);
+}
+
+.d25-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border-dim, #1f1f1f);
+  font-size: 0.92rem;
+}
+
+.d25-summary-row span:first-child {
+  color: var(--text-dim, #888);
+  font-size: 0.85rem;
+}
+
+.d25-summary-row:last-child { border-bottom: none; }
+
+.d25-summary-final {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 2px solid var(--border, #2a2a2a);
+  font-size: 1rem;
+}
+
+.d25-veto-banner {
+  margin: 0.75rem 0 0 0;
+  padding: 0.5rem 0.75rem;
+  background: rgba(220, 38, 38, 0.15);
+  border-left: 3px solid #dc2626;
+  font-size: 0.85rem;
+  color: #fca5a5;
+  border-radius: 0 4px 4px 0;
+}
+
+.d25-section {
+  margin-bottom: 1.75rem;
+  padding: 1rem 1.25rem;
+  background: var(--card-bg, #1a1a1a);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+}
+
+.d25-section h3 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.d25-section h3 .dim {
+  font-size: 0.78rem;
+  font-weight: normal;
+}
+
+.d25-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1rem;
+}
+
+.d25-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.d25-field-full {
+  grid-column: span 2;
+}
+
+.d25-field > span {
+  font-size: 0.8rem;
+  color: var(--text-dim, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.d25-field input[type="text"],
+.d25-field input[type="number"],
+.d25-field input[type="date"],
+.d25-field select,
+.d25-field textarea {
+  background: var(--input-bg, #0d0d0d);
+  border: 1px solid var(--border, #2a2a2a);
+  color: var(--text, #e5e5e5);
+  padding: 0.5rem 0.65rem;
+  border-radius: 4px;
+  font-size: 0.92rem;
+  font-family: inherit;
+}
+
+.d25-field textarea {
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.d25-field input:focus, .d25-field select:focus, .d25-field textarea:focus {
+  outline: none;
+  border-color: var(--accent, #3b82f6);
+}
+
+.d25-pillar-block {
+  margin-bottom: 1rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--input-bg, #0d0d0d);
+  border: 1px solid var(--border-dim, #1f1f1f);
+  border-radius: 4px;
+}
+
+.d25-pillar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.d25-pillar-head h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.d25-pillar-score {
+  font-weight: bold;
+  font-size: 1rem;
+  color: var(--accent, #3b82f6);
+}
+
+.d25-sub-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed var(--border-dim, #1f1f1f);
+}
+
+.d25-sub-row:last-of-type { border-bottom: none; }
+
+.d25-sub-label {
+  font-size: 0.85rem;
+  color: var(--text, #e5e5e5);
+}
+
+.d25-seg-control {
+  display: inline-flex;
+  gap: 0.15rem;
+}
+
+.d25-seg-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  background: var(--input-bg, #0d0d0d);
+  user-select: none;
+}
+
+.d25-seg-opt input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.d25-seg-opt.active {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #fff;
+  font-weight: bold;
+}
+
+.d25-math-line {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dotted var(--border-dim, #1f1f1f);
+  font-size: 0.78rem;
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+}
+
+.d25-veto-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  align-items: center;
+}
+
+.d25-veto-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.d25-veto-note {
+  background: var(--input-bg, #0d0d0d);
+  border: 1px solid var(--border, #2a2a2a);
+  color: var(--text, #e5e5e5);
+  padding: 0.35rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+
+.d25-veto-note:disabled { opacity: 0.4; }
+
+.d25-warning {
+  background: rgba(251, 191, 36, 0.1);
+  border-left: 3px solid #fbbf24;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  border-radius: 0 4px 4px 0;
+  margin-top: 0.5rem;
+}
+
+.btn-primary {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  border: 1px solid var(--accent, #3b82f6);
+  padding: 0.45rem 0.85rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover, #2563eb);
+  border-color: var(--accent-hover, #2563eb);
+}
+
+@media (max-width: 1024px) {
+  .d25-form-layout {
+    grid-template-columns: 1fr;
+  }
+  .d25-summary-pane {
+    position: static;
+  }
+}

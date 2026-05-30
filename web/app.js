@@ -328,6 +328,7 @@ function renderLogin() {
 const state = {
   user: null,
   tab: 'summary',       // 'summary' | 'stocks' | 'crypto' | 'heatmap' | 'news' | 'crypto-news'
+  cryptoView: 'list',   // D25 Phase 2: 'list' | 'drafts' | 'create' | 'edit:SYM:VER'
   stocks: null,         // array of stock rows
   crypto: null,         // array of crypto rows
   summary: null,        // cached summary response
@@ -9452,6 +9453,15 @@ document.addEventListener('focusout', (ev) => {
 let _cryptoAdapterListCache = null;
 
 async function renderCryptoTheses() {
+  // D25 Phase 2: dispatch on state.cryptoView for create/drafts/edit pages
+  if (state.cryptoView === 'drafts') return renderCryptoDraftsList();
+  if (state.cryptoView === 'create') return renderCryptoCreatePage();
+  if (typeof state.cryptoView === 'string' && state.cryptoView.startsWith('edit:')) {
+    const [, sym, ver] = state.cryptoView.split(':');
+    return renderCryptoEditDraftPage(sym, ver);
+  }
+  state.cryptoView = 'list';
+
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading crypto theses…</div>';
 
@@ -9481,9 +9491,23 @@ async function renderCryptoTheses() {
   // Render full layout: Allocation Panel → Cross-thesis table → Repository.
   content.innerHTML = `
     ${renderAllocationPanel(allocation, theses)}
+    <div class="d25-list-actions">
+      <button class="btn-ghost" id="d25-open-drafts">📝 Draft theses…</button>
+      <button class="btn-primary" id="d25-open-create">+ Create new thesis</button>
+    </div>
     ${renderCrossThesisTable(theses)}
     ${renderAdapterRepository(adapters, selected)}
   `;
+
+  // Wire D25 Phase 2 buttons.
+  $('#d25-open-create').addEventListener('click', () => {
+    state.cryptoView = 'create';
+    renderCryptoCreatePage();
+  });
+  $('#d25-open-drafts').addEventListener('click', () => {
+    state.cryptoView = 'drafts';
+    renderCryptoDraftsList();
+  });
 
   // Wire allocation save.
   wireAllocationPanel();
@@ -9924,6 +9948,1128 @@ async function openCryptoAdapterVersions(slug) {
   `;
   document.body.appendChild(modal);
   for (const c of modal.querySelectorAll('[data-close]')) c.addEventListener('click', () => modal.remove());
+}
+
+// ============================================================================
+// D25 Scoring Engine — Phase 2 (frontend)
+//
+// Authored 2026-05-30 evening per D25_Build_Doctrine_Handoff.md (6 locked
+// scope decisions) + FT_Spec_9l_v0_6_1_supplement.md §A (v0.5.1 #4 LOCKED)
+// + FT_Spec_9l_v0_9_patch.md (Phase 1 backend as-built).
+//
+// Contents:
+//   - d25ComputePillarScore      JS mirror of Go ComputePillarScore (v0.5
+//                                strict + v0.5.1 #4 tie-break LOCKED).
+//                                MUST stay byte-identical with Go side —
+//                                drift-prevention test fixtures in
+//                                cmd/ft-d25-p1-test/.
+//   - d25ComputeRawAndFinalBand  JS mirror of PPG cap logic.
+//   - D25_SCHEMA                 Adapter sub-criteria labels schema
+//                                (hard-coded per architectural Q A —
+//                                Phase 3 will extract from adapter MDs).
+//   - renderCryptoCreatePage     New thesis create form.
+//   - renderCryptoEditDraftPage  Existing draft edit form.
+//   - renderCryptoDraftsList     List view of all drafts.
+// ============================================================================
+
+// ---------- JS port of ComputePillarScore (Go: internal/cryptotheses/scoring.go)
+
+function d25ComputePillarScore(subs) {
+  if (!subs || subs.length === 0) return 0;
+  let sum = 0, zeros = 0, loweqOne = 0;
+  for (const s of subs) {
+    sum += s;
+    if (s === 0) zeros++;
+    if (s <= 1) loweqOne++;
+  }
+  const avg = sum / subs.length;
+  // Rule 1: round DOWN if any sub-criterion = 0
+  if (zeros > 0) return Math.min(2, Math.max(0, Math.floor(avg)));
+  // Rule 2: round DOWN if 2+ sub-criteria ≤ 1 in a 5+ sub-criterion pillar
+  if (subs.length >= 5 && loweqOne >= 2) return Math.min(2, Math.max(0, Math.floor(avg)));
+  // v0.5.1 #4: round DOWN on exact 0.5/1.5 ties
+  if (avg === 0.5 || avg === 1.5) return Math.min(2, Math.max(0, Math.floor(avg)));
+  // Default: round to nearest (half-up)
+  return Math.min(2, Math.max(0, Math.round(avg)));
+}
+
+function d25BandFromTotal(total, scorecardType) {
+  if (scorecardType === 'monetary_12') {
+    if (total >= 9) return 'strong';
+    if (total >= 7) return 'accumulate';
+    if (total >= 5) return 'hold';
+    if (total >= 3) return 'trim';
+    return 'exit';
+  }
+  if (total >= 13) return 'strong';
+  if (total >= 10) return 'accumulate';
+  if (total >= 7) return 'hold';
+  if (total >= 4) return 'trim';
+  return 'exit';
+}
+
+function d25OneBandBelow(b) {
+  return ({ strong: 'accumulate', accumulate: 'hold', hold: 'trim', trim: 'exit', exit: 'exit' })[b] || b;
+}
+
+function d25ComputeRawAndFinalBand(scores, scorecardType) {
+  let total = 0;
+  for (const k in scores) total += scores[k];
+  const raw = d25BandFromTotal(total, scorecardType);
+  const failedGates = [];
+  let hasZero = false;
+  for (const k in scores) {
+    if (scores[k] === 0) {
+      hasZero = true;
+      failedGates.push(k + '_pillar_zero');
+    }
+  }
+  if (scorecardType === 'alt_18') {
+    for (const k of ['Q1', 'Q2', 'Q6', 'Q9']) {
+      if (scores[k] != null && scores[k] < 1) {
+        failedGates.push(k + '_below_one');
+      }
+    }
+  }
+  const ppgFailed = hasZero;
+  let final = raw;
+  let capped = false;
+  if (ppgFailed && raw !== 'exit') {
+    final = d25OneBandBelow(raw);
+    capped = true;
+  }
+  return { total, rawBand: raw, finalBand: final, ppgCapApplied: capped, ppgFailedGates: failedGates };
+}
+
+// ---------- Sub-criteria schema (option B per architectural Q A; Phase 3 extracts from MDs)
+
+const D25_SCHEMA = {
+  alt_18: {
+    Q1: { label: 'Bottleneck / Narrative State', subs: [
+      'Narrative state (early/maturing/mature)',
+      'Narrative durability (multi-cycle)',
+      'Mispricing vs narrative',
+      'Position within sub-sector rotation',
+    ] },
+    Q2: { label: 'Tokenomics', subs: [
+      'Inflation rate (net of any burn)',
+      'Unlock schedule (next 12 months)',
+      'Distribution concentration (top 100)',
+      'Insider / team / VC overhang',
+      'Token utility (separate from governance)',
+    ] },
+    Q3: { label: 'Moat / Network Effect', subs: [
+      'Service share within sub-category',
+      'Integration density (composability)',
+      'Multi-cycle persistence',
+      'Multi-chain deployment quality',
+      'Treasury value vs FDV',
+    ] },
+    Q4: { label: 'Adoption Intensity', subs: [
+      'Primary sub-type metric (90d trend)',
+      'Operator / user count (90d MA)',
+      'Service revenue trend (90d, USD)',
+      'Cross-protocol composability usage',
+      'Developer activity',
+    ] },
+    Q5: { label: 'Value Accrual', subs: [
+      'Mechanism strength',
+      'Annualized $ to holders vs FDV',
+      'Trend (90d)',
+      'Sustainability',
+    ] },
+    Q6: { label: 'Security & Decentralization', subs: [
+      'Smart contract audit history',
+      'Operational track record',
+      'Decentralization of dependencies',
+      'Oracle dependency risk',
+      'Governance / upgrade risk',
+      'Sub-type-specific (e.g. slashing for restaking)',
+    ] },
+    Q7: { label: 'Catalyst', subs: [
+      'Highest-scoring catalyst within window',
+    ] },
+    Q8: { label: 'Technicals & Regime Alignment', subs: [
+      'Price vs 50-day MA',
+      'Price vs 200-day MA',
+      'Weekly RSI',
+      '9e Cowen cycle alignment',
+      'Parent host chain thesis band (cascade)',
+      'ETH/BTC ratio (for non-ETH alt-cycle)',
+      '9e Pal macro regime',
+      'Sentiment / community signal',
+    ] },
+    Q9: { label: 'Team & Founder Risk', subs: [
+      'Founder credibility',
+      'Team operational track record',
+      'Foundation / DAO governance health',
+      'Insider / team token lock-ups',
+      'Multi-year roadmap delivery',
+      'Investor / backer quality',
+    ] },
+  },
+  monetary_12: {
+    P1: { label: 'Macro Regime Alignment', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    P2: { label: 'Adoption & Network', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    P3: { label: 'Supply & Demand', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    P4: { label: 'Security & Decentralization', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    P5: { label: 'Narrative & Sentiment', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    P6: { label: 'Technicals & Cycle', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+  },
+};
+
+// Q5 mechanism dropdown options (post-Migration 0033, 14 values)
+const D25_Q5_MECHANISMS = [
+  ['fee_burn', 'fee_burn (ETH-style)'],
+  ['fee_share', 'fee_share'],
+  ['buyback', 'buyback'],
+  ['staking_yield', 'staking_yield'],
+  ['real_yield_staking', 'real_yield_staking (paid from real fees)'],
+  ['burn_and_mint', 'burn_and_mint (BME / tax-burn)'],
+  ['buyback_stake', 'buyback_stake'],
+  ['direct_asset_claim', 'direct_asset_claim (RWA)'],
+  ['required_for_service', 'required_for_service (Infrastructure)'],
+  ['dsr_surplus', 'dsr_surplus (stablecoin issuer)'],
+  ['governance_with_fee_switch', 'governance_with_fee_switch (proposed not active)'],
+  ['governance_only', 'governance_only'],
+  ['none', 'none'],
+  ['other', 'other'],
+];
+
+const D25_HORIZONS = [
+  ['never_sell', 'Never-Sell'],
+  ['cycle', 'Cycle (3-4yr)'],
+  ['multi_year', 'Multi-year (1-3yr)'],
+  ['medium', 'Medium (3-12mo)'],
+  ['trade', 'Trade (<3mo)'],
+  ['tbd', 'TBD'],
+];
+
+const D25_BETAS = [
+  ['high', 'high'],
+  ['medium', 'medium'],
+  ['low', 'low'],
+  ['inverse', 'inverse'],
+  ['reference', 'reference (BTC only)'],
+];
+
+const D25_CUSTODY_TIERS = [
+  ['', '(none)'],
+  ['tier_1', 'Tier 1 (monthly Big-4 OR daily admin by G-SIB)'],
+  ['tier_2', 'Tier 2 (quarterly mid-firm)'],
+  ['tier_3', 'Tier 3 (annual / none — caps Q6)'],
+];
+
+// Universal 6 VETO conditions (Spec 9l §20)
+const D25_UNIVERSAL_VETOS = [
+  ['unlockCliffOver20Pct', 'Unlock cliff > 20% of float in next 90d'],
+  ['activeSecEnforcement', 'Active SEC enforcement / litigation'],
+  ['holderConcentrationOver50', 'Validator/holder concentration > 50% one entity'],
+  ['exploitUnresolved60d', 'Exchange hack / depeg / governance attack within 60d unresolved'],
+  ['founderRug', 'Founder rug / criminal record / disappearance'],
+  ['liquidityPrefilterFail', 'Liquidity pre-filter fail (not on Kraken/Coinbase/Binance)'],
+];
+
+// ---------- Drafts list view
+
+async function renderCryptoDraftsList() {
+  const content = $('#content');
+  content.innerHTML = '<div class="empty">loading drafts…</div>';
+  let drafts = [];
+  try {
+    const res = await api('/api/crypto/theses/drafts');
+    drafts = res.drafts || [];
+  } catch (e) {
+    content.innerHTML = `<div class="empty"><div class="loss">drafts load failed: ${escapeHTML(e.message)}</div></div>`;
+    return;
+  }
+
+  const backBtn = `<button class="btn-ghost" id="d25-back-list">← Back to Theses</button>`;
+  const createBtn = `<button class="btn-primary" id="d25-create-new">+ New thesis</button>`;
+
+  let rows = '';
+  if (drafts.length === 0) {
+    rows = '<tr><td colspan="7" class="dim">No draft theses. Click <strong>+ New thesis</strong> to start one.</td></tr>';
+  } else {
+    rows = drafts.map(d => `
+      <tr>
+        <td><strong>${escapeHTML(d.coinSymbol)}</strong></td>
+        <td>${escapeHTML(d.coinName)}</td>
+        <td><code>${escapeHTML(d.adapterSlug)}</code></td>
+        <td>${d.score}/${d.maxScore}</td>
+        <td>${escapeHTML(d.holdingHorizon)}</td>
+        <td>${escapeHTML(d.btcBeta)}</td>
+        <td>
+          <button class="btn-ghost d25-edit-draft" data-key="${escapeHTML(d.coinSymbol)}|${escapeHTML(d.version)}">edit</button>
+          <button class="btn-ghost d25-delete-draft" data-key="${escapeHTML(d.coinSymbol)}|${escapeHTML(d.version)}">delete</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  content.innerHTML = `
+    <div class="d25-page">
+      <div class="d25-page-head">
+        ${backBtn}
+        <h2>Draft theses</h2>
+        ${createBtn}
+      </div>
+      <table class="ct-table">
+        <thead>
+          <tr><th>Symbol</th><th>Name</th><th>Adapter</th><th>Score (preview)</th><th>Horizon</th><th>BTC-β</th><th>Actions</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+
+  $('#d25-back-list').addEventListener('click', () => {
+    state.cryptoView = 'list';
+    renderCryptoTheses();
+  });
+  $('#d25-create-new').addEventListener('click', () => {
+    state.cryptoView = 'create';
+    renderCryptoCreatePage();
+  });
+  for (const btn of content.querySelectorAll('.d25-edit-draft')) {
+    btn.addEventListener('click', () => {
+      const [sym, ver] = btn.dataset.key.split('|');
+      state.cryptoView = `edit:${sym}:${ver}`;
+      renderCryptoEditDraftPage(sym, ver);
+    });
+  }
+  for (const btn of content.querySelectorAll('.d25-delete-draft')) {
+    btn.addEventListener('click', async () => {
+      const [sym, ver] = btn.dataset.key.split('|');
+      if (!confirm(`Delete draft ${sym} v${ver}?`)) return;
+      try {
+        await api(`/api/crypto/theses/${encodeURIComponent(sym)}/${encodeURIComponent(ver)}`, { method: 'DELETE' });
+        renderCryptoDraftsList();
+      } catch (e) {
+        alert('Delete failed: ' + e.message);
+      }
+    });
+  }
+}
+
+// ---------- Create page
+
+async function renderCryptoCreatePage() {
+  let adapters = [];
+  try {
+    const res = await api('/api/crypto/adapters');
+    adapters = (res.adapters || []).filter(a => a.status === 'locked');
+  } catch (e) {
+    alert('Adapter load failed: ' + e.message);
+    return;
+  }
+  renderCryptoFormPage({
+    mode: 'create',
+    adapters,
+    initial: d25EmptyDraft(),
+  });
+}
+
+async function renderCryptoEditDraftPage(symbol, version) {
+  let adapters = [], thesis = null;
+  try {
+    const [aRes, tRes] = await Promise.all([
+      api('/api/crypto/adapters'),
+      api(`/api/crypto/theses/${encodeURIComponent(symbol)}/${encodeURIComponent(version)}`),
+    ]);
+    adapters = (aRes.adapters || []).filter(a => a.status === 'locked');
+    thesis = tRes.thesis;
+  } catch (e) {
+    alert('Draft load failed: ' + e.message);
+    return;
+  }
+  const initial = d25ThesisToFormState(thesis);
+  renderCryptoFormPage({
+    mode: 'edit',
+    symbol,
+    version,
+    adapters,
+    initial,
+  });
+}
+
+function d25EmptyDraft() {
+  return {
+    symbol: '',
+    version: 'v1',
+    name: '',
+    coinGeckoId: '',
+    adapterSlug: 'defi',
+    subType: '',
+    primaryChainSymbol: 'ETH',
+    secondaryAdapterSlug: '',
+    horizon: 'multi_year',
+    btcBeta: 'high',
+    subCriteria: {},
+    q5Mechanism: 'real_yield_staking',
+    q5MechanismNote: '',
+    q5AnnualUSD: 0,
+    q5FDVUSD: 0,
+    q4q5Ryr: null,
+    q5PaidRevenueUSD: null,
+    q5EmissionsUSD: null,
+    networkAgeMonths: null,
+    q5Rabr: null,
+    q5VerifiedAssetValueUSD: null,
+    q5TokenSupplyAtParUSD: null,
+    q5AuditDate: '',
+    q5Auditor: '',
+    q6CustodyTier: '',
+    q6CustodyCadence: '',
+    q6CustodyJurisdiction: '',
+    oracleDependencyParentSymbol: '',
+    oracleDependencyParentVersion: 'v1',
+    vetoConditions: { adapterSpecificConditions: {}, adapterSpecificNotes: {} },
+    q9TeamNote: '',
+    catalystDate: '',
+    catalystNote: '',
+    secondaryTags: [],
+    liquidityVenues: [],
+    liquidityPassed: true,
+    markdownCurrent: '',
+    nextReviewDate: '',
+  };
+}
+
+function d25ThesisToFormState(t) {
+  // Best-effort hydration from existing thesis read shape (compound or legacy)
+  const f = d25EmptyDraft();
+  f.symbol = t.coinSymbol;
+  f.version = t.version;
+  f.name = t.coinName;
+  f.coinGeckoId = t.coingeckoID || '';
+  f.adapterSlug = t.adapterSlug;
+  f.horizon = t.holdingHorizon;
+  f.btcBeta = t.btcBeta;
+  f.q5Mechanism = t.q5Mechanism || 'governance_only';
+  f.q5AnnualUSD = t.q5AnnualUSD || 0;
+  f.q5FDVUSD = t.q5FDVUSD || 0;
+  f.q4q5Ryr = t.q4q5Ryr ?? null;
+  f.q5PaidRevenueUSD = t.q5PaidRevenueUSD ?? null;
+  f.q5EmissionsUSD = t.q5EmissionsUSD ?? null;
+  f.networkAgeMonths = t.networkAgeMonths ?? null;
+  f.q5Rabr = t.q5Rabr ?? null;
+  f.q5VerifiedAssetValueUSD = t.q5VerifiedAssetValueUSD ?? null;
+  f.q5TokenSupplyAtParUSD = t.q5TokenSupplyAtParUSD ?? null;
+  f.q5AuditDate = t.q5AuditDate || '';
+  f.q5Auditor = t.q5Auditor || '';
+  f.q6CustodyTier = t.q6CustodyTier || '';
+  f.q6CustodyCadence = t.q6CustodyCadence || '';
+  f.q6CustodyJurisdiction = t.q6CustodyJurisdiction || '';
+  f.q9TeamNote = t.q9TeamNote || '';
+  f.catalystDate = t.catalystDate || '';
+  f.catalystNote = t.catalystNote || '';
+  f.liquidityVenues = t.liquidityVenues || [];
+  f.markdownCurrent = t.markdownCurrent || '';
+  f.parentSymbol = t.parentSymbol || '';
+  // Sub-criteria — only available for D25-authored compound shape; legacy fixtures don't expose subs via this endpoint
+  // (They're not editable via D25 anyway — locked.)
+  return f;
+}
+
+// ---------- Form page (shared by create + edit)
+
+let _d25FormState = null;
+let _d25Adapters = [];
+let _d25LockedTheses = null;
+
+async function renderCryptoFormPage({ mode, symbol, version, adapters, initial }) {
+  _d25FormState = JSON.parse(JSON.stringify(initial)); // deep clone
+  _d25Adapters = adapters;
+  // Cache locked theses for cascade dropdown (Infrastructure only)
+  try {
+    const r = await api('/api/crypto/theses');
+    _d25LockedTheses = (r.theses || []).filter(t => t.status === 'locked' || t.status === 'needs-review');
+  } catch (_) {
+    _d25LockedTheses = [];
+  }
+
+  const content = $('#content');
+  content.innerHTML = `
+    <div class="d25-page">
+      <div class="d25-page-head">
+        <button class="btn-ghost" id="d25-back">← Back</button>
+        <h2>${mode === 'create' ? 'Create new thesis' : `Edit draft — ${escapeHTML(symbol)} v${escapeHTML(version)}`}</h2>
+        <div class="d25-actions">
+          ${mode === 'create' ? '' : `<button class="btn-ghost" id="d25-delete">delete</button>`}
+          <button class="btn-ghost" id="d25-save">save draft</button>
+          <button class="btn-primary" id="d25-lock">lock thesis</button>
+        </div>
+      </div>
+      <div class="d25-form-layout">
+        <div class="d25-form-main" id="d25-form-main"></div>
+        <aside class="d25-summary-pane" id="d25-summary-pane"></aside>
+      </div>
+    </div>
+  `;
+
+  $('#d25-back').addEventListener('click', () => {
+    if (mode === 'edit') {
+      state.cryptoView = 'drafts';
+      renderCryptoDraftsList();
+    } else {
+      state.cryptoView = 'list';
+      renderCryptoTheses();
+    }
+  });
+
+  $('#d25-save').addEventListener('click', () => d25SaveDraft(mode, symbol, version));
+  $('#d25-lock').addEventListener('click', () => d25LockDraft(mode, symbol, version));
+
+  const delBtn = document.getElementById('d25-delete');
+  if (delBtn) {
+    delBtn.addEventListener('click', async () => {
+      if (!confirm(`Delete draft ${symbol} v${version}?`)) return;
+      try {
+        await api(`/api/crypto/theses/${encodeURIComponent(symbol)}/${encodeURIComponent(version)}`, { method: 'DELETE' });
+        state.cryptoView = 'drafts';
+        renderCryptoDraftsList();
+      } catch (e) { alert('Delete failed: ' + e.message); }
+    });
+  }
+
+  d25RenderForm();
+  d25RenderSummary();
+}
+
+function d25CurrentAdapter() {
+  return _d25Adapters.find(a => a.slug === _d25FormState.adapterSlug);
+}
+
+function d25RenderForm() {
+  const f = _d25FormState;
+  const adapter = d25CurrentAdapter();
+  const scorecardType = adapter?.scorecardType || 'alt_18';
+  const pillars = D25_SCHEMA[scorecardType] || D25_SCHEMA.alt_18;
+
+  const pillarBlocks = Object.entries(pillars).map(([key, def]) => {
+    const subs = f.subCriteria[key] || new Array(def.subs.length).fill(0);
+    return d25RenderPillarBlock(key, def, subs);
+  }).join('');
+
+  let adapterSpecific = '';
+  if (adapter?.adapterType === 'depin') {
+    adapterSpecific = d25RenderDepinSection(f);
+  } else if (adapter?.adapterType === 'rwa') {
+    adapterSpecific = d25RenderRwaSection(f);
+  }
+
+  // Forward cascade declaration (DeFi/Speculative only)
+  let cascadeBlock = '';
+  if (adapter?.adapterType === 'defi' || adapter?.adapterType === 'speculative') {
+    const infraTheses = (_d25LockedTheses || []).filter(t => t.adapterSlug === 'infra');
+    const opts = ['<option value="">— none —</option>']
+      .concat(infraTheses.map(t => `<option value="${escapeHTML(t.coinSymbol)}" ${f.oracleDependencyParentSymbol === t.coinSymbol ? 'selected' : ''}>${escapeHTML(t.coinSymbol)} v${escapeHTML(t.version)} — ${escapeHTML(t.coinName)} (${escapeHTML(t.band)})</option>`))
+      .join('');
+    cascadeBlock = `
+      <section class="d25-section">
+        <h3>Forward cascade declaration (Decision 5)</h3>
+        <p class="dim">Optional. Selecting an Infrastructure parent creates a forward <code>oracle_dependency</code> moderate cascade row on lock per Infrastructure adapter §3 bidirectional design.</p>
+        <label class="d25-field">
+          <span>Oracle / Infrastructure dependency parent</span>
+          <select id="d25-oracle-parent">${opts}</select>
+        </label>
+      </section>
+    `;
+  }
+
+  // VETO checklist
+  const vetoRows = D25_UNIVERSAL_VETOS.map(([key, label]) => {
+    const on = !!f.vetoConditions[key];
+    const noteField = key + 'Note';
+    const noteValue = f.vetoConditions[noteField] || '';
+    return `
+      <div class="d25-veto-row">
+        <label class="d25-veto-check">
+          <input type="checkbox" data-veto="${key}" ${on ? 'checked' : ''}>
+          <span>${escapeHTML(label)}</span>
+        </label>
+        <input type="text" class="d25-veto-note" data-veto-note="${noteField}" placeholder="note (optional)" value="${escapeHTML(noteValue)}" ${on ? '' : 'disabled'}>
+      </div>
+    `;
+  }).join('');
+
+  const mechanismOpts = D25_Q5_MECHANISMS.map(([v, label]) =>
+    `<option value="${v}" ${f.q5Mechanism === v ? 'selected' : ''}>${escapeHTML(label)}</option>`
+  ).join('');
+  const horizonOpts = D25_HORIZONS.map(([v, label]) =>
+    `<option value="${v}" ${f.horizon === v ? 'selected' : ''}>${escapeHTML(label)}</option>`
+  ).join('');
+  const betaOpts = D25_BETAS.map(([v, label]) =>
+    `<option value="${v}" ${f.btcBeta === v ? 'selected' : ''}>${escapeHTML(label)}</option>`
+  ).join('');
+  const adapterOpts = _d25Adapters.map(a =>
+    `<option value="${escapeHTML(a.slug)}" ${f.adapterSlug === a.slug ? 'selected' : ''}>${escapeHTML(a.slug)} (${escapeHTML(a.scorecardType)})</option>`
+  ).join('');
+
+  const main = $('#d25-form-main');
+  main.innerHTML = `
+    <section class="d25-section">
+      <h3>1. Identity</h3>
+      <div class="d25-grid-2">
+        <label class="d25-field">
+          <span>Symbol *</span>
+          <input type="text" id="d25-symbol" value="${escapeHTML(f.symbol)}" placeholder="BTC, ETH, etc." style="text-transform:uppercase">
+        </label>
+        <label class="d25-field">
+          <span>Version</span>
+          <input type="text" id="d25-version" value="${escapeHTML(f.version)}" placeholder="v1">
+        </label>
+        <label class="d25-field d25-field-full">
+          <span>Name *</span>
+          <input type="text" id="d25-name" value="${escapeHTML(f.name)}">
+        </label>
+        <label class="d25-field">
+          <span>CoinGecko ID</span>
+          <input type="text" id="d25-coingecko" value="${escapeHTML(f.coinGeckoId)}">
+        </label>
+        <label class="d25-field">
+          <span>Adapter *</span>
+          <select id="d25-adapter">${adapterOpts}</select>
+        </label>
+        <label class="d25-field">
+          <span>Sub-type</span>
+          <input type="text" id="d25-subtype" value="${escapeHTML(f.subType)}" placeholder="lending, oracle, hp-l1, etc.">
+        </label>
+        <label class="d25-field">
+          <span>Primary chain</span>
+          <input type="text" id="d25-primary-chain" value="${escapeHTML(f.primaryChainSymbol)}" placeholder="ETH, SOL, BTC; for protocol_host cascade">
+        </label>
+        <label class="d25-field">
+          <span>Horizon *</span>
+          <select id="d25-horizon">${horizonOpts}</select>
+        </label>
+        <label class="d25-field">
+          <span>BTC-β *</span>
+          <select id="d25-beta">${betaOpts}</select>
+        </label>
+      </div>
+    </section>
+
+    <section class="d25-section">
+      <h3>2. Pillar scoring <span class="dim">(v0.5 + v0.5.1 #4 tie-break LOCKED — round DOWN on 0.5/1.5)</span></h3>
+      ${pillarBlocks}
+    </section>
+
+    <section class="d25-section">
+      <h3>3. Q5 mechanism + quantification</h3>
+      <div class="d25-grid-2">
+        <label class="d25-field d25-field-full">
+          <span>Mechanism *</span>
+          <select id="d25-q5-mech">${mechanismOpts}</select>
+        </label>
+        <label class="d25-field">
+          <span>Annualized $ to holders</span>
+          <input type="number" step="any" id="d25-q5-annual" value="${f.q5AnnualUSD}">
+        </label>
+        <label class="d25-field">
+          <span>FDV (USD)</span>
+          <input type="number" step="any" id="d25-q5-fdv" value="${f.q5FDVUSD}">
+        </label>
+        <label class="d25-field d25-field-full">
+          <span>Mechanism note</span>
+          <textarea id="d25-q5-note" rows="2">${escapeHTML(f.q5MechanismNote)}</textarea>
+        </label>
+      </div>
+    </section>
+
+    ${adapterSpecific}
+
+    ${cascadeBlock}
+
+    <section class="d25-section">
+      <h3>${cascadeBlock ? '5' : '4'}. VETO conditions <span class="dim">(any checked → band forced to Exit per Spec 9l §20)</span></h3>
+      ${vetoRows}
+    </section>
+
+    <section class="d25-section">
+      <h3>${cascadeBlock ? '6' : '5'}. Q9 + catalyst + body</h3>
+      <label class="d25-field d25-field-full">
+        <span>Q9 team note</span>
+        <textarea id="d25-q9-note" rows="3">${escapeHTML(f.q9TeamNote)}</textarea>
+      </label>
+      <label class="d25-field d25-field-full">
+        <span>Catalyst note</span>
+        <textarea id="d25-catalyst-note" rows="2">${escapeHTML(f.catalystNote)}</textarea>
+      </label>
+      <label class="d25-field d25-field-full">
+        <span>Liquidity venues (comma-separated)</span>
+        <input type="text" id="d25-venues" value="${escapeHTML((f.liquidityVenues || []).join(', '))}" placeholder="kraken, coinbase, binance">
+      </label>
+      <label class="d25-field d25-field-full">
+        <span>Markdown body</span>
+        <textarea id="d25-markdown" rows="10" placeholder="# Thesis body in markdown…">${escapeHTML(f.markdownCurrent)}</textarea>
+      </label>
+      <label class="d25-field">
+        <span>Next review date</span>
+        <input type="date" id="d25-next-review" value="${escapeHTML(f.nextReviewDate)}">
+      </label>
+    </section>
+  `;
+
+  d25WireFormInputs();
+}
+
+function d25RenderPillarBlock(key, def, subs) {
+  const segments = def.subs.map((label, i) => `
+    <div class="d25-sub-row">
+      <span class="d25-sub-label">${escapeHTML(label)}</span>
+      <div class="d25-seg-control">
+        ${[0, 1, 2].map(v => `
+          <label class="d25-seg-opt ${subs[i] === v ? 'active' : ''}">
+            <input type="radio" name="d25-${key}-${i}" data-pillar="${key}" data-sub-index="${i}" value="${v}" ${subs[i] === v ? 'checked' : ''}>
+            ${v}
+          </label>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+  return `
+    <div class="d25-pillar-block" data-pillar-key="${key}">
+      <div class="d25-pillar-head">
+        <h4>${key}: ${escapeHTML(def.label)}</h4>
+        <span class="d25-pillar-score" id="d25-pillar-${key}-score">—</span>
+      </div>
+      ${segments}
+      <div class="d25-math-line" id="d25-pillar-${key}-math"></div>
+    </div>
+  `;
+}
+
+function d25RenderDepinSection(f) {
+  return `
+    <section class="d25-section">
+      <h3>4. DePIN mandatory fields <span class="dim">(RYR per DePIN adapter §3)</span></h3>
+      <div class="d25-grid-2">
+        <label class="d25-field">
+          <span>RYR (q4q5Ryr) — paid revenue / emissions</span>
+          <input type="number" step="any" id="d25-ryr" value="${f.q4q5Ryr ?? ''}">
+        </label>
+        <label class="d25-field">
+          <span>Network age (months)</span>
+          <input type="number" id="d25-age" value="${f.networkAgeMonths ?? ''}">
+        </label>
+        <label class="d25-field">
+          <span>Paid revenue (USD, 90d annualized)</span>
+          <input type="number" step="any" id="d25-paid-rev" value="${f.q5PaidRevenueUSD ?? ''}">
+        </label>
+        <label class="d25-field">
+          <span>Emissions (USD, 90d annualized at spot)</span>
+          <input type="number" step="any" id="d25-emissions" value="${f.q5EmissionsUSD ?? ''}">
+        </label>
+      </div>
+      <p class="dim">Pre-revenue DePIN protocols: enter <strong>0</strong> for paid revenue (meaningful data). Leaving blank rejects lock.</p>
+    </section>
+  `;
+}
+
+function d25RenderRwaSection(f) {
+  const tierOpts = D25_CUSTODY_TIERS.map(([v, label]) =>
+    `<option value="${v}" ${f.q6CustodyTier === v ? 'selected' : ''}>${escapeHTML(label)}</option>`
+  ).join('');
+  return `
+    <section class="d25-section">
+      <h3>4a. RWA RABR mandatory fields <span class="dim">(per RWA adapter §3)</span></h3>
+      <div class="d25-grid-2">
+        <label class="d25-field">
+          <span>RABR (q5Rabr) — verified value / supply at par</span>
+          <input type="number" step="any" id="d25-rabr" value="${f.q5Rabr ?? ''}">
+        </label>
+        <label class="d25-field">
+          <span>Audit date</span>
+          <input type="date" id="d25-audit-date" value="${escapeHTML(f.q5AuditDate)}">
+        </label>
+        <label class="d25-field">
+          <span>Verified asset value (USD)</span>
+          <input type="number" step="any" id="d25-vav" value="${f.q5VerifiedAssetValueUSD ?? ''}">
+        </label>
+        <label class="d25-field">
+          <span>Token supply at par (USD)</span>
+          <input type="number" step="any" id="d25-supply-par" value="${f.q5TokenSupplyAtParUSD ?? ''}">
+        </label>
+        <label class="d25-field d25-field-full">
+          <span>Auditor</span>
+          <input type="text" id="d25-auditor" value="${escapeHTML(f.q5Auditor)}" placeholder="e.g. BDO, Mazars, Deloitte">
+        </label>
+      </div>
+    </section>
+    <section class="d25-section">
+      <h3>4b. RWA Custody Verification Tier <span class="dim">(per RWA adapter §3)</span></h3>
+      <div class="d25-grid-2">
+        <label class="d25-field">
+          <span>Custody Tier *</span>
+          <select id="d25-custody-tier">${tierOpts}</select>
+        </label>
+        <label class="d25-field">
+          <span>Cadence</span>
+          <input type="text" id="d25-custody-cadence" value="${escapeHTML(f.q6CustodyCadence)}" placeholder="monthly / quarterly / annual / none">
+        </label>
+        <label class="d25-field d25-field-full">
+          <span>Jurisdiction</span>
+          <input type="text" id="d25-custody-jurisdiction" value="${escapeHTML(f.q6CustodyJurisdiction)}" placeholder="US / EU / Cayman / etc.">
+        </label>
+      </div>
+      ${f.q6CustodyTier === 'tier_3' ? '<p class="d25-warning">⚠ Tier 3 custody structurally caps Q6 sub-criterion 1 below Strong Conviction band-eligible levels (RWA adapter §3 soft warning — does not block lock).</p>' : ''}
+    </section>
+  `;
+}
+
+function d25WireFormInputs() {
+  const set = (id, getter) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => { getter(el); d25RecomputeAndRender(); });
+  };
+
+  set('d25-symbol', (e) => _d25FormState.symbol = e.value.toUpperCase());
+  set('d25-version', (e) => _d25FormState.version = e.value);
+  set('d25-name', (e) => _d25FormState.name = e.value);
+  set('d25-coingecko', (e) => _d25FormState.coinGeckoId = e.value);
+  set('d25-subtype', (e) => _d25FormState.subType = e.value);
+  set('d25-primary-chain', (e) => _d25FormState.primaryChainSymbol = e.value.toUpperCase());
+  set('d25-q5-annual', (e) => _d25FormState.q5AnnualUSD = parseFloat(e.value) || 0);
+  set('d25-q5-fdv', (e) => _d25FormState.q5FDVUSD = parseFloat(e.value) || 0);
+  set('d25-q5-note', (e) => _d25FormState.q5MechanismNote = e.value);
+  set('d25-q9-note', (e) => _d25FormState.q9TeamNote = e.value);
+  set('d25-catalyst-note', (e) => _d25FormState.catalystNote = e.value);
+  set('d25-venues', (e) => _d25FormState.liquidityVenues = e.value.split(',').map(s => s.trim()).filter(s => s));
+  set('d25-markdown', (e) => _d25FormState.markdownCurrent = e.value);
+  set('d25-next-review', (e) => _d25FormState.nextReviewDate = e.value);
+
+  // dropdowns (use change so adapter switch can re-render the whole form)
+  const adapterSel = document.getElementById('d25-adapter');
+  if (adapterSel) adapterSel.addEventListener('change', () => {
+    _d25FormState.adapterSlug = adapterSel.value;
+    _d25FormState.subCriteria = {}; // reset; pillar sizes can differ
+    d25RenderForm();
+    d25RenderSummary();
+  });
+  const horizonSel = document.getElementById('d25-horizon');
+  if (horizonSel) horizonSel.addEventListener('change', () => { _d25FormState.horizon = horizonSel.value; });
+  const betaSel = document.getElementById('d25-beta');
+  if (betaSel) betaSel.addEventListener('change', () => { _d25FormState.btcBeta = betaSel.value; });
+  const mechSel = document.getElementById('d25-q5-mech');
+  if (mechSel) mechSel.addEventListener('change', () => { _d25FormState.q5Mechanism = mechSel.value; });
+
+  // DePIN fields
+  const depinSetNum = (id, key) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => {
+      _d25FormState[key] = el.value === '' ? null : parseFloat(el.value);
+      d25RenderSummary();
+    });
+  };
+  depinSetNum('d25-ryr', 'q4q5Ryr');
+  depinSetNum('d25-age', 'networkAgeMonths');
+  depinSetNum('d25-paid-rev', 'q5PaidRevenueUSD');
+  depinSetNum('d25-emissions', 'q5EmissionsUSD');
+
+  // RWA fields
+  depinSetNum('d25-rabr', 'q5Rabr');
+  depinSetNum('d25-vav', 'q5VerifiedAssetValueUSD');
+  depinSetNum('d25-supply-par', 'q5TokenSupplyAtParUSD');
+  const setVal = (id, key) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => { _d25FormState[key] = el.value; });
+  };
+  setVal('d25-audit-date', 'q5AuditDate');
+  setVal('d25-auditor', 'q5Auditor');
+  setVal('d25-custody-cadence', 'q6CustodyCadence');
+  setVal('d25-custody-jurisdiction', 'q6CustodyJurisdiction');
+  const tierSel = document.getElementById('d25-custody-tier');
+  if (tierSel) tierSel.addEventListener('change', () => {
+    _d25FormState.q6CustodyTier = tierSel.value;
+    d25RenderForm(); // re-render to surface tier_3 soft warning
+    d25RenderSummary();
+  });
+
+  // Cascade
+  const oracleSel = document.getElementById('d25-oracle-parent');
+  if (oracleSel) oracleSel.addEventListener('change', () => {
+    _d25FormState.oracleDependencyParentSymbol = oracleSel.value;
+  });
+
+  // VETO checkboxes
+  for (const cb of document.querySelectorAll('input[data-veto]')) {
+    cb.addEventListener('change', () => {
+      const key = cb.dataset.veto;
+      _d25FormState.vetoConditions[key] = cb.checked;
+      // Enable/disable note input
+      const noteInput = document.querySelector(`input[data-veto-note="${key}Note"]`);
+      if (noteInput) noteInput.disabled = !cb.checked;
+      d25RenderSummary();
+    });
+  }
+  for (const ni of document.querySelectorAll('input[data-veto-note]')) {
+    ni.addEventListener('input', () => {
+      const key = ni.dataset.vetoNote;
+      _d25FormState.vetoConditions[key] = ni.value;
+    });
+  }
+
+  // Pillar radio buttons
+  for (const radio of document.querySelectorAll('input[data-pillar]')) {
+    radio.addEventListener('change', () => {
+      const k = radio.dataset.pillar;
+      const idx = parseInt(radio.dataset.subIndex, 10);
+      const val = parseInt(radio.value, 10);
+      if (!_d25FormState.subCriteria[k]) {
+        const adapter = d25CurrentAdapter();
+        const sc = adapter?.scorecardType || 'alt_18';
+        const def = (D25_SCHEMA[sc] || D25_SCHEMA.alt_18)[k];
+        _d25FormState.subCriteria[k] = new Array(def.subs.length).fill(0);
+      }
+      _d25FormState.subCriteria[k][idx] = val;
+      d25RecomputeAndRender();
+    });
+  }
+}
+
+function d25RecomputeAndRender() {
+  const adapter = d25CurrentAdapter();
+  const sc = adapter?.scorecardType || 'alt_18';
+  const pillars = D25_SCHEMA[sc] || D25_SCHEMA.alt_18;
+  for (const [key, def] of Object.entries(pillars)) {
+    const subs = _d25FormState.subCriteria[key] || new Array(def.subs.length).fill(0);
+    const score = d25ComputePillarScore(subs);
+    const scoreEl = document.getElementById(`d25-pillar-${key}-score`);
+    if (scoreEl) scoreEl.textContent = `${score}/2`;
+    const mathEl = document.getElementById(`d25-pillar-${key}-math`);
+    if (mathEl) mathEl.innerHTML = d25MathAnnotation(subs);
+    // Active segment styling
+    for (let i = 0; i < def.subs.length; i++) {
+      for (const v of [0, 1, 2]) {
+        const opt = document.querySelector(`input[name="d25-${key}-${i}"][value="${v}"]`);
+        if (opt) {
+          const lbl = opt.closest('.d25-seg-opt');
+          if (lbl) lbl.classList.toggle('active', subs[i] === v);
+        }
+      }
+    }
+  }
+  d25RenderSummary();
+}
+
+function d25MathAnnotation(subs) {
+  if (!subs || subs.length === 0) return '<span class="dim">no sub-criteria scored yet</span>';
+  const sum = subs.reduce((a, b) => a + b, 0);
+  const avg = sum / subs.length;
+  const zeros = subs.filter(s => s === 0).length;
+  const lowOnes = subs.filter(s => s <= 1).length;
+  let rule = '';
+  if (zeros > 0) rule = 'any sub-criterion = 0, round <strong>DOWN</strong>';
+  else if (subs.length >= 5 && lowOnes >= 2) rule = `${lowOnes} sub-criteria ≤ 1 in ${subs.length}-pillar, round <strong>DOWN</strong>`;
+  else if (avg === 0.5 || avg === 1.5) rule = `exact tie (avg ${avg}), v0.5.1 #4 round <strong>DOWN</strong>`;
+  else rule = `round to nearest`;
+  const result = d25ComputePillarScore(subs);
+  return `<span class="dim">Sub-criteria [${subs.join(', ')}] → avg ${avg.toFixed(2)} → ${rule} → pillar = <strong>${result}</strong></span>`;
+}
+
+function d25RenderSummary() {
+  const f = _d25FormState;
+  const adapter = d25CurrentAdapter();
+  const sc = adapter?.scorecardType || 'alt_18';
+  const pillars = D25_SCHEMA[sc] || D25_SCHEMA.alt_18;
+
+  const scores = {};
+  for (const key of Object.keys(pillars)) {
+    const subs = f.subCriteria[key] || [];
+    if (subs.length > 0) scores[key] = d25ComputePillarScore(subs);
+  }
+
+  const result = d25ComputeRawAndFinalBand(scores, sc);
+  const maxScore = sc === 'monetary_12' ? 12 : 18;
+
+  // VETO check
+  const triggeredVetos = D25_UNIVERSAL_VETOS.filter(([k]) => f.vetoConditions[k]);
+  const vetoActive = triggeredVetos.length > 0;
+  const finalBand = vetoActive ? 'exit' : result.finalBand;
+
+  const bandPill = (b) => `<span class="ct-band ct-band-${b}">${b}</span>`;
+  const ppgIndicator = result.ppgCapApplied
+    ? `<span class="loss">⚠ FAIL</span> <span class="dim">(${result.ppgFailedGates.join(', ')})</span>`
+    : '<span class="ok">✓ PASS</span>';
+  const vetoIndicator = vetoActive
+    ? `<span class="loss">🛑 TRIGGERED</span> (${triggeredVetos.map(v => v[0]).join(', ')})`
+    : '<span class="ok">clean</span>';
+
+  const pane = $('#d25-summary-pane');
+  pane.innerHTML = `
+    <div class="d25-summary-card">
+      <h3>Live preview</h3>
+      <div class="d25-summary-row">
+        <span>Symbol</span>
+        <strong>${escapeHTML(f.symbol || '—')} v${escapeHTML(f.version || 'v1')}</strong>
+      </div>
+      <div class="d25-summary-row">
+        <span>Adapter</span>
+        <code>${escapeHTML(f.adapterSlug)}</code> (${escapeHTML(sc)})
+      </div>
+      <div class="d25-summary-row">
+        <span>Raw total</span>
+        <strong>${result.total}/${maxScore}</strong>
+      </div>
+      <div class="d25-summary-row">
+        <span>Raw band</span>
+        ${bandPill(result.rawBand)}
+      </div>
+      <div class="d25-summary-row">
+        <span>PPG</span>
+        ${ppgIndicator}
+      </div>
+      <div class="d25-summary-row">
+        <span>VETO</span>
+        ${vetoIndicator}
+      </div>
+      <div class="d25-summary-row d25-summary-final">
+        <span>Final band</span>
+        ${bandPill(finalBand)}
+        ${vetoActive ? '<span class="dim"> (VETO override)</span>' : (result.ppgCapApplied ? '<span class="dim"> (PPG cap)</span>' : '')}
+      </div>
+      ${vetoActive ? '<p class="d25-veto-banner">🛑 VETO will trigger — band forced to Exit on lock regardless of pillar math.</p>' : ''}
+    </div>
+  `;
+}
+
+// ---------- Save + Lock actions
+
+function d25BuildPayload(f) {
+  const adapter = d25CurrentAdapter();
+  const sc = adapter?.scorecardType || 'alt_18';
+  // Normalize sub-criteria keys to lowercase for API contract; backend normalizes to uppercase for storage
+  const subCriteria = {};
+  for (const k in f.subCriteria) subCriteria[k.toLowerCase()] = f.subCriteria[k];
+
+  const payload = {
+    symbol: f.symbol,
+    version: f.version || 'v1',
+    name: f.name,
+    coinGeckoId: f.coinGeckoId || undefined,
+    adapterSlug: f.adapterSlug,
+    subType: f.subType || undefined,
+    primaryChainSymbol: f.primaryChainSymbol || undefined,
+    horizon: f.horizon,
+    btcBeta: f.btcBeta,
+    subCriteria,
+    q5Mechanism: f.q5Mechanism,
+    q5MechanismNote: f.q5MechanismNote || undefined,
+    q5AnnualUSD: f.q5AnnualUSD || undefined,
+    q5FDVUSD: f.q5FDVUSD || undefined,
+    vetoConditions: d25BuildVetoPayload(f),
+    q9TeamNote: f.q9TeamNote || undefined,
+    catalystDate: f.catalystDate || undefined,
+    catalystNote: f.catalystNote || undefined,
+    liquidityVenues: f.liquidityVenues || [],
+    liquidityPassed: f.liquidityPassed === false ? false : true,
+    markdownCurrent: f.markdownCurrent || '',
+    nextReviewDate: f.nextReviewDate || undefined,
+  };
+  // DePIN fields
+  if (adapter?.adapterType === 'depin') {
+    payload.q4q5Ryr = f.q4q5Ryr;
+    payload.q5PaidRevenueUSD = f.q5PaidRevenueUSD;
+    payload.q5EmissionsUSD = f.q5EmissionsUSD;
+    payload.networkAgeMonths = f.networkAgeMonths;
+  }
+  // RWA fields
+  if (adapter?.adapterType === 'rwa') {
+    payload.q5Rabr = f.q5Rabr;
+    payload.q5VerifiedAssetValueUSD = f.q5VerifiedAssetValueUSD;
+    payload.q5TokenSupplyAtParUSD = f.q5TokenSupplyAtParUSD;
+    payload.q5AuditDate = f.q5AuditDate || undefined;
+    payload.q5Auditor = f.q5Auditor || undefined;
+    payload.q6CustodyTier = f.q6CustodyTier || undefined;
+    payload.q6CustodyCadence = f.q6CustodyCadence || undefined;
+    payload.q6CustodyJurisdiction = f.q6CustodyJurisdiction || undefined;
+  }
+  // Forward cascade
+  if (f.oracleDependencyParentSymbol) {
+    payload.oracleDependencyParentSymbol = f.oracleDependencyParentSymbol;
+    payload.oracleDependencyParentVersion = f.oracleDependencyParentVersion || 'v1';
+  }
+  // Drop undefined
+  for (const k of Object.keys(payload)) if (payload[k] === undefined) delete payload[k];
+  return payload;
+}
+
+function d25BuildVetoPayload(f) {
+  const vc = f.vetoConditions || {};
+  const out = {
+    unlockCliffOver20Pct: !!vc.unlockCliffOver20Pct,
+    activeSecEnforcement: !!vc.activeSecEnforcement,
+    holderConcentrationOver50: !!vc.holderConcentrationOver50,
+    exploitUnresolved60d: !!vc.exploitUnresolved60d,
+    founderRug: !!vc.founderRug,
+    liquidityPrefilterFail: !!vc.liquidityPrefilterFail,
+  };
+  if (vc.unlockCliffOver20PctNote) out.unlockCliffNote = vc.unlockCliffOver20PctNote;
+  if (vc.activeSecEnforcementNote) out.activeSecEnforcementNote = vc.activeSecEnforcementNote;
+  if (vc.holderConcentrationOver50Note) out.holderConcentrationNote = vc.holderConcentrationOver50Note;
+  if (vc.exploitUnresolved60dNote) out.exploitUnresolved60dNote = vc.exploitUnresolved60dNote;
+  if (vc.founderRugNote) out.founderRugNote = vc.founderRugNote;
+  if (vc.liquidityPrefilterFailNote) out.liquidityPrefilterFailNote = vc.liquidityPrefilterFailNote;
+  return out;
+}
+
+async function d25SaveDraft(mode, symbol, version) {
+  const f = _d25FormState;
+  if (!f.symbol || !f.name) {
+    alert('Symbol and Name are required.');
+    return;
+  }
+  const payload = d25BuildPayload(f);
+  try {
+    if (mode === 'create') {
+      const res = await api('/api/crypto/theses', { method: 'POST', body: JSON.stringify(payload) });
+      alert(`Draft created: ${res.thesisId || res.symbol}`);
+      state.cryptoView = 'drafts';
+      renderCryptoDraftsList();
+    } else {
+      await api(`/api/crypto/theses/${encodeURIComponent(symbol)}/${encodeURIComponent(version)}`, {
+        method: 'PUT', body: JSON.stringify(payload),
+      });
+      alert('Draft saved.');
+    }
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
+}
+
+async function d25LockDraft(mode, symbol, version) {
+  // First save (so latest field state is persisted), then lock.
+  const f = _d25FormState;
+  if (!f.symbol || !f.name) {
+    alert('Symbol and Name are required.');
+    return;
+  }
+  const payload = d25BuildPayload(f);
+  try {
+    let sym, ver;
+    if (mode === 'create') {
+      const res = await api('/api/crypto/theses', { method: 'POST', body: JSON.stringify(payload) });
+      sym = f.symbol;
+      ver = f.version || 'v1';
+    } else {
+      await api(`/api/crypto/theses/${encodeURIComponent(symbol)}/${encodeURIComponent(version)}`, {
+        method: 'PUT', body: JSON.stringify(payload),
+      });
+      sym = symbol;
+      ver = version;
+    }
+    const lockRes = await api(`/api/crypto/theses/${encodeURIComponent(sym)}/${encodeURIComponent(ver)}/lock`, {
+      method: 'POST',
+    });
+    const r = lockRes.locked;
+    alert(`Locked: ${r.symbol} v${r.version}\nTotal: ${r.total}/${r.maxScore}\nRaw band: ${r.rawBand}\nFinal band: ${r.finalBand}${r.ppgCapApplied ? ' (PPG cap)' : ''}${r.vetoTriggered ? ' (VETO → Exit)' : ''}\nCascade rows: ${(r.cascadeRowsCreated || []).join('; ') || 'none'}`);
+    state.cryptoView = 'list';
+    renderCryptoTheses();
+  } catch (e) {
+    alert('Lock failed: ' + e.message);
+  }
 }
 
 boot();
