@@ -35,9 +35,10 @@ type Server struct {
 	refresh          *refresh.Service
 	llm              *llm.Service              // Spec 9c.1; nil-safe — handlers guard
 	scorecards       *scorecards.Service       // Spec 9g
-	cryptoAdapters   *cryptotheses.Service       // Spec 9l adapter CRUD
-	cryptoTheses     *cryptotheses.ThesisService // Spec 9l thesis read
-	cryptoCascade    *cryptotheses.CascadeService // Spec 9l cascade engine
+	cryptoAdapters   *cryptotheses.Service            // Spec 9l adapter CRUD
+	cryptoTheses     *cryptotheses.ThesisService      // Spec 9l thesis read
+	cryptoCascade    *cryptotheses.CascadeService     // Spec 9l cascade engine
+	cryptoWrite      *cryptotheses.ThesisWriteService // Spec 9l D25 thesis write
 	theses           *theses.Engine            // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
 	cryptoIndicators *cryptoindicators.Service // Spec 9e Phase 1
 	signals          *signals.Service          // Spec 9k Phase A
@@ -54,12 +55,15 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		cryptoAdapters: cryptotheses.New(st.DB),
 		cryptoTheses:   cryptotheses.NewThesisService(st.DB),
 		cryptoCascade:  cryptotheses.NewCascade(st.DB),
+		// cryptoWrite wired AFTER ctor because it depends on cryptoAdapters + cryptoCascade
+		// (assigned in the line after this struct closes — see below).
 		theses: theses.New(st.DB, cfg.ThesisRepoDir, cfg.ThesisRepoOwner,
 			cfg.ThesisRepoName, cfg.GitHubToken),
 		cryptoIndicators: cryptoindicators.New(st.DB), // Spec 9e Phase 1
 		signals:          signals.New(st.DB),          // Spec 9k Phase A
 		mux:              http.NewServeMux(),
 	}
+	s.cryptoWrite = cryptotheses.NewThesisWriteService(st.DB, s.cryptoAdapters, s.cryptoCascade)
 	s.routes()
 	return s
 }
@@ -262,6 +266,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/crypto/adapters/{slug}/status", s.requireUser(s.handleCryptoAdapterStatus))
 	// Spec 9l — Crypto Theses cross-table + detail (D26/D27)
 	s.mux.HandleFunc("GET /api/crypto/theses", s.requireUserOrToken(s.handleCryptoThesesList))
+	s.mux.HandleFunc("GET /api/crypto/theses/drafts", s.requireUser(s.handleCryptoDraftsList))
+	s.mux.HandleFunc("POST /api/crypto/theses", s.requireUser(s.handleCryptoThesisCreate))
+	s.mux.HandleFunc("PUT /api/crypto/theses/{symbol}/{version}", s.requireUser(s.handleCryptoThesisUpdateDraft))
+	s.mux.HandleFunc("POST /api/crypto/theses/{symbol}/{version}/lock", s.requireUser(s.handleCryptoThesisLock))
+	s.mux.HandleFunc("DELETE /api/crypto/theses/{symbol}/{version}", s.requireUser(s.handleCryptoThesisDelete))
 	s.mux.HandleFunc("GET /api/crypto/theses/{symbol}/{version}", s.requireUserOrToken(s.handleCryptoThesisGet))
 	s.mux.HandleFunc("GET /api/crypto/theses/{symbol}/{version}/events", s.requireUserOrToken(s.handleCryptoThesisEvents))
 	// Spec 9l — Allocation Panel (v0.2 §C two-table design)

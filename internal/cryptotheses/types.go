@@ -673,39 +673,17 @@ const DriftThresholdPct = 0.15
 // per v0.5 §L.9.2. Rule does NOT extend to 4-pillar; "round to nearest"
 // default applies. Future extension would be v0.5.1 patch territory.
 //
-// Used by the Scoring Engine (D25, Phase 2) when computing pillar scores
-// from individual sub-criterion inputs. Phase 1 stores pre-computed pillar
-// scores; this function is doctrine reference + ready-for-D25 helper.
+// Used by the Scoring Engine (D25, Phase 1+2) when computing pillar scores
+// from individual sub-criterion inputs. D25 ComputePillarScore (scoring.go)
+// is the canonical wrapper; this helper kept as direct-callable reference.
+//
+// **v0.5.1 #4 tie-breaking** (per v0.6.1 §A, locked retroactively 2026-05-30
+// evening): round DOWN on exact 0.5/1.5 ties. Forced by empirical application
+// in AAVE Q1 + EIGEN Q1 (both sub-criteria [1,2,2,1], avg 1.5 → pillar = 1).
 //
 // Sub-criteria expected in [0, 2]; result clamped to [0, 2].
 func ApplyV05Rounding(subCriteria []int) int {
-	if len(subCriteria) == 0 {
-		return 0
-	}
-	sum := 0
-	zeros := 0
-	loweqOne := 0
-	for _, s := range subCriteria {
-		sum += s
-		if s == 0 {
-			zeros++
-		}
-		if s <= 1 {
-			loweqOne++
-		}
-	}
-	avg := float64(sum) / float64(len(subCriteria))
-
-	// Round down if any sub-criterion = 0.
-	if zeros > 0 {
-		return clamp02(int(avg)) // truncate toward zero for non-negative
-	}
-	// Round down if 2+ sub-criteria ≤ 1 in a pillar with 5+ sub-criteria.
-	if len(subCriteria) >= 5 && loweqOne >= 2 {
-		return clamp02(int(avg))
-	}
-	// Otherwise round to nearest (half-up).
-	return clamp02(int(avg + 0.5))
+	return ComputePillarScore(SubCriteria(subCriteria))
 }
 
 func clamp02(v int) int {

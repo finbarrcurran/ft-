@@ -222,7 +222,7 @@ func (s *ThesisService) Get(ctx context.Context, symbol, version string) (*Thesi
 	if d.NextReviewAt != nil {
 		d.NextReviewDate = time.Unix(*d.NextReviewAt, 0).UTC().Format("2006-01-02")
 	}
-	_ = json.Unmarshal([]byte(pillarJSON), &d.PillarScores)
+	d.PillarScores = ParsePillarScoresJSON(pillarJSON)
 	_ = json.Unmarshal([]byte(venuesJSON), &d.LiquidityVenues)
 	if q5Annual.Valid {
 		v := q5Annual.Float64
@@ -391,6 +391,7 @@ func scanThesisRow(sc scanner) (ThesisRow, error) {
 	}
 	r.PillarPassGateFailed = pgFailed != 0
 	_ = json.Unmarshal([]byte(tagsJSON), &r.SecondaryTags)
+	r.SecondaryTags = FilterMetaTags(r.SecondaryTags)
 	if lockedAt.Valid {
 		v := lockedAt.Int64
 		r.LockedAt = &v
@@ -475,6 +476,7 @@ func scanDetailRow(sc scanner, d *ThesisDetail,
 	}
 	r.PillarPassGateFailed = pgFailed != 0
 	_ = json.Unmarshal([]byte(tagsJSON), &r.SecondaryTags)
+	r.SecondaryTags = FilterMetaTags(r.SecondaryTags)
 	if lockedAt.Valid {
 		v := lockedAt.Int64
 		r.LockedAt = &v
