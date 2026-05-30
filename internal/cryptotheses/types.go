@@ -626,3 +626,63 @@ var (
 // DriftThresholdPct — Spec 9l v0.2 §B. Locked at ±15% (crypto noisier
 // than equity fundamentals; original ±10% inherited from stock context).
 const DriftThresholdPct = 0.15
+
+// ApplyV05Rounding implements the canonical sub-criterion → pillar rounding
+// rule per **Spec 9l v0.5 §L.9.1** (supersedes v0.4 §C, 2026-05-30 PM late).
+//
+//	"Round down if any sub-criterion = 0,
+//	 OR if 2+ sub-criteria ≤ 1 in a pillar with 5+ sub-criteria.
+//	 Otherwise round to nearest."
+//
+// Verified against all 8 Phase 1 locked theses: only LINK v1 needed
+// re-locking (Q6 + Q9 from 1 → 2; 14/18 → 16/18, Strong Conviction band
+// unchanged). v0.5 §L.9.5 records the audit; §L.9.4 the SQL.
+//
+// 4-sub-criterion pillar interpretation: **Option B (strict 5+ reading)**
+// per v0.5 §L.9.2. Rule does NOT extend to 4-pillar; "round to nearest"
+// default applies. Future extension would be v0.5.1 patch territory.
+//
+// Used by the Scoring Engine (D25, Phase 2) when computing pillar scores
+// from individual sub-criterion inputs. Phase 1 stores pre-computed pillar
+// scores; this function is doctrine reference + ready-for-D25 helper.
+//
+// Sub-criteria expected in [0, 2]; result clamped to [0, 2].
+func ApplyV05Rounding(subCriteria []int) int {
+	if len(subCriteria) == 0 {
+		return 0
+	}
+	sum := 0
+	zeros := 0
+	loweqOne := 0
+	for _, s := range subCriteria {
+		sum += s
+		if s == 0 {
+			zeros++
+		}
+		if s <= 1 {
+			loweqOne++
+		}
+	}
+	avg := float64(sum) / float64(len(subCriteria))
+
+	// Round down if any sub-criterion = 0.
+	if zeros > 0 {
+		return clamp02(int(avg)) // truncate toward zero for non-negative
+	}
+	// Round down if 2+ sub-criteria ≤ 1 in a pillar with 5+ sub-criteria.
+	if len(subCriteria) >= 5 && loweqOne >= 2 {
+		return clamp02(int(avg))
+	}
+	// Otherwise round to nearest (half-up).
+	return clamp02(int(avg + 0.5))
+}
+
+func clamp02(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 2 {
+		return 2
+	}
+	return v
+}
