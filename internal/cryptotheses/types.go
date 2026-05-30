@@ -148,15 +148,16 @@ func (h HoldingHorizon) RescoreCadenceDays() int {
 type BTCBeta string
 
 const (
-	BetaHigh    BTCBeta = "high"
-	BetaMedium  BTCBeta = "medium"
-	BetaLow     BTCBeta = "low"
-	BetaInverse BTCBeta = "inverse"
+	BetaHigh      BTCBeta = "high"
+	BetaMedium    BTCBeta = "medium"
+	BetaLow       BTCBeta = "low"
+	BetaInverse   BTCBeta = "inverse"
+	BetaReference BTCBeta = "reference" // Spec 9l v0.6 §A.5 / Migration 0033 — self-reference (BTC v1 only)
 )
 
 func (b BTCBeta) Valid() bool {
 	switch b {
-	case BetaHigh, BetaMedium, BetaLow, BetaInverse:
+	case BetaHigh, BetaMedium, BetaLow, BetaInverse, BetaReference:
 		return true
 	}
 	return false
@@ -167,6 +168,7 @@ func (b BTCBeta) Valid() bool {
 type Q5Mechanism string
 
 const (
+	// v0.1 original set
 	Q5FeeBurn        Q5Mechanism = "fee_burn"
 	Q5FeeShare       Q5Mechanism = "fee_share"
 	Q5Buyback        Q5Mechanism = "buyback"
@@ -174,12 +176,41 @@ const (
 	Q5GovernanceOnly Q5Mechanism = "governance_only"
 	Q5None           Q5Mechanism = "none"
 	Q5Other          Q5Mechanism = "other"
+	// Migration 0033 additions (Spec 9l v0.4 §B + v0.5 §H)
+	Q5DirectAssetClaim        Q5Mechanism = "direct_asset_claim"          // RWA — 1:1 backed claim (BUIDL)
+	Q5RequiredForService      Q5Mechanism = "required_for_service"        // Infrastructure — required for service (LINK)
+	Q5DSRSurplus              Q5Mechanism = "dsr_surplus"                 // DeFi stablecoin-issuer (Sky/MKR)
+	Q5BurnAndMint             Q5Mechanism = "burn_and_mint"               // DePIN BME / Speculative transaction-tax (RNDR, LUNC)
+	Q5BuybackStake            Q5Mechanism = "buyback_stake"               // DeFi/Infra buyback held to treasury
+	Q5RealYieldStaking        Q5Mechanism = "real_yield_staking"          // Distinct from staking_yield — paid from real fees (AAVE)
+	Q5GovernanceWithFeeSwitch Q5Mechanism = "governance_with_fee_switch"  // UNI-class — governance controls dormant fee switch
 )
 
 func (q Q5Mechanism) Valid() bool {
 	switch q {
 	case Q5FeeBurn, Q5FeeShare, Q5Buyback, Q5StakingYield,
-		Q5GovernanceOnly, Q5None, Q5Other:
+		Q5GovernanceOnly, Q5None, Q5Other,
+		Q5DirectAssetClaim, Q5RequiredForService, Q5DSRSurplus,
+		Q5BurnAndMint, Q5BuybackStake, Q5RealYieldStaking,
+		Q5GovernanceWithFeeSwitch:
+		return true
+	}
+	return false
+}
+
+// CustodyTier — Spec 9l v0.6 §A.4 / Migration 0033 (RWA adapter §3).
+// Tier 3 structurally caps Q6 below Strong Conviction band-eligible.
+type CustodyTier string
+
+const (
+	CustodyTier1 CustodyTier = "tier_1" // monthly Big-4 OR daily admin by G-SIB
+	CustodyTier2 CustodyTier = "tier_2" // quarterly mid-firm
+	CustodyTier3 CustodyTier = "tier_3" // annual / none — caps Q6 below Strong
+)
+
+func (c CustodyTier) Valid() bool {
+	switch c {
+	case CustodyTier1, CustodyTier2, CustodyTier3:
 		return true
 	}
 	return false

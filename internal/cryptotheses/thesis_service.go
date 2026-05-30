@@ -64,6 +64,26 @@ type ThesisDetail struct {
 	RenderedHTML     string          `json:"renderedHTML"`
 	Dependencies     []DependencyRow `json:"dependencies"`
 	History          []HistoryRow    `json:"history"`
+
+	// Migration 0033 additions (Spec 9l v0.6 §A) — surfaced for DePIN/RWA theses.
+	// Nullable; populated for relevant adapter types only.
+	Q4Q5RYR                 *float64 `json:"q4q5Ryr,omitempty"`                  // DePIN: paid_revenue / token_emissions
+	Q5PaidRevenueUSD        *float64 `json:"q5PaidRevenueUSD,omitempty"`         // DePIN: 90d annualised
+	Q5EmissionsUSD          *float64 `json:"q5EmissionsUSD,omitempty"`           // DePIN: 90d annualised at spot
+	NetworkAgeMonths        *int     `json:"networkAgeMonths,omitempty"`         // DePIN: months since mainnet
+	Q5RABR                  *float64 `json:"q5Rabr,omitempty"`                   // RWA: verified_asset_value / token_supply_at_par
+	Q5VerifiedAssetValueUSD *float64 `json:"q5VerifiedAssetValueUSD,omitempty"`  // RWA: per attestation
+	Q5TokenSupplyAtParUSD   *float64 `json:"q5TokenSupplyAtParUSD,omitempty"`    // RWA: total supply × par value
+	Q5AuditDate             string   `json:"q5AuditDate,omitempty"`              // RWA: YYYY-MM-DD
+	Q5Auditor               string   `json:"q5Auditor,omitempty"`                // RWA: attestation provider
+	Q6CustodyTier           string   `json:"q6CustodyTier,omitempty"`            // RWA: tier_1 / tier_2 / tier_3
+	Q6CustodyCadence        string   `json:"q6CustodyCadence,omitempty"`         // RWA: monthly/quarterly/annual/none
+	Q6CustodyJurisdiction   string   `json:"q6CustodyJurisdiction,omitempty"`    // RWA: country/region
+
+	// Computed (derived in Get from the underlying fields)
+	RYRClassification       string `json:"ryrClassification,omitempty"`            // structural_profit/sustainable_yield/subsidized/concern/emissions_farming
+	RABRClassification      string `json:"rabrClassification,omitempty"`           // fully_backed/slight_drift/concern/veto_eligible
+	BootstrapWindowStatus   string `json:"bootstrapWindowStatus,omitempty"`        // active/expired
 }
 
 // DependencyRow exposed via detail view.
@@ -173,7 +193,12 @@ func (s *ThesisService) Get(ctx context.Context, symbol, version string) (*Thesi
 		       t.pillar_scores_json, COALESCE(t.q5_mechanism,''),
 		       t.q5_annual_usd, t.q5_fdv_usd, t.q5_accrual_pct,
 		       COALESCE(t.q9_team_note,''), COALESCE(t.catalyst_note,''),
-		       t.liquidity_venues_json, t.markdown_current, t.rendered_html
+		       t.liquidity_venues_json, t.markdown_current, t.rendered_html,
+		       t.q4_q5_ryr, t.q5_paid_revenue_usd, t.q5_emissions_usd, t.network_age_months,
+		       t.q5_rabr, t.q5_verified_asset_value_usd, t.q5_token_supply_at_par_usd,
+		       COALESCE(t.q5_audit_date,''), COALESCE(t.q5_auditor,''),
+		       COALESCE(t.q6_custody_tier,''), COALESCE(t.q6_custody_cadence,''),
+		       COALESCE(t.q6_custody_jurisdiction,'')
 		  FROM crypto_theses t
 		  JOIN crypto_adapters a ON a.id = t.primary_adapter_id
 		  LEFT JOIN crypto_adapters sa ON sa.id = t.secondary_adapter_id
@@ -182,7 +207,13 @@ func (s *ThesisService) Get(ctx context.Context, symbol, version string) (*Thesi
 	var d ThesisDetail
 	var pillarJSON, venuesJSON string
 	var q5Annual, q5FDV, q5Pct sql.NullFloat64
-	r, err := scanDetailRow(row, &d, &pillarJSON, &q5Annual, &q5FDV, &q5Pct, &venuesJSON)
+	// Migration 0033 nullables
+	var ryr, paidRev, emissionsUSD sql.NullFloat64
+	var ageMonths sql.NullInt64
+	var rabr, vaValue, supParUSD sql.NullFloat64
+	r, err := scanDetailRow(row, &d, &pillarJSON, &q5Annual, &q5FDV, &q5Pct, &venuesJSON,
+		&ryr, &paidRev, &emissionsUSD, &ageMonths,
+		&rabr, &vaValue, &supParUSD)
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +235,39 @@ func (s *ThesisService) Get(ctx context.Context, symbol, version string) (*Thesi
 	if q5Pct.Valid {
 		v := q5Pct.Float64
 		d.Q5AccrualPct = &v
+	}
+	// Migration 0033 — DePIN RYR fields
+	if ryr.Valid {
+		v := ryr.Float64
+		d.Q4Q5RYR = &v
+		d.RYRClassification = classifyRYR(v)
+	}
+	if paidRev.Valid {
+		v := paidRev.Float64
+		d.Q5PaidRevenueUSD = &v
+	}
+	if emissionsUSD.Valid {
+		v := emissionsUSD.Float64
+		d.Q5EmissionsUSD = &v
+	}
+	if ageMonths.Valid {
+		v := int(ageMonths.Int64)
+		d.NetworkAgeMonths = &v
+		d.BootstrapWindowStatus = classifyBootstrapWindow(v)
+	}
+	// Migration 0033 — RWA RABR fields
+	if rabr.Valid {
+		v := rabr.Float64
+		d.Q5RABR = &v
+		d.RABRClassification = classifyRABR(v)
+	}
+	if vaValue.Valid {
+		v := vaValue.Float64
+		d.Q5VerifiedAssetValueUSD = &v
+	}
+	if supParUSD.Valid {
+		v := supParUSD.Float64
+		d.Q5TokenSupplyAtParUSD = &v
 	}
 
 	// Attach parent via cascade lookup.
@@ -342,8 +406,48 @@ func scanThesisRow(sc scanner) (ThesisRow, error) {
 	return r, nil
 }
 
+// classifyRYR — DePIN adapter §3 RYR bands.
+func classifyRYR(ryr float64) string {
+	switch {
+	case ryr >= 2.0:
+		return "structural_profit"
+	case ryr >= 1.0:
+		return "sustainable_yield"
+	case ryr >= 0.5:
+		return "subsidized"
+	case ryr >= 0.1:
+		return "concern"
+	default:
+		return "emissions_farming"
+	}
+}
+
+// classifyRABR — RWA adapter §3 RABR bands.
+func classifyRABR(rabr float64) string {
+	switch {
+	case rabr >= 1.00:
+		return "fully_backed"
+	case rabr >= 0.95:
+		return "slight_drift"
+	case rabr >= 0.85:
+		return "concern"
+	default:
+		return "veto_eligible"
+	}
+}
+
+// classifyBootstrapWindow — DePIN adapter §3 24-month allowance.
+func classifyBootstrapWindow(ageMonths int) string {
+	if ageMonths < 24 {
+		return "active"
+	}
+	return "expired"
+}
+
 func scanDetailRow(sc scanner, d *ThesisDetail,
 	pillarJSON *string, q5Annual, q5FDV, q5Pct *sql.NullFloat64, venuesJSON *string,
+	ryr, paidRev, emissionsUSD *sql.NullFloat64, ageMonths *sql.NullInt64,
+	rabr, vaValue, supParUSD *sql.NullFloat64,
 ) (ThesisRow, error) {
 	var r ThesisRow
 	var lockedAt, lastReviewedAt, nextReviewAt sql.NullInt64
@@ -361,7 +465,12 @@ func scanDetailRow(sc scanner, d *ThesisDetail,
 		pillarJSON, &d.Q5Mechanism,
 		q5Annual, q5FDV, q5Pct,
 		&d.Q9TeamNote, &d.CatalystNote,
-		venuesJSON, &d.MarkdownCurrent, &d.RenderedHTML); err != nil {
+		venuesJSON, &d.MarkdownCurrent, &d.RenderedHTML,
+		// Migration 0033 columns
+		ryr, paidRev, emissionsUSD, ageMonths,
+		rabr, vaValue, supParUSD,
+		&d.Q5AuditDate, &d.Q5Auditor,
+		&d.Q6CustodyTier, &d.Q6CustodyCadence, &d.Q6CustodyJurisdiction); err != nil {
 		return r, err
 	}
 	r.PillarPassGateFailed = pgFailed != 0
