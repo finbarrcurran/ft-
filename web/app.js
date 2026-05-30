@@ -6985,7 +6985,34 @@ async function renderCryptoIndicators() {
   );
   const heroExpanded = !!state.cryptoIndicators.heroExpanded;
   const rangeLabel = (CI_RANGE_OPTIONS.find((o) => o.key === state.cryptoIndicators.rangeKey) || {}).label || `${days} days`;
+
+  // Spec 9l D30 — 9e sell-window verdict badge.
+  // Fires when 9e composite is in Distribute/Strong-Distribute AND at least
+  // one locked Crypto Thesis is in Trim or Exit band. Phase 1 MVP: doesn't
+  // gate on held-coin marking (Spec 9l §41 says "user-marked-as-held";
+  // Phase 2 will fetch holdings + intersect).
+  let sellWindowHTML = '';
+  const distRegime = comp.actionBand === 'distribute' || comp.actionBand === 'strong_distribute';
+  if (distRegime) {
+    try {
+      const theses = (await api('/api/crypto/theses').catch(() => ({ theses: [] }))).theses || [];
+      const trimExitTheses = theses.filter(t => t.status === 'locked' && (t.band === 'trim' || t.band === 'exit'));
+      if (trimExitTheses.length > 0) {
+        const list = trimExitTheses.slice(0, 4).map(t => `<a href="#" class="ci-sw-thesis" data-sym="${escapeHTML(t.coinSymbol)}" data-ver="${escapeHTML(t.version)}">${escapeHTML(t.coinSymbol)} (${escapeHTML(t.band)})</a>`).join(', ');
+        const more = trimExitTheses.length > 4 ? ` +${trimExitTheses.length - 4} more` : '';
+        sellWindowHTML = `
+          <div class="ci-sell-window-banner">
+            <strong>🔔 Favourable selling window</strong> — 9e in ${escapeHTML(bandLabel)} regime AND
+            <span class="ci-sw-coins">${list}${more}</span> currently scored Trim or Exit on Crypto Theses tab.
+            <span class="dim">(Phase 1 fires per locked Crypto Thesis; Phase 2 will gate on user-held coins.)</span>
+          </div>
+        `;
+      }
+    } catch (_) {}
+  }
+
   const heroHTML = `
+    ${sellWindowHTML}
     <div class="ci-hero ci-hero-v2 ${heroExpanded ? 'ci-hero-expanded' : ''}" id="ci-hero">
       <div class="ci-hero-left" id="ci-hero-gauge" title="Click to ${heroExpanded ? 'collapse' : 'expand'} composite history">
         ${renderCIGauge(Number(dispScore), comp.actionBand)}
@@ -7229,6 +7256,14 @@ async function renderCryptoIndicators() {
   $('#ci-hero-gauge')?.addEventListener('click', () => {
     state.cryptoIndicators.heroExpanded = !state.cryptoIndicators.heroExpanded;
     renderCryptoIndicators();
+  });
+
+  // Spec 9l D30 — sell-window thesis links open detail modal.
+  document.querySelectorAll('.ci-sw-thesis').forEach((a) => {
+    a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      openCryptoThesisDetail(a.dataset.sym, a.dataset.ver);
+    });
   });
 
   // v1.18 — drill-down modal: card click opens modal
@@ -9418,69 +9453,54 @@ let _cryptoAdapterListCache = null;
 
 async function renderCryptoTheses() {
   const content = $('#content');
-  content.innerHTML = '<div class="empty">loading crypto adapters…</div>';
+  content.innerHTML = '<div class="empty">loading crypto theses…</div>';
 
-  let list;
+  let adapters = [], theses = [], allocation = null;
   try {
-    const r = await api('/api/crypto/adapters');
-    list = r.adapters || [];
-    _cryptoAdapterListCache = list;
+    const [adapterRes, thesesRes, allocRes] = await Promise.all([
+      api('/api/crypto/adapters'),
+      api('/api/crypto/theses').catch(() => ({ theses: [] })),
+      api('/api/crypto/allocation').catch(() => null),
+    ]);
+    adapters = adapterRes.adapters || [];
+    theses = thesesRes.theses || [];
+    allocation = allocRes?.current || null;
+    _cryptoAdapterListCache = adapters;
   } catch (e) {
-    content.innerHTML = `<div class="empty"><div class="loss">crypto adapters failed: ${escapeHTML(e.message)}</div></div>`;
+    content.innerHTML = `<div class="empty"><div class="loss">crypto theses load failed: ${escapeHTML(e.message)}</div></div>`;
     return;
   }
 
-  // Pre-select: state.selectedCryptoAdapter → first locked → first row.
+  // Pre-select adapter for Repository pane.
   let selected = state.selectedCryptoAdapter
-    || list.find(a => a.status === 'locked')?.slug
-    || list[0]?.slug
+    || adapters.find(a => a.status === 'locked')?.slug
+    || adapters[0]?.slug
     || null;
   state.selectedCryptoAdapter = selected;
 
-  const statusIcon = (a) => {
-    if (a.status === 'locked') return '🔒';
-    if (a.status === 'needs-review') return '🔄';
-    return '⚠';
-  };
-  const scorecardChip = (a) =>
-    a.scorecardType === 'monetary_12'
-      ? '<span class="ca-chip ca-chip-btc">/12 monetary</span>'
-      : '<span class="ca-chip ca-chip-alt">/18 alt</span>';
-
-  const leftPane = list.map(a => {
-    const cls = ['sc-row', 'ca-row'];
-    if (a.slug === selected) cls.push('active');
-    return `
-      <div class="${cls.join(' ')}" data-ca-slug="${escapeHTML(a.slug)}" tabindex="0">
-        <div class="sc-row-title">${escapeHTML(a.displayName)}</div>
-        <div class="sc-row-meta">
-          <span class="sc-version">v${escapeHTML(a.currentVersion)}</span>
-          <span class="sc-status">${statusIcon(a)} ${escapeHTML(a.status)}</span>
-          ${scorecardChip(a)}
-        </div>
-      </div>
-    `;
-  }).join('');
-
+  // Render full layout: Allocation Panel → Cross-thesis table → Repository.
   content.innerHTML = `
-    <div class="scorecards-layout">
-      <aside class="sc-left">
-        <h3 class="sc-pane-head">
-          Crypto Adapters
-          <span class="dim" style="font-size:0.72rem; font-weight:normal">(${list.length})</span>
-        </h3>
-        <div class="ct-doctrine-banner dim" style="font-size:0.72rem; padding:0.4rem 0.6rem; line-height:1.4">
-          Spec 9l Phase 1 — Repository view. Scoring Engine + per-coin theses arrive once locked adapter MDs land.
-        </div>
-        <div class="sc-list">${leftPane || '<p class="dim">No adapters seeded yet.</p>'}</div>
-      </aside>
-      <section class="sc-right" id="ca-right">
-        <div class="empty">loading…</div>
-      </section>
-    </div>
+    ${renderAllocationPanel(allocation, theses)}
+    ${renderCrossThesisTable(theses)}
+    ${renderAdapterRepository(adapters, selected)}
   `;
 
-  // Wire left-pane clicks.
+  // Wire allocation save.
+  wireAllocationPanel();
+
+  // Wire thesis row clicks.
+  for (const row of content.querySelectorAll('.ct-thesis-row[data-thesis-key]')) {
+    const open = () => {
+      const [sym, ver] = row.dataset.thesisKey.split('|');
+      openCryptoThesisDetail(sym, ver);
+    };
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
+    });
+  }
+
+  // Wire adapter pane clicks.
   for (const row of content.querySelectorAll('.ca-row[data-ca-slug]')) {
     const open = () => {
       state.selectedCryptoAdapter = row.dataset.caSlug;
@@ -9495,6 +9515,257 @@ async function renderCryptoTheses() {
   if (selected) {
     await loadCryptoAdapterRightPane(selected);
   }
+}
+
+// ---------- Cross-thesis table (Spec 9l D26) ---------------------------
+function renderCrossThesisTable(theses) {
+  if (!theses || !theses.length) {
+    return `
+      <div class="ct-section">
+        <h3 class="ct-section-head">Locked Theses <span class="dim">(0)</span></h3>
+        <p class="dim">No theses locked yet. Use the Scoring Engine modal (coming Step 6) to score your first coin.</p>
+      </div>
+    `;
+  }
+
+  const bandPill = (band) => {
+    const bands = { strong:'Strong', accumulate:'Accumulate', hold:'Hold', trim:'Trim', exit:'Exit' };
+    return `<span class="ct-band ct-band-${escapeHTML(band)}">${bands[band] || band}</span>`;
+  };
+  const statusPill = (status) => {
+    const ic = { locked:'🔒', 'needs-review':'🔄', watching:'👁', draft:'⚠', invalidated:'⛔', forked:'🔱' };
+    return `<span class="ct-status">${ic[status] || ''} ${escapeHTML(status)}</span>`;
+  };
+  const scoreCell = (t) => {
+    if (t.pillarPassGateFailed && t.rawBand !== t.band) {
+      return `${t.score}/${t.maxScore} <span class="dim" title="raw band capped by pillar pass gate">→ ${bandPill(t.band)}</span>`;
+    }
+    return `${t.score}/${t.maxScore}`;
+  };
+  const vetoCell = (t) => t.activeVeto
+    ? `<span class="ct-veto" title="${escapeHTML(t.activeVetoReason || '')}">🛑 ${escapeHTML(t.activeVeto)}</span>`
+    : '<span class="dim">—</span>';
+
+  const rows = theses.map(t => `
+    <tr class="ct-thesis-row" data-thesis-key="${escapeHTML(t.coinSymbol)}|${escapeHTML(t.version)}" tabindex="0">
+      <td><strong>${escapeHTML(t.coinSymbol)}</strong></td>
+      <td>${escapeHTML(t.coinName)}</td>
+      <td><code>${escapeHTML(t.adapterSlug)}</code></td>
+      <td>${scoreCell(t)}</td>
+      <td>${bandPill(t.band)}</td>
+      <td>${statusPill(t.status)}</td>
+      <td>${escapeHTML(t.holdingHorizon)}</td>
+      <td>${escapeHTML(t.btcBeta)}</td>
+      <td>${t.parentSymbol ? `${escapeHTML(t.parentSymbol)} ${escapeHTML(t.parentVersion)}` : '<span class="dim">—</span>'}</td>
+      <td>${vetoCell(t)}</td>
+      <td class="dim">${t.nextReviewDate || '—'}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="ct-section">
+      <h3 class="ct-section-head">
+        Locked Theses
+        <span class="dim" style="font-size:0.72rem; font-weight:normal">(${theses.length})</span>
+      </h3>
+      <div class="ct-table-wrap">
+        <table class="ct-thesis-table">
+          <thead>
+            <tr>
+              <th>Coin</th><th>Name</th><th>Adapter</th><th>Score</th><th>Band</th>
+              <th>Status</th><th>Horizon</th><th>BTC-β</th><th>Parent</th><th>VETO</th><th>Next RS</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ---------- Allocation Panel (Spec 9l D29 — two-table backend) ---------
+function renderAllocationPanel(alloc, theses) {
+  if (!alloc) {
+    return `<div class="ct-section"><h3 class="ct-section-head">Allocation Panel</h3><p class="dim">Allocation API unavailable.</p></div>`;
+  }
+  const totalAltScore = theses
+    .filter(t => t.status === 'locked' && t.adapterSlug !== 'btc' && t.coinSymbol !== 'ETH')
+    .reduce((sum, t) => sum + (t.score || 0), 0);
+  const altRows = theses
+    .filter(t => t.status === 'locked' && t.adapterSlug !== 'btc' && t.coinSymbol !== 'ETH')
+    .map(t => {
+      const share = totalAltScore > 0 ? (t.score / totalAltScore) : 0;
+      const weight = (share * (alloc.pctAlts || 0)).toFixed(2);
+      return `<tr><td>${escapeHTML(t.coinSymbol)}</td><td>${t.score}/${t.maxScore}</td><td>${(share * 100).toFixed(1)}%</td><td>${weight}%</td></tr>`;
+    }).join('');
+
+  return `
+    <div class="ct-section">
+      <h3 class="ct-section-head">Allocation Panel</h3>
+      <div class="ct-alloc-grid">
+        <label>Stocks <input type="number" id="alloc-stocks" min="0" max="100" step="0.5" value="${alloc.pctStocks}"></label>
+        <label>BTC <input type="number" id="alloc-btc" min="0" max="100" step="0.5" value="${alloc.pctBTC}"></label>
+        <label>ETH <input type="number" id="alloc-eth" min="0" max="100" step="0.5" value="${alloc.pctETH}"></label>
+        <label>Alts <input type="number" id="alloc-alts" min="0" max="100" step="0.5" value="${alloc.pctAlts}"></label>
+        <label>Cash <input type="number" id="alloc-cash" min="0" max="100" step="0.5" value="${alloc.pctCash}"></label>
+        <div class="ct-alloc-sum">Sum: <span id="alloc-sum">100</span>%</div>
+        <button class="btn" id="alloc-save" disabled>Save</button>
+      </div>
+      ${altRows ? `
+        <details class="ct-alloc-breakdown">
+          <summary>Suggested per-coin alt allocation <span class="dim">(thesis_score / total_alt_score × pct_alts)</span></summary>
+          <table class="ct-thesis-table">
+            <thead><tr><th>Coin</th><th>Score</th><th>Share</th><th>Suggested %</th></tr></thead>
+            <tbody>${altRows}</tbody>
+          </table>
+        </details>
+      ` : ''}
+    </div>
+  `;
+}
+
+function wireAllocationPanel() {
+  const fields = ['stocks', 'btc', 'eth', 'alts', 'cash'];
+  const inputs = fields.map(f => document.getElementById(`alloc-${f}`)).filter(Boolean);
+  const sumEl = document.getElementById('alloc-sum');
+  const saveBtn = document.getElementById('alloc-save');
+  if (!sumEl || !saveBtn) return;
+
+  const updateSum = () => {
+    const total = inputs.reduce((s, el) => s + (parseFloat(el.value) || 0), 0);
+    sumEl.textContent = total.toFixed(2);
+    sumEl.style.color = Math.abs(total - 100) < 0.01 ? '#22c55e' : '#ef4444';
+    saveBtn.disabled = Math.abs(total - 100) >= 0.01;
+  };
+  for (const el of inputs) el.addEventListener('input', updateSum);
+  updateSum();
+
+  saveBtn.addEventListener('click', async () => {
+    const payload = {
+      pctStocks: parseFloat(document.getElementById('alloc-stocks').value) || 0,
+      pctBTC: parseFloat(document.getElementById('alloc-btc').value) || 0,
+      pctETH: parseFloat(document.getElementById('alloc-eth').value) || 0,
+      pctAlts: parseFloat(document.getElementById('alloc-alts').value) || 0,
+      pctCash: parseFloat(document.getElementById('alloc-cash').value) || 0,
+    };
+    try {
+      await api('/api/crypto/allocation', { method: 'PUT', body: JSON.stringify(payload) });
+      saveBtn.textContent = '✓ Saved';
+      setTimeout(() => { saveBtn.textContent = 'Save'; renderCryptoTheses(); }, 800);
+    } catch (e) {
+      alert('Save failed: ' + e.message);
+    }
+  });
+}
+
+// ---------- Adapter Repository pane (existing, extracted) --------------
+function renderAdapterRepository(adapters, selected) {
+  const statusIcon = (a) => {
+    if (a.status === 'locked') return '🔒';
+    if (a.status === 'needs-review') return '🔄';
+    return '⚠';
+  };
+  const scorecardChip = (a) =>
+    a.scorecardType === 'monetary_12'
+      ? '<span class="ca-chip ca-chip-btc">/12 monetary</span>'
+      : '<span class="ca-chip ca-chip-alt">/18 alt</span>';
+  const leftPane = adapters.map(a => {
+    const cls = ['sc-row', 'ca-row'];
+    if (a.slug === selected) cls.push('active');
+    return `
+      <div class="${cls.join(' ')}" data-ca-slug="${escapeHTML(a.slug)}" tabindex="0">
+        <div class="sc-row-title">${escapeHTML(a.displayName)}</div>
+        <div class="sc-row-meta">
+          <span class="sc-version">v${escapeHTML(a.currentVersion)}</span>
+          <span class="sc-status">${statusIcon(a)} ${escapeHTML(a.status)}</span>
+          ${scorecardChip(a)}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="ct-section">
+      <h3 class="ct-section-head">Adapter Repository <span class="dim">(${adapters.length})</span></h3>
+      <div class="scorecards-layout">
+        <aside class="sc-left">
+          <div class="sc-list">${leftPane || '<p class="dim">No adapters seeded yet.</p>'}</div>
+        </aside>
+        <section class="sc-right" id="ca-right">
+          <div class="empty">loading…</div>
+        </section>
+      </div>
+    </div>
+  `;
+}
+
+// ---------- Per-thesis detail modal (Spec 9l D27) ----------------------
+async function openCryptoThesisDetail(symbol, version) {
+  let payload;
+  try {
+    payload = await api(`/api/crypto/theses/${encodeURIComponent(symbol)}/${encodeURIComponent(version)}`);
+  } catch (e) {
+    alert('Thesis load failed: ' + e.message);
+    return;
+  }
+  const t = payload.thesis;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+
+  const pillarRows = Object.entries(t.pillarScores || {})
+    .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+    .map(([k, v]) => `<tr><td>${k}</td><td><strong>${v}</strong>/2</td></tr>`).join('');
+  const q5 = t.q5AnnualUSD != null && t.q5FDVUSD != null
+    ? `<div><strong>Mechanism:</strong> ${escapeHTML(t.q5Mechanism)}; $${(t.q5AnnualUSD / 1e6).toFixed(1)}M annual / $${(t.q5FDVUSD / 1e9).toFixed(2)}B FDV = <strong>${(t.q5AccrualPct || 0).toFixed(2)}%</strong></div>`
+    : (t.q5Mechanism ? `<div><strong>Mechanism:</strong> ${escapeHTML(t.q5Mechanism)} (no $ figures stored)</div>` : '<span class="dim">no Q5 detail</span>');
+
+  const depRows = (t.dependencies || []).map(d =>
+    `<li><strong>${d.direction === 'parent_of' ? '↓ parent of' : '↑ child of'}</strong> ${escapeHTML(d.otherSymbol)} ${escapeHTML(d.otherVersion)} <code>${escapeHTML(d.dependencyType)}</code> <span class="dim">${escapeHTML(d.cascadeStrength)}</span>${d.note ? ` — <span class="dim">${escapeHTML(d.note)}</span>` : ''}</li>`
+  ).join('');
+
+  const vetoBlock = t.activeVeto ? `
+    <div class="ct-veto-box">
+      <strong>🛑 ACTIVE VETO:</strong> <code>${escapeHTML(t.activeVeto)}</code><br>
+      ${escapeHTML(t.activeVetoReason || '')}
+    </div>` : '';
+
+  modal.innerHTML = `
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h3>
+          ${escapeHTML(t.coinSymbol)} — ${escapeHTML(t.coinName)} <span class="sc-version-pill">v${escapeHTML(t.version)}</span>
+          <span style="margin-left:0.6rem; font-size:0.85rem;">${t.score}/${t.maxScore} <span class="ct-band ct-band-${escapeHTML(t.band)}">${escapeHTML(t.band)}</span></span>
+        </h3>
+        <button class="btn-ghost" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        ${vetoBlock}
+        <div class="ca-meta-grid">
+          <div><span class="dim">Adapter:</span> <code>${escapeHTML(t.adapterSlug)}</code> (${escapeHTML(t.scorecardType)})</div>
+          <div><span class="dim">Horizon:</span> ${escapeHTML(t.holdingHorizon)}</div>
+          <div><span class="dim">BTC-β:</span> ${escapeHTML(t.btcBeta)}</div>
+          <div><span class="dim">PPG failed:</span> ${t.pillarPassGateFailed ? '⚠ yes' : '✓ no'}</div>
+          <div><span class="dim">Raw band:</span> ${escapeHTML(t.rawBand)}${t.rawBand !== t.band ? ` → capped to <strong>${escapeHTML(t.band)}</strong>` : ''}</div>
+          <div><span class="dim">Liquidity:</span> ${(t.liquidityVenues || []).join(', ') || '—'}</div>
+        </div>
+        <h4>Pillar scores</h4>
+        <table class="ct-pillar-table"><tbody>${pillarRows}</tbody></table>
+        <h4>Q5 Value Accrual</h4>
+        ${q5}
+        ${t.q9TeamNote ? `<h4>Q9 Team / Founder Note</h4><div class="ct-q9-note">${escapeHTML(t.q9TeamNote)}</div>` : ''}
+        ${depRows ? `<h4>Cascade dependencies</h4><ul class="ct-dep-list">${depRows}</ul>` : ''}
+        <details>
+          <summary>Locked thesis markdown</summary>
+          <article class="sc-body">${t.renderedHTML || '<p class="dim">no rendered HTML</p>'}</article>
+        </details>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" data-close>Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  for (const c of modal.querySelectorAll('[data-close]')) c.addEventListener('click', () => modal.remove());
 }
 
 async function loadCryptoAdapterRightPane(slug) {

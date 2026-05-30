@@ -35,7 +35,9 @@ type Server struct {
 	refresh          *refresh.Service
 	llm              *llm.Service              // Spec 9c.1; nil-safe — handlers guard
 	scorecards       *scorecards.Service       // Spec 9g
-	cryptoAdapters   *cryptotheses.Service     // Spec 9l
+	cryptoAdapters   *cryptotheses.Service       // Spec 9l adapter CRUD
+	cryptoTheses     *cryptotheses.ThesisService // Spec 9l thesis read
+	cryptoCascade    *cryptotheses.CascadeService // Spec 9l cascade engine
 	theses           *theses.Engine            // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
 	cryptoIndicators *cryptoindicators.Service // Spec 9e Phase 1
 	signals          *signals.Service          // Spec 9k Phase A
@@ -50,6 +52,8 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		llm:        llmSvc,
 		scorecards:     scorecards.New(st.DB),
 		cryptoAdapters: cryptotheses.New(st.DB),
+		cryptoTheses:   cryptotheses.NewThesisService(st.DB),
+		cryptoCascade:  cryptotheses.NewCascade(st.DB),
 		theses: theses.New(st.DB, cfg.ThesisRepoDir, cfg.ThesisRepoOwner,
 			cfg.ThesisRepoName, cfg.GitHubToken),
 		cryptoIndicators: cryptoindicators.New(st.DB), // Spec 9e Phase 1
@@ -256,6 +260,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/crypto/adapters/{slug}/versions", s.requireUserOrToken(s.handleCryptoAdapterVersions))
 	s.mux.HandleFunc("GET /api/crypto/adapters/{slug}/versions/{ver}", s.requireUserOrToken(s.handleCryptoAdapterVersionGet))
 	s.mux.HandleFunc("PUT /api/crypto/adapters/{slug}/status", s.requireUser(s.handleCryptoAdapterStatus))
+	// Spec 9l — Crypto Theses cross-table + detail (D26/D27)
+	s.mux.HandleFunc("GET /api/crypto/theses", s.requireUserOrToken(s.handleCryptoThesesList))
+	s.mux.HandleFunc("GET /api/crypto/theses/{symbol}/{version}", s.requireUserOrToken(s.handleCryptoThesisGet))
+	s.mux.HandleFunc("GET /api/crypto/theses/{symbol}/{version}/events", s.requireUserOrToken(s.handleCryptoThesisEvents))
+	// Spec 9l — Allocation Panel (v0.2 §C two-table design)
+	s.mux.HandleFunc("GET /api/crypto/allocation", s.requireUserOrToken(s.handleCryptoAllocationGet))
+	s.mux.HandleFunc("PUT /api/crypto/allocation", s.requireUser(s.handleCryptoAllocationPut))
 
 	// Spec 9b D11: macro economics calendar (embedded JSON).
 	s.mux.HandleFunc("GET /api/macro", s.requireUser(s.handleMacro))

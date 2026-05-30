@@ -50,9 +50,14 @@ func main() {
 		file string
 	}
 	seeds := []seed{
-		{slug: "btc", file: "BTC_adapter_v1.md"},
+				{slug: "btc", file: "BTC_adapter_v1.md"},
+		{slug: "l2", file: "L2_adapter_v1.md"},
 		{slug: "l1", file: "L1_adapter_v1.md"},
 		{slug: "speculative", file: "Speculative_adapter_v1.md"},
+		{slug: "defi", file: "DeFi_adapter_v1.md"},
+		{slug: "infra", file: "Infrastructure_adapter_v1.md"},
+		{slug: "depin", file: "DePIN_adapter_v1.md"},
+		{slug: "rwa", file: "RWA_adapter_v1.md"},
 	}
 
 	now := time.Now().Unix()

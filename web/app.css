@@ -3815,3 +3815,145 @@ a.score-badge { display: inline-block; }
   border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 .ca-version-table th { color: #9ca3af; font-weight: 600; }
+
+/* ===== Spec 9l Step 7 — Cross-thesis table + Allocation Panel ===== */
+
+.ct-section {
+  margin: 0 0 1.2rem 0;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.ct-section:last-child { border-bottom: none; }
+.ct-section-head {
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin: 0 0 0.6rem 0;
+  color: #e5e7eb;
+}
+
+.ct-table-wrap {
+  overflow-x: auto;
+}
+.ct-thesis-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+.ct-thesis-table th,
+.ct-thesis-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  white-space: nowrap;
+}
+.ct-thesis-table th {
+  color: #9ca3af;
+  font-weight: 600;
+  font-size: 0.72rem;
+  background: rgba(255,255,255,0.02);
+}
+.ct-thesis-row { cursor: pointer; }
+.ct-thesis-row:hover { background: rgba(255,255,255,0.04); }
+
+.ct-band {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.ct-band-strong     { background: rgba(34,197,94,0.18);  color: #4ade80; border: 1px solid rgba(34,197,94,0.35); }
+.ct-band-accumulate { background: rgba(34,197,94,0.10);  color: #86efac; border: 1px solid rgba(34,197,94,0.25); }
+.ct-band-hold       { background: rgba(255,255,255,0.06); color: #d1d5db; border: 1px solid rgba(255,255,255,0.15); }
+.ct-band-trim       { background: rgba(245,158,11,0.18); color: #fbbf24; border: 1px solid rgba(245,158,11,0.35); }
+.ct-band-exit       { background: rgba(239,68,68,0.18);  color: #f87171; border: 1px solid rgba(239,68,68,0.4); }
+
+.ct-status { font-size: 0.72rem; color: #9ca3af; }
+.ct-veto   { color: #f87171; font-weight: 600; }
+
+.ct-alloc-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr) auto auto;
+  gap: 0.6rem;
+  align-items: end;
+  padding: 0.4rem 0.6rem;
+  background: rgba(99,102,241,0.05);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 0.35rem;
+}
+.ct-alloc-grid label {
+  font-size: 0.72rem;
+  color: #9ca3af;
+  display: flex;
+  flex-direction: column;
+}
+.ct-alloc-grid input {
+  background: rgba(0,0,0,0.25);
+  color: #e5e7eb;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 0.25rem;
+  padding: 0.2rem 0.35rem;
+  font-size: 0.85rem;
+  width: 100%;
+}
+.ct-alloc-sum {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.ct-alloc-breakdown {
+  margin-top: 0.6rem;
+  font-size: 0.78rem;
+}
+
+.ct-pillar-table {
+  width: 50%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  margin: 0.4rem 0;
+}
+.ct-pillar-table td {
+  padding: 0.2rem 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.ct-q9-note {
+  background: rgba(255,255,255,0.03);
+  border-left: 3px solid rgba(99,102,241,0.6);
+  padding: 0.5rem 0.8rem;
+  margin: 0.4rem 0;
+  font-size: 0.82rem;
+  font-style: italic;
+}
+.ct-dep-list {
+  margin: 0.4rem 0;
+  padding-left: 1.3rem;
+  font-size: 0.82rem;
+}
+.ct-veto-box {
+  background: rgba(239,68,68,0.10);
+  border: 1px solid rgba(239,68,68,0.4);
+  border-radius: 0.35rem;
+  padding: 0.5rem 0.8rem;
+  margin: 0.4rem 0 0.6rem 0;
+  color: #fca5a5;
+  font-size: 0.85rem;
+}
+
+/* ===== Spec 9l D30 — 9e sell-window verdict badge ===== */
+
+.ci-sell-window-banner {
+  background: linear-gradient(135deg, rgba(245,158,11,0.10), rgba(239,68,68,0.10));
+  border: 1px solid rgba(245,158,11,0.5);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  margin: 0 0 0.8rem 0;
+  font-size: 0.85rem;
+  color: #fbbf24;
+}
+.ci-sell-window-banner strong { color: #fcd34d; }
+.ci-sw-coins a {
+  color: #f87171;
+  text-decoration: underline;
+  margin-right: 0.3rem;
+  font-weight: 600;
+}
+.ci-sw-coins a:hover { color: #fca5a5; }
