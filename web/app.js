@@ -9741,7 +9741,7 @@ async function openCryptoThesisDetail(symbol, version) {
       <div class="modal-body">
         ${vetoBlock}
         <div class="ca-meta-grid">
-          <div><span class="dim">Adapter:</span> <code>${escapeHTML(t.adapterSlug)}</code> (${escapeHTML(t.scorecardType)})</div>
+          <div><span class="dim">Adapter:</span> <code>${escapeHTML(t.adapterSlug)}</code> (${escapeHTML(t.scorecardType)})${t.secondaryAdapterSlug ? ` <span class="ct-hybrid-tag" title="Hybrid coin — secondary adapter advisory only per Spec 9l §13">+ ${escapeHTML(t.secondaryAdapterSlug)} advisory</span>` : ''}</div>
           <div><span class="dim">Horizon:</span> ${escapeHTML(t.holdingHorizon)}</div>
           <div><span class="dim">BTC-β:</span> ${escapeHTML(t.btcBeta)}</div>
           <div><span class="dim">PPG failed:</span> ${t.pillarPassGateFailed ? '⚠ yes' : '✓ no'}</div>

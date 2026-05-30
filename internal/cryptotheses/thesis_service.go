@@ -23,9 +23,11 @@ type ThesisRow struct {
 	CoinSymbol        string          `json:"coinSymbol"`
 	CoinName          string          `json:"coinName"`
 	CoingeckoID       string          `json:"coingeckoID,omitempty"`
-	AdapterSlug       string          `json:"adapterSlug"`
-	AdapterType       AdapterType     `json:"adapterType"`
-	ScorecardType     ScorecardType   `json:"scorecardType"`
+	AdapterSlug          string         `json:"adapterSlug"`
+	AdapterType          AdapterType    `json:"adapterType"`
+	ScorecardType        ScorecardType  `json:"scorecardType"`
+	SecondaryAdapterSlug string         `json:"secondaryAdapterSlug,omitempty"`
+	SecondaryAdapterType AdapterType    `json:"secondaryAdapterType,omitempty"`
 	SecondaryTags     []string        `json:"secondaryTags"`
 	Score             int             `json:"score"`
 	MaxScore          int             `json:"maxScore"`
@@ -104,6 +106,7 @@ func (s *ThesisService) ListAll(ctx context.Context) ([]ThesisRow, error) {
 	q := `
 		SELECT t.id, t.coin_symbol, t.coin_name, COALESCE(t.coingecko_id,''),
 		       a.slug, a.adapter_type, t.scorecard_type, t.secondary_tags_json,
+		       COALESCE(sa.slug,''), COALESCE(sa.adapter_type,''),
 		       t.total_score, t.max_score, t.band, t.pillar_pass_gate_failed,
 		       t.status, t.holding_horizon, t.btc_beta,
 		       COALESCE(t.active_veto,''), COALESCE(t.active_veto_reason,''),
@@ -111,6 +114,7 @@ func (s *ThesisService) ListAll(ctx context.Context) ([]ThesisRow, error) {
 		       COALESCE(t.catalyst_date,''), t.version
 		  FROM crypto_theses t
 		  JOIN crypto_adapters a ON a.id = t.primary_adapter_id
+		  LEFT JOIN crypto_adapters sa ON sa.id = t.secondary_adapter_id
 		 ORDER BY
 		   CASE t.status
 		     WHEN 'locked' THEN 0
@@ -160,6 +164,7 @@ func (s *ThesisService) Get(ctx context.Context, symbol, version string) (*Thesi
 	row := s.DB.QueryRowContext(ctx, `
 		SELECT t.id, t.coin_symbol, t.coin_name, COALESCE(t.coingecko_id,''),
 		       a.slug, a.adapter_type, t.scorecard_type, t.secondary_tags_json,
+		       COALESCE(sa.slug,''), COALESCE(sa.adapter_type,''),
 		       t.total_score, t.max_score, t.band, t.pillar_pass_gate_failed,
 		       t.status, t.holding_horizon, t.btc_beta,
 		       COALESCE(t.active_veto,''), COALESCE(t.active_veto_reason,''),
@@ -171,6 +176,7 @@ func (s *ThesisService) Get(ctx context.Context, symbol, version string) (*Thesi
 		       t.liquidity_venues_json, t.markdown_current, t.rendered_html
 		  FROM crypto_theses t
 		  JOIN crypto_adapters a ON a.id = t.primary_adapter_id
+		  LEFT JOIN crypto_adapters sa ON sa.id = t.secondary_adapter_id
 		 WHERE t.coin_symbol = ? AND t.version = ?`, symbol, version)
 
 	var d ThesisDetail
@@ -311,6 +317,7 @@ func scanThesisRow(sc scanner) (ThesisRow, error) {
 	if err := sc.Scan(
 		&r.ID, &r.CoinSymbol, &r.CoinName, &r.CoingeckoID,
 		&r.AdapterSlug, &r.AdapterType, &r.ScorecardType, &tagsJSON,
+		&r.SecondaryAdapterSlug, &r.SecondaryAdapterType,
 		&r.Score, &r.MaxScore, &r.Band, &pgFailed,
 		&r.Status, &r.HoldingHorizon, &r.BTCBeta,
 		&r.ActiveVeto, &r.ActiveVetoReason,
@@ -345,6 +352,7 @@ func scanDetailRow(sc scanner, d *ThesisDetail,
 	if err := sc.Scan(
 		&r.ID, &r.CoinSymbol, &r.CoinName, &r.CoingeckoID,
 		&r.AdapterSlug, &r.AdapterType, &r.ScorecardType, &tagsJSON,
+		&r.SecondaryAdapterSlug, &r.SecondaryAdapterType,
 		&r.Score, &r.MaxScore, &r.Band, &pgFailed,
 		&r.Status, &r.HoldingHorizon, &r.BTCBeta,
 		&r.ActiveVeto, &r.ActiveVetoReason,
