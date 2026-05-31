@@ -1090,6 +1090,52 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
   z-index: 9999;
 }
 
+/* ----- SC-05: Cowen capture live autofill --------------------------- */
+
+.cw-prefill-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+.cw-suggest {
+  border: 1px solid rgb(var(--color-border));
+  border-left: 3px solid rgb(var(--color-border-strong));
+  border-radius: var(--radius);
+  background: rgb(var(--color-surface-sunken));
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.8rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.cw-suggest.loading { color: rgb(var(--color-text-muted)); }
+.cw-suggest.err     { border-left-color: rgb(var(--color-loss)); }
+.cw-suggest.ok      { border-left-color: rgb(var(--color-gain)); }
+.cw-suggest-head {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.cw-suggest-row { margin-top: 0.1rem; }
+.cw-suggest-foot {
+  margin-top: 0.35rem;
+  font-size: 0.76rem;
+  color: rgb(var(--color-text-muted));
+}
+.cw-preview-bar {
+  margin-top: 0.8rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgb(var(--color-border));
+  font-size: 0.85rem;
+}
+.cw-regime-val {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.cw-regime-val.cw-stable       { color: rgb(var(--color-gain)); }
+.cw-regime-val.cw-shifting     { color: rgb(var(--color-amber)); }
+.cw-regime-val.cw-defensive    { color: rgb(var(--color-loss)); }
+.cw-regime-val.cw-unclassified { color: rgb(var(--color-text-muted)); }
+
 /* ----- USD / EUR toggle (Summary tab) ------------------------------ */
 
 .currency-toggle {

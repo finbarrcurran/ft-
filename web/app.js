@@ -991,7 +991,11 @@ function openCowenCaptureForm() {
           <button class="modal-close" id="modal-close" aria-label="Close">×</button>
         </div>
         <div class="modal-body">
-          ${lastJSON ? `<button class="btn-ghost" id="cw-prefill" style="margin-bottom:0.8rem">↻ Pre-fill from last submission</button>` : ''}
+          <div class="cw-prefill-row">
+            <button class="btn-secondary" id="cw-prefill-live" type="button">⤓ Pre-fill from live indicators</button>
+            ${lastJSON ? `<button class="btn-ghost" id="cw-prefill" type="button">↻ Pre-fill from last submission</button>` : ''}
+          </div>
+          <div id="cw-suggest" class="cw-suggest" hidden></div>
           <form id="cw-form">
             <div class="form-row"><label>1. BTC vs 200wk MA (%)</label>
               <input name="btc_vs_200wk_ma_pct" type="number" step="0.1" required placeholder="e.g. +28.4"/></div>
@@ -1033,6 +1037,10 @@ function openCowenCaptureForm() {
               <textarea name="note" rows="2" placeholder="anything else"></textarea></div>
             <div class="error" id="cw-err"></div>
           </form>
+          <div class="cw-preview-bar">
+            Regime preview: <strong id="cw-regime-preview">—</strong>
+            <span class="dim">— updates as you edit; the saved value is computed server-side on save</span>
+          </div>
         </div>
         <div class="modal-foot">
           <button class="btn-secondary" id="cw-cancel">Cancel</button>
@@ -1046,8 +1054,13 @@ function openCowenCaptureForm() {
   $('#cw-cancel').addEventListener('click', closeImportModal);
   $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
   if (lastJSON && $('#cw-prefill')) {
-    $('#cw-prefill').addEventListener('click', () => cowenPrefill(lastJSON));
+    $('#cw-prefill').addEventListener('click', () => { cowenPrefill(lastJSON); updateCowenRegimePreview(); });
   }
+  $('#cw-prefill-live').addEventListener('click', () => cowenPrefillFromLive(lastJSON));
+  // Live regime preview: recompute whenever any input changes. Suggest-only,
+  // never persisted — the authoritative classification runs server-side on save.
+  $('#cw-form').addEventListener('input', updateCowenRegimePreview);
+  $('#cw-form').addEventListener('change', updateCowenRegimePreview);
   $('#cw-save').addEventListener('click', () => submitCowenCapture());
 }
 
@@ -1069,6 +1082,186 @@ function cowenPrefill(d) {
   setCheck('cpi_trending_down', d.cpi_trending_down);
   setCheck('fed_not_hostile',   d.fed_not_hostile);
   setCheck('recession_risk_low', d.recession_risk_low);
+}
+
+// ---------- SC-05: Cowen capture autofill from live 9e indicators --------
+//
+// "Pre-fill from live indicators" pulls the latest Spec 9e crypto_indicators
+// readings into the weekly-capture form. Suggest-only: nothing is persisted
+// until the user hits "Classify + save". Indicators older than the fallback
+// window leave their field BLANK rather than seed a stale default (AC4).
+// MVRV-Z has no free data source, so it always stays blank for manual entry.
+//
+// Field mapping (form field ← 9e indicator):
+//   btc_vs_200wk_ma_pct ← cowen_price_vs_200wma (stored as a ratio → %)
+//   btc_vs_200d_ma_pct  ← computed from BTC daily history (200d SMA)
+//   log_band_third      ← cowen_log_band (5-band score → 3 thirds)
+//   risk_indicator      ← cowen_risk_indicator (0–1 passthrough)
+//   btc_dominance_pct   ← cowen_btc_dominance (+ trend4w → rising/flat/falling)
+//   eth_btc             ← cowen_eth_btc        (+ trend4w → rising/flat/falling)
+const COWEN_LIVE_STALE_DAYS = 10;
+
+const cwRound = (v, dp) => (v == null || Number.isNaN(v)) ? null : Math.round(v * 10 ** dp) / 10 ** dp;
+// Signed % change → trend word, matching the server's ±0.5% flat band.
+function cwTrendWord(t) {
+  if (t == null || Number.isNaN(t)) return null;
+  if (t > 0.5) return 'rising';
+  if (t < -0.5) return 'falling';
+  return 'flat';
+}
+// Suggested cycle phase from the risk indicator. Editable — the final
+// cycle-phase call stays the user's (handover §96).
+function cwSuggestCyclePhase(risk) {
+  if (risk == null) return null;
+  if (risk > 0.75) return 4;
+  if (risk >= 0.5) return 3;
+  if (risk >= 0.25) return 2;
+  return 1;
+}
+// JS mirror of regime.ClassifyCowen for the live preview only. The saved
+// regime is always computed server-side on /api/regime/cowen/auto.
+function cwClassifyPreview(risk, cyclePhase, macroOK, prior) {
+  if (risk == null || cyclePhase == null) return 'unclassified';
+  const r = risk, cp = cyclePhase;
+  if (cp === 4 || r > 0.75 || (!macroOK && r > 0.5)) return 'defensive';
+  if ((cp === 3 && r >= 0.5 && r <= 0.75) || (cp === 2 && prior === 3)) return 'shifting';
+  if ((cp === 1 || cp === 2) && r < 0.5) return 'stable';
+  return 'unclassified';
+}
+
+function updateCowenRegimePreview() {
+  const el = $('#cw-regime-preview');
+  if (!el) return;
+  const form = $('#cw-form');
+  const riskRaw = form.querySelector('[name=risk_indicator]').value.trim();
+  const risk = riskRaw === '' ? null : parseFloat(riskRaw);
+  const cpEl = form.querySelector('[name=cycle_phase]:checked');
+  const cp = cpEl ? parseInt(cpEl.value, 10) : null;
+  const macroOK = form.querySelector('[name=cpi_trending_down]').checked &&
+    form.querySelector('[name=fed_not_hostile]').checked &&
+    form.querySelector('[name=recession_risk_low]').checked;
+  const last = regimeState && regimeState.cowen ? regimeState.cowen.last_inputs : null;
+  const prior = last && last.cycle_phase ? parseInt(last.cycle_phase, 10) : 0;
+  const reg = cwClassifyPreview(risk, cp, macroOK, prior);
+  el.textContent = reg.toUpperCase();
+  el.className = 'cw-regime-val cw-' + reg;
+}
+
+async function cowenPrefillFromLive(lastJSON) {
+  const noteEl = $('#cw-suggest');
+  const setNote = (html, cls) => {
+    if (!noteEl) return;
+    noteEl.hidden = false;
+    noteEl.className = 'cw-suggest ' + (cls || '');
+    noteEl.innerHTML = html;
+  };
+  setNote('Loading live indicators…', 'loading');
+
+  let payload;
+  try {
+    payload = await api('/api/crypto-indicators');
+  } catch (e) {
+    setNote('Could not load live indicators: ' + escapeHTML(e.message) + '. Fill the form manually.', 'err');
+    return;
+  }
+  if (!payload || payload.available === false || !Array.isArray(payload.indicators)) {
+    setNote('Live indicators are not available yet — fill the form manually.', 'err');
+    return;
+  }
+
+  const byId = {};
+  for (const it of payload.indicators) byId[it.id] = it;
+  const nowSec = Date.now() / 1000;
+  const fresh = (it) => it && it.updatedAt != null &&
+    (nowSec - it.updatedAt) <= COWEN_LIVE_STALE_DAYS * 86400;
+
+  const form = $('#cw-form');
+  const setVal = (name, val) => { const el = form.querySelector(`[name=${name}]`); if (el) el.value = (val == null ? '' : val); };
+  const setRadio = (name, val) => {
+    form.querySelectorAll(`[name=${name}]`).forEach((el) => { el.checked = false; });
+    if (val == null) return;
+    const el = form.querySelector(`[name=${name}][value="${val}"]`);
+    if (el) el.checked = true;
+  };
+
+  const filled = [];
+  const skipped = [];
+
+  // 1. BTC vs 200wk MA % — indicator stores a ratio (price ÷ 200wMA).
+  const wma = byId['cowen_price_vs_200wma'];
+  if (fresh(wma) && wma.currentValue != null) {
+    setVal('btc_vs_200wk_ma_pct', cwRound((wma.currentValue - 1) * 100, 1));
+    filled.push('BTC vs 200wk MA');
+  } else { setVal('btc_vs_200wk_ma_pct', ''); skipped.push('BTC vs 200wk MA'); }
+
+  // 2. BTC vs 200d MA % — no indicator; compute from BTC daily history.
+  let pct200d = null;
+  try {
+    const btc = await api('/api/crypto-indicators/btc-history?days=205');
+    const h = btc && Array.isArray(btc.history) ? btc.history : [];
+    if (h.length >= 200) {
+      const last200 = h.slice(-200);
+      const sma = last200.reduce((a, p) => a + p.closeUsd, 0) / last200.length;
+      const latest = h[h.length - 1].closeUsd;
+      if (sma > 0) pct200d = cwRound((latest / sma - 1) * 100, 1);
+    }
+  } catch (_) { /* leave blank */ }
+  if (pct200d != null) { setVal('btc_vs_200d_ma_pct', pct200d); filled.push('BTC vs 200d MA'); }
+  else { setVal('btc_vs_200d_ma_pct', ''); skipped.push('BTC vs 200d MA'); }
+
+  // 3. Log-regression band third — indicator uses a 5-band score; map to the
+  //    form's 3 thirds (lower / middle / upper).
+  const lb = byId['cowen_log_band'];
+  let bandThird = null;
+  if (fresh(lb) && lb.currentScore != null) {
+    bandThird = lb.currentScore >= 0.5 ? 'lower' : lb.currentScore <= -0.5 ? 'upper' : 'middle';
+  }
+  if (bandThird) { setRadio('log_band_third', bandThird); filled.push('Log band'); }
+  else { setRadio('log_band_third', null); skipped.push('Log band'); }
+
+  // 4. Risk indicator (0–1) — straight passthrough.
+  const risk = byId['cowen_risk_indicator'];
+  let riskVal = null;
+  if (fresh(risk) && risk.currentValue != null) {
+    riskVal = cwRound(risk.currentValue, 2);
+    setVal('risk_indicator', riskVal);
+    filled.push('Risk indicator');
+  } else { setVal('risk_indicator', ''); skipped.push('Risk indicator'); }
+
+  // 5. BTC dominance % + 4-week trend.
+  const dom = byId['cowen_btc_dominance'];
+  if (fresh(dom) && dom.currentValue != null) {
+    setVal('btc_dominance_pct', cwRound(dom.currentValue, 1));
+    setRadio('btc_dominance_4wk', cwTrendWord(dom.trend4w));
+    filled.push('BTC dominance');
+  } else { setVal('btc_dominance_pct', ''); setRadio('btc_dominance_4wk', null); skipped.push('BTC dominance'); }
+
+  // 6. ETH/BTC ratio + 4-week trend.
+  const eth = byId['cowen_eth_btc'];
+  if (fresh(eth) && eth.currentValue != null) {
+    setVal('eth_btc', cwRound(eth.currentValue, 4));
+    setRadio('eth_btc_4wk', cwTrendWord(eth.trend4w));
+    filled.push('ETH/BTC');
+  } else { setVal('eth_btc', ''); setRadio('eth_btc_4wk', null); skipped.push('ETH/BTC'); }
+
+  // 7. MVRV-Z — no free data source; always manual (AC3). Cleared, not seeded.
+  setRadio('mvrv_z_band', null);
+
+  // 8. Suggested cycle phase from the risk indicator (editable, AC2).
+  const suggestedPhase = cwSuggestCyclePhase(riskVal);
+  if (suggestedPhase) setRadio('cycle_phase', suggestedPhase);
+
+  updateCowenRegimePreview();
+  const previewReg = ($('#cw-regime-preview') && $('#cw-regime-preview').textContent) || '—';
+
+  setNote(`
+    <div class="cw-suggest-head">Pre-filled from live 9e indicators</div>
+    <div class="cw-suggest-row"><span class="dim">Filled:</span> ${filled.length ? escapeHTML(filled.join(', ')) : '—'}</div>
+    ${skipped.length ? `<div class="cw-suggest-row"><span class="dim">Left blank (stale &gt;${COWEN_LIVE_STALE_DAYS}d / unavailable):</span> ${escapeHTML(skipped.join(', '))}</div>` : ''}
+    <div class="cw-suggest-row"><span class="dim">MVRV-Z:</span> manual entry — no free source</div>
+    ${suggestedPhase ? `<div class="cw-suggest-row"><span class="dim">Suggested cycle phase:</span> <strong>${suggestedPhase}</strong> · <span class="dim">regime preview:</span> <strong>${escapeHTML(previewReg)}</strong></div>` : ''}
+    <div class="cw-suggest-foot">All values are suggestions — review, confirm cycle phase + macro flags, then Classify + save.</div>
+  `, 'ok');
 }
 
 async function submitCowenCapture() {
