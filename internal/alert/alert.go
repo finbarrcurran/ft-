@@ -54,11 +54,10 @@ func ComputeWithMargin(h *domain.StockHolding, m metrics.StockMetrics, margin fl
 	if h.RSI14 != nil && *h.RSI14 >= 65 && *h.RSI14 <= 74 {
 		amber = append(amber, fmt.Sprintf("RSI %.0f (65–74, elevated)", *h.RSI14))
 	}
-	// AMBER_SL_PROXIMITY (Spec 3 D12): manual SL set, current price is within
-	// margin of SL on the way down, and today's change is negative.
-	if reason, ok := slProximity(h, margin); ok {
-		amber = append(amber, reason)
-	}
+	// NB: SC-08 retired the old flat-margin SL/TP proximity here. The two-tier
+	// progress-based "Proximity Alert" family now lives in proximity.go and is
+	// surfaced as its own alert kinds via /api/bot/alerts (not folded into the
+	// RED/AMBER classification).
 	if len(amber) > 0 {
 		return domain.AlertResult{Status: domain.AlertAmber, Triggers: amber}
 	}
@@ -78,53 +77,5 @@ func ComputeWithMargin(h *domain.StockHolding, m metrics.StockMetrics, margin fl
 			},
 		}
 	}
-	// GREEN_TP_PROXIMITY (Spec 3 D12): manual TP set, current price is within
-	// margin of TP on the way up, today's change is positive.
-	if reason, ok := tpProximity(h, margin); ok {
-		return domain.AlertResult{Status: domain.AlertGreen, Triggers: []string{reason}}
-	}
-
 	return domain.AlertResult{Status: domain.AlertNeutral, Triggers: []string{}}
-}
-
-// slProximity implements AMBER_SL_PROXIMITY per Spec 3 D12.
-//
-//	fires when current price <= manual_sl_price * (1 + margin)
-//	  AND current price > manual_sl_price
-//	  AND today's change is negative
-func slProximity(h *domain.StockHolding, margin float64) (string, bool) {
-	if h.StopLoss == nil || h.CurrentPrice == nil || h.DailyChangePct == nil {
-		return "", false
-	}
-	sl := *h.StopLoss
-	px := *h.CurrentPrice
-	if sl <= 0 || px <= 0 {
-		return "", false
-	}
-	if px > sl && px <= sl*(1+margin) && *h.DailyChangePct < 0 {
-		gap := (px - sl) / sl * 100
-		return fmt.Sprintf("Price within %.1f%% of stop loss (today %.2f%%)", gap, *h.DailyChangePct), true
-	}
-	return "", false
-}
-
-// tpProximity implements GREEN_TP_PROXIMITY per Spec 3 D12.
-//
-//	fires when current price >= manual_tp_price * (1 - margin)
-//	  AND current price < manual_tp_price
-//	  AND today's change is positive
-func tpProximity(h *domain.StockHolding, margin float64) (string, bool) {
-	if h.TakeProfit == nil || h.CurrentPrice == nil || h.DailyChangePct == nil {
-		return "", false
-	}
-	tp := *h.TakeProfit
-	px := *h.CurrentPrice
-	if tp <= 0 || px <= 0 {
-		return "", false
-	}
-	if px < tp && px >= tp*(1-margin) && *h.DailyChangePct > 0 {
-		gap := (tp - px) / tp * 100
-		return fmt.Sprintf("Price within %.1f%% of take profit (today +%.2f%%)", gap, *h.DailyChangePct), true
-	}
-	return "", false
 }

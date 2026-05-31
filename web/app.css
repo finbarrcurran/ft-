@@ -3706,6 +3706,49 @@ input.autofilled, select.autofilled {
   50%      { box-shadow: 0 0 0 4px rgba(207,58,58,0.25); }
 }
 
+/* === SC-08 — Dist to TP chip + per-row stop-method toggle === */
+.dist-tp-chip {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.dist-tp-chip.gain { color: #6bd47c; }
+.dist-tp-chip.tp-near {
+  background: rgba(107,212,124,0.22);
+  color: #d6f5dc;
+}
+.dist-tp-chip.tp-hit {
+  background: rgba(107,212,124,0.45);
+  color: #effbf1;
+}
+.sl-method-row { margin-top: 0.2rem; text-align: right; }
+.sl-method-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.sl-method-toggle .slm-btn {
+  border: 1px solid rgba(255,255,255,0.18);
+  background: transparent;
+  color: var(--dim, #9aa4b2);
+  border-radius: 4px;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.12rem 0.35rem;
+  cursor: pointer;
+}
+.sl-method-toggle .slm-btn:hover { border-color: rgba(255,255,255,0.4); }
+.sl-method-toggle .slm-btn.active {
+  background: rgba(94,160,255,0.28);
+  border-color: rgba(94,160,255,0.6);
+  color: #e6efff;
+}
+.sl-method-toggle .slm-btn:disabled { opacity: 0.5; cursor: default; }
+.sl-method-toggle .slm-lock { font-size: 0.7rem; opacity: 0.8; }
+
 /* Thesis-source score badge — slight visual distinction */
 .score-badge.thesis-source {
   border: 1px solid rgba(245,158,11,0.45);

@@ -286,3 +286,25 @@ func nullInt(p *int64) any {
 	}
 	return *p
 }
+
+// UpdateStockHoldingSLMethod is the SC-08 convenience endpoint for the
+// per-row Vol-envelope/Technical toggle in the Stocks table. Bypasses the
+// full UpdateStockHolding flow (which requires the whole mutation payload).
+// safetyPct is optional — nil leaves the stored sl_safety_pct untouched.
+func (s *Store) UpdateStockHoldingSLMethod(ctx context.Context, userID, holdingID int64, method string, safetyPct *float64) error {
+	_, err := s.DB.ExecContext(ctx, `
+		UPDATE stock_holdings
+		   SET sl_method = ?,
+		       sl_safety_pct = COALESCE(?, sl_safety_pct),
+		       updated_at = strftime('%s','now')
+		 WHERE user_id = ? AND id = ? AND deleted_at IS NULL`,
+		method, fpAny(safetyPct), userID, holdingID)
+	return err
+}
+
+func fpAny(p *float64) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}

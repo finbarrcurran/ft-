@@ -45,9 +45,12 @@ type stockMutationReq struct {
 	// Empty string clears any prior override.
 	ExchangeOverride *string `json:"exchangeOverride"`
 	// Spec 12 D7 AC #15 — listing currency, autofilled from Yahoo.
-	Currency   *string `json:"currency,omitempty"`
-	Reason     *string `json:"reason,omitempty"`     // for update audit row
-	ReasonCode *string `json:"reasonCode,omitempty"` // Spec 12 D9 typed reason
+	Currency *string `json:"currency,omitempty"`
+	// SC-08 — explicit stop-loss methodology. nil preserves the stored value.
+	SLMethod    *string  `json:"slMethod,omitempty"`
+	SLSafetyPct *float64 `json:"slSafetyPct,omitempty"`
+	Reason      *string  `json:"reason,omitempty"`     // for update audit row
+	ReasonCode  *string  `json:"reasonCode,omitempty"` // Spec 12 D9 typed reason
 }
 
 type cryptoMutationReq struct {
@@ -622,6 +625,9 @@ func stockFromReq(req stockMutationReq) *domain.StockHolding {
 		ExchangeOverride: trimStrPtr(req.ExchangeOverride),
 		// Spec 12 D7 — listing currency.
 		Currency: trimStrPtr(req.Currency),
+		// SC-08 — explicit stop-loss methodology.
+		SLMethod:    trimStrPtr(req.SLMethod),
+		SLSafetyPct: req.SLSafetyPct,
 	}
 }
 

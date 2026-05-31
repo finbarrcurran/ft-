@@ -102,6 +102,43 @@ function distToSlCell(v) {
   return `<span class="dist-sl-chip ${chip}" title="${escapeHTML(title)}">${formatted}</span>`;
 }
 
+// distToTpCell — SC-08. Pct of current price up to the take-profit target.
+// Positive = still below target (room to run). Green when comfortably below;
+// brightens to "near target" within 2%, and flags "reached" at/above the TP.
+function distToTpCell(v) {
+  if (v == null || Number.isNaN(v)) return '<span class="dim">—</span>';
+  const f = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const formatted = `${v > 0 ? '+' : ''}${f.format(v)}%`;
+  let chip = 'gain';
+  let title = `Distance to take-profit: ${formatted}`;
+  if (v <= 0) {
+    chip = 'tp-hit';
+    title = `Take-profit REACHED — current is at or above the TP price (${formatted}). Consider trimming.`;
+  } else if (v < 2) {
+    chip = 'tp-near';
+    title = `Within 2% of take-profit (${formatted}) — approaching target.`;
+  }
+  return `<span class="dist-tp-chip ${chip}" title="${escapeHTML(title)}">${formatted}</span>`;
+}
+
+// SC-08 — per-row stop-method toggle. Two compact buttons (Tech / Vol) that
+// PUT /api/holdings/stocks/{id}/sl-method. A manual stop_loss override always
+// wins over the method, so when `source === 'manual'` we show a lock hint.
+const SL_METHOD_HELP = {
+  technical: 'Technical — stop below structural support, buffered by volatility; for shorter-term entries.',
+  vol_envelope: 'Vol-envelope — stop a full annual-volatility band below entry; catastrophe-only, for long-term conviction.',
+};
+function slMethodToggle(r, m) {
+  const method = (r.slMethod === 'technical' || r.slMethod === 'vol_envelope') ? r.slMethod : 'vol_envelope';
+  const manual = m && m.effectiveSlSource === 'manual';
+  const lock = manual ? '<span class="slm-lock" title="Manual stop-loss set — overrides the method until cleared">🔒</span>' : '';
+  return `<span class="sl-method-toggle" data-row-id="${r.id}">
+      <button class="slm-btn ${method === 'technical' ? 'active' : ''}" data-method="technical" title="${escapeHTML(SL_METHOD_HELP.technical)}">T</button>
+      <button class="slm-btn ${method === 'vol_envelope' ? 'active' : ''}" data-method="vol_envelope" title="${escapeHTML(SL_METHOD_HELP.vol_envelope)}">V</button>
+      ${lock}
+    </span>`;
+}
+
 function escapeHTML(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -2371,7 +2408,9 @@ async function renderStocks() {
       : `<td></td>`;
     // Spec 12 D5b — combined price|% cell. Falls back to "—" when one
     // side is missing.
-    const proposedSL = proposedLevelCell(r.stopLoss, r.suggestedSlPct, r.avgOpenPrice, r.currentPrice, 'sl');
+    // SC-08 — Proposed SL prefers the resolved effective stop (manual override
+    // wins, else the sl_method computation) over the raw manual field.
+    const proposedSL = proposedLevelCell(m.effectiveSlPrice ?? r.stopLoss, r.suggestedSlPct, r.avgOpenPrice, r.currentPrice, 'sl');
     const proposedTP = proposedLevelCell(r.takeProfit, r.suggestedTpPct, r.avgOpenPrice, r.currentPrice, 'tp');
     const sparkSvg = r.sparklineSvg || '<span class="sparkline-empty">—</span>';
     const tickerCell = `<span class="ticker-hover" data-row-id="${r.id}" data-row-kind="stock" tabindex="0">${escapeHTML(r.ticker || '—')}</span>`;
@@ -2392,9 +2431,10 @@ async function renderStocks() {
         <td class="num" data-flash-id="stock-${r.id}-pnl" data-flash-value="${m.pnlUsd ?? ''}">${pnlCurrencyCell(m.pnlUsd, state.pnlCurrency, fxEURUSD)}</td>
         <td class="num">${pct(m.pnlPct, 2)}</td>
         <td class="num">${dash(r.rsi14, fmtNum2)}</td>
-        <td class="num">${proposedSL}</td>
+        <td class="num">${proposedSL}<div class="sl-method-row">${slMethodToggle(r, m)}</div></td>
         <td class="num">${proposedTP}</td>
         <td class="num">${distToSlCell(m.distanceToSlPct)}</td>
+        <td class="num">${distToTpCell(m.distanceToTpPct)}</td>
         ${vol12mCell}
         <td>${earningsCell(r.earningsDate)}</td>
         <td>${exDivCell(r.exDividendDate)}</td>
@@ -2434,9 +2474,10 @@ async function renderStocks() {
             </th>
             <th class="num" title="Profit/loss as a percentage of invested capital">P&amp;L %</th>
             <th class="num" title="Relative Strength Index over 14 periods. >70 = overbought, <30 = oversold.">RSI(14)</th>
-            <th class="num" title="Recommended stop-loss level (price | % from current). Set on eToro manually.">Proposed SL</th>
+            <th class="num" title="Effective stop-loss (price | % from current). Manual override wins; otherwise computed from the per-row method — T: Technical (support − vol×ATR), V: Vol-envelope (entry − annual-vol band). Set on eToro manually.">Proposed SL</th>
             <th class="num" title="Recommended take-profit level (price | % from current). Set on eToro manually.">Proposed TP</th>
             <th class="num" title="How close the current price is to the proposed stop-loss.">Dist to SL</th>
+            <th class="num" title="How close the current price is to the take-profit target (positive = room to run; turns green near/at target).">Dist to TP</th>
             <th class="num" title="Annualized realized volatility over the past 12 months.">12m Vol</th>
             <th title="Next earnings">Earn</th>
             <th title="Next ex-dividend">Ex-Div</th>
@@ -2455,6 +2496,31 @@ async function renderStocks() {
   $('#add-stock').addEventListener('click', () => openHoldingModal({ kind: 'stock', mode: 'add' }));
   wireRowActions('stock');
   wireTickerHover('stock');
+  // SC-08 — per-row stop-method toggle (Tech / Vol). PUTs the chosen method,
+  // then reloads so the server re-resolves the effective stop + metrics.
+  for (const btn of document.querySelectorAll('.sl-method-toggle .slm-btn')) {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (btn.classList.contains('active')) return;
+      const wrap = btn.closest('.sl-method-toggle');
+      const id = wrap && wrap.dataset.rowId;
+      const method = btn.dataset.method;
+      if (!id || !method) return;
+      btn.disabled = true;
+      try {
+        await api(`/api/holdings/stocks/${id}/sl-method`, {
+          method: 'PUT',
+          body: JSON.stringify({ slMethod: method }),
+        });
+        state.stocks = null;
+        state.summary = null;
+        loadActiveTab();
+      } catch (e) {
+        btn.disabled = false;
+        alert('Could not change stop method: ' + e.message);
+      }
+    });
+  }
   // Spec 12 D5g — P&L currency toggle.
   for (const btn of document.querySelectorAll('.pcy-btn[data-pcy]')) {
     btn.addEventListener('click', async () => {
@@ -2849,6 +2915,14 @@ const stockFields = [
   { name: 'resistance2',  label: 'Resistance 2 (TP2 ref)', type: 'number', step: '0.01', section: 'levels' },
   { name: 'setupType',    label: 'Setup type',     type: 'select-kv', options: SETUP_TYPES, section: 'levels' },
   { name: 'stage',        label: 'Stage',          type: 'select-kv', options: STAGES, section: 'levels' },
+  // SC-08 — dual stop-loss methodology. A manual Stop loss (above) always
+  // overrides whichever method is chosen here.
+  { name: 'slMethod',     label: 'Stop method',    type: 'select-kv', section: 'levels',
+    options: [
+      { value: 'vol_envelope', label: 'Vol-envelope — annual-vol band below entry (catastrophe-only)' },
+      { value: 'technical',    label: 'Technical — support − vol×ATR (shorter-term)' },
+    ] },
+  { name: 'slSafetyPct',  label: 'Vol-envelope safety (fraction, e.g. 0.02)', type: 'number', step: '0.005', section: 'levels' },
   // Spec 5 polish — manual override when ticker-suffix detection picks wrong.
   // Empty value = use suffix rule (default).
   { name: 'exchangeOverride', label: 'Exchange override', type: 'select-kv',

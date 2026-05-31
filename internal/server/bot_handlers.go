@@ -10,6 +10,7 @@ import (
 	"ft/internal/alert"
 	"ft/internal/domain"
 	"ft/internal/metrics"
+	"ft/internal/regime"
 	"net/http"
 	"sort"
 	"strconv"
@@ -123,6 +124,37 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 				Kind:         ev.Kind,
 				Triggers:     []string{ev.Trigger},
 				CurrentPrice: h.CurrentPrice,
+			})
+		}
+	}
+
+	// SC-08 — two-tier "Proximity Alert" family (PROXIMITY_{AMBER,RED}_{SL,TP}).
+	// Amber tightens from 75% to 85% progress when the effective regime is
+	// Shifting/Defensive; red (within 2% of level) supersedes amber per side.
+	eff := s.currentEffectiveRegime(r.Context())
+	tightened := eff == regime.Shifting || eff == regime.Defensive
+	for _, h := range stocks {
+		m := metrics.ComputeStock(h)
+		for _, ev := range alert.ProximityEvents(h, m, tightened) {
+			if onlyUnnotified {
+				acked, err := s.store.HasAlertBeenAckedToday(r.Context(), "stock", h.ID, ev.Kind, today)
+				if err != nil {
+					mapStoreError(w, err)
+					return
+				}
+				if acked {
+					continue
+				}
+			}
+			out = append(out, alertOut{
+				HoldingKind:     "stock",
+				HoldingID:       h.ID,
+				Ticker:          h.Ticker,
+				Name:            h.Name,
+				Kind:            ev.Kind,
+				Triggers:        []string{ev.Trigger},
+				CurrentPrice:    h.CurrentPrice,
+				DistanceToSLPct: m.DistanceToSLPct,
 			})
 		}
 	}

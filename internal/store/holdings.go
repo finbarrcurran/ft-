@@ -31,6 +31,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         currency,
         sector_universe_id,
         sector_adapter_subtype,
+        sl_method, sl_safety_pct,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -155,6 +156,8 @@ func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) 
 		   thesis_link = ?,
 		   exchange_override = ?,
 		   currency = ?,
+		   sl_method = COALESCE(?, sl_method),
+		   sl_safety_pct = COALESCE(?, sl_safety_pct),
 		   updated_at = strftime('%s','now')
 		 WHERE user_id = ? AND id = ?`,
 		h.Name, strPtrToNull(h.Ticker), strPtrToNull(h.Category), strPtrToNull(h.Sector),
@@ -166,6 +169,7 @@ func (s *Store) UpdateStockHolding(ctx context.Context, h *domain.StockHolding) 
 		strPtrToNull(h.ThesisLink),
 		strPtrToNull(h.ExchangeOverride),
 		strPtrToNull(h.Currency),
+		strPtrToNull(h.SLMethod), fp(h.SLSafetyPct),
 		h.UserID, h.ID,
 	)
 	return err
@@ -422,6 +426,8 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	var sectorUniverseID sql.NullInt64
 	// Migration 0034/0035 — SC-01 bottleneck tag:
 	var sectorAdapterSubtype sql.NullString
+	var slMethod sql.NullString
+	var slSafetyPct sql.NullFloat64
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -440,10 +446,13 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&currency,
 		&sectorUniverseID,
 		&sectorAdapterSubtype,
+		&slMethod, &slSafetyPct,
 		&updatedAt,
 	); err != nil {
 		return nil, err
 	}
+	h.SLMethod = nsToPtrNonEmpty(slMethod)
+	h.SLSafetyPct = nfToPtr(slSafetyPct)
 	h.Currency = nsToPtrNonEmpty(currency)
 	if sectorUniverseID.Valid {
 		v := sectorUniverseID.Int64

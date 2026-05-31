@@ -127,3 +127,32 @@ func (s *Server) handleUpdateStockSector(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"updated": id})
 }
+
+// PUT /api/holdings/stocks/{id}/sl-method
+// Body: {"slMethod": "technical"} or {"slMethod": "vol_envelope", "slSafetyPct": 0.03}
+//
+// SC-08 convenience endpoint for the per-row stop-method toggle. Like the
+// /sector retag endpoint, it sidesteps the full mutation payload.
+func (s *Server) handleUpdateStockSLMethod(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFromContext(r.Context())
+	id, err := pathID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var req struct {
+		SLMethod    string   `json:"slMethod"`
+		SLSafetyPct *float64 `json:"slSafetyPct"`
+	}
+	if !decodeJSON(r, w, &req) {
+		return
+	}
+	if req.SLMethod != "technical" && req.SLMethod != "vol_envelope" {
+		writeError(w, http.StatusBadRequest, "slMethod must be 'technical' or 'vol_envelope'")
+		return
+	}
+	if err := s.store.UpdateStockHoldingSLMethod(r.Context(), userID, id, req.SLMethod, req.SLSafetyPct); mapStoreError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"updated": id})
+}

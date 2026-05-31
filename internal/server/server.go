@@ -207,6 +207,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/sector-rotation/refresh", s.requireUserOrToken(s.handleSectorRefresh))
 	s.mux.HandleFunc("GET /api/sector-rotation/digests", s.requireUserOrToken(s.handleSectorDigests))
 	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}/sector", s.requireUser(s.handleUpdateStockSector))
+	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}/sl-method", s.requireUser(s.handleUpdateStockSLMethod))
 
 	// Spec 14: Per-holding theses.
 	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis", s.requireUser(s.handleGetHoldingThesis))

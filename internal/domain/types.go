@@ -134,9 +134,10 @@ type StockHolding struct {
 	ThesisLink     *string `json:"thesisLink,omitempty"` // external URL (Notion, Google Doc, ...)
 	RealizedPnLUSD float64 `json:"realizedPnlUsd"`       // derived from transactions; cached
 
-	// Spec 12 — 12-month annualized realized volatility. Long-horizon display
-	// metric, NOT used for stop sizing (Spec 9c ATR owns that). Populated by
-	// the daily cron from price_history.
+	// Spec 12 — 12-month annualized realized volatility (stored as a percent,
+	// e.g. 40.0 = 40%). Populated by the daily cron from price_history.
+	// As of SC-08 this also feeds the vol-envelope stop (entry × (1 − vol12m
+	// − safety)); the Spec 9c ATR path still owns the technical stop.
 	Volatility12mPct *float64 `json:"volatility12mPct,omitempty"`
 
 	// Spec 12 D4a — analyst price-target consensus from Yahoo's
@@ -159,6 +160,15 @@ type StockHolding struct {
 	// "ai-infra-semi:gpu-accelerator"). Drives the SC-01 bottleneck donut
 	// (self-maintaining: change the tag, the donut slice follows). Nullable.
 	SectorAdapterSubtype *string `json:"sectorAdapterSubtype,omitempty"`
+
+	// SC-08 / migration 0036 — explicit stop-loss methodology.
+	//   SLMethod:    'vol_envelope' (default) | 'technical'.
+	//   SLSafetyPct: additive buffer below the vol band, default 0.02 (2%).
+	// The manual StopLoss field above remains the authoritative override; when
+	// it is set it drives Dist-to-SL + proximity alerts, otherwise the chosen
+	// method computes the effective stop (see metrics.ComputeStock).
+	SLMethod    *string  `json:"slMethod,omitempty"`
+	SLSafetyPct *float64 `json:"slSafetyPct,omitempty"`
 
 	UpdatedAt time.Time `json:"updatedAt"`
 }
