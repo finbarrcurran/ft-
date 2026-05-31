@@ -180,3 +180,40 @@ func decodeJSONOptional(r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
 	return dec.Decode(dst)
 }
+
+// POST /api/crypto/theses/{symbol}/{version}/fork  (D27)
+//
+// Body (optional):
+//   { "note": "free-text rationale for the fork" }
+//
+// Spawns a new draft at vN+1 inheriting source content. Transitions source
+// from locked/needs-review to 'forked'. Returns ForkResult with both ids.
+func (s *Server) handleCryptoThesisFork(w http.ResponseWriter, r *http.Request) {
+	symbol := r.PathValue("symbol")
+	version := r.PathValue("version")
+	var body struct {
+		Note string `json:"note,omitempty"`
+	}
+	_ = decodeJSONOptional(r, &body)
+	res, err := s.cryptoWrite.ForkToV2(r.Context(), symbol, version, body.Note)
+	if err != nil {
+		mapForkErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"forked": res})
+}
+
+func mapForkErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, cryptotheses.ErrThesisNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, cryptotheses.ErrCannotForkDraft),
+		errors.Is(err, cryptotheses.ErrCannotForkForked),
+		errors.Is(err, cryptotheses.ErrCannotForkInvalid),
+		errors.Is(err, cryptotheses.ErrVersionExists),
+		errors.Is(err, cryptotheses.ErrVersionUnparseable):
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
+}

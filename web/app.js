@@ -9760,6 +9760,16 @@ async function openCryptoThesisDetail(symbol, version) {
       <strong>🔄 NEEDS REVIEW</strong> — cascade engine flagged this thesis after a parent thesis band change.
       <br>
       <button class="btn-primary" id="d26-show-ack" style="margin-top:0.5rem;">Review cascade events + re-lock…</button>
+      <button class="btn-ghost" id="d27-show-fork" style="margin-top:0.5rem;margin-left:0.5rem;">Fork to v${parseInt((t.version||'v1').replace(/^v/, ''), 10) + 1}…</button>
+    </div>` : '';
+
+  // D27: fork-to-v2 button — surfaces for locked theses (and is in the
+  // needs-review banner above too). Lets author spawn a new draft for
+  // material amendments. Source goes to status=forked.
+  const forkBlock = (t.status === 'locked') ? `
+    <div class="d27-fork-action">
+      <button class="btn-ghost" id="d27-show-fork-locked">⑂ Fork to v${parseInt((t.version||'v1').replace(/^v/, ''), 10) + 1}…</button>
+      <span class="dim">— spawn new draft for material amendments (source → forked)</span>
     </div>` : '';
 
   modal.innerHTML = `
@@ -9774,6 +9784,7 @@ async function openCryptoThesisDetail(symbol, version) {
       <div class="modal-body">
         ${vetoBlock}
         ${needsReviewBlock}
+        ${forkBlock}
         <div class="ca-meta-grid">
           <div><span class="dim">Adapter:</span> <code>${escapeHTML(t.adapterSlug)}</code> (${escapeHTML(t.scorecardType)})${t.secondaryAdapterSlug ? ` <span class="ct-hybrid-tag" title="Hybrid coin — secondary adapter advisory only per Spec 9l §13">+ ${escapeHTML(t.secondaryAdapterSlug)} advisory</span>` : ''}</div>
           <div><span class="dim">Horizon:</span> ${escapeHTML(t.holdingHorizon)}</div>
@@ -9806,6 +9817,74 @@ async function openCryptoThesisDetail(symbol, version) {
   if (ackBtn) {
     ackBtn.addEventListener('click', () => d26OpenAcknowledgeFlow(t, modal));
   }
+
+  // D27 — wire fork-to-v2 flow (button surfaces on locked + needs-review).
+  for (const btnId of ['#d27-show-fork', '#d27-show-fork-locked']) {
+    const forkBtn = modal.querySelector(btnId);
+    if (forkBtn) {
+      forkBtn.addEventListener('click', () => d27OpenForkFlow(t, modal));
+    }
+  }
+}
+
+async function d27OpenForkFlow(thesis, parentModal) {
+  const currentN = parseInt((thesis.version || 'v1').replace(/^v/, ''), 10);
+  const nextN = currentN + 1;
+
+  const confirmModal = document.createElement('div');
+  confirmModal.className = 'modal-backdrop';
+  confirmModal.innerHTML = `
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Fork ${escapeHTML(thesis.coinSymbol)} v${escapeHTML(thesis.version)} → v${nextN}</h3>
+        <button class="btn-ghost" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        <p>Spawning a new draft thesis at v${nextN} for material amendments. This action:</p>
+        <ul class="dim" style="margin: 0.5rem 0 1rem 1.5rem;">
+          <li>Creates a new <code>draft</code> thesis at v${nextN} inheriting all content from v${currentN} (pillar scores + sub-criteria + Q5 mechanism + DePIN/RWA quant fields + body + cascade declarations)</li>
+          <li>Transitions source v${currentN} from <code>${escapeHTML(thesis.status)}</code> to <code>forked</code></li>
+          <li>Auto-resolves any unresolved cascade events on v${currentN} (note: "forked to v${nextN}")</li>
+          <li>Writes <code>fork_rescore</code> audit rows on both v${currentN} (source) and v${nextN} (target)</li>
+          <li>Cascade dependency rows in <code>crypto_thesis_dependencies</code> will re-create when v${nextN} locks — v${currentN} rows remain pointing at v${currentN}</li>
+        </ul>
+        <p class="dim">After this action, edit the new v${nextN} draft via Crypto Theses → Draft theses, then lock when ready.</p>
+        <label class="d25-field d25-field-full" style="margin-top: 1rem;">
+          <span>Fork rationale (optional but recommended)</span>
+          <input type="text" id="d27-fork-note" placeholder="e.g. EIGEN ELIP-12 activated; Q5 re-score required">
+        </label>
+      </div>
+      <div class="modal-foot" style="padding: 0.75rem 1.25rem; display: flex; justify-content: flex-end; gap: 0.5rem; border-top: 1px solid var(--border, #2a2a2a);">
+        <button class="btn-ghost" data-close>Cancel</button>
+        <button class="btn-primary" id="d27-confirm-fork">Fork to v${nextN}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(confirmModal);
+  for (const c of confirmModal.querySelectorAll('[data-close]')) c.addEventListener('click', () => confirmModal.remove());
+
+  confirmModal.querySelector('#d27-confirm-fork').addEventListener('click', async () => {
+    const note = confirmModal.querySelector('#d27-fork-note').value || '';
+    try {
+      const res = await api(`/api/crypto/theses/${encodeURIComponent(thesis.coinSymbol)}/${encodeURIComponent(thesis.version)}/fork`, {
+        method: 'POST',
+        body: JSON.stringify({ note }),
+      });
+      const r = res.forked;
+      alert(`Forked: ${r.sourceSymbol} v${r.sourceVersion} (${r.sourcePreviousStatus} → forked) → ${r.newSymbol} v${r.newVersion} (draft)\n` +
+            `Cascade events resolved: ${r.cascadeEventsResolvedCount}\n` +
+            `Source history row id: ${r.sourceHistoryRowId}\n` +
+            `New (target) history row id: ${r.newHistoryRowId}\n\n` +
+            `Edit the v${r.newVersion.replace(/^v/, '')} draft now via Crypto Theses → Draft theses, then lock when ready.`);
+      confirmModal.remove();
+      parentModal.remove();
+      // Drop user into the draft edit page
+      state.cryptoView = `edit:${r.newSymbol}:${r.newVersion}`;
+      renderCryptoEditDraftPage(r.newSymbol, r.newVersion);
+    } catch (e) {
+      alert('Fork failed: ' + e.message);
+    }
+  });
 }
 
 async function d26OpenAcknowledgeFlow(thesis, parentModal) {
