@@ -264,9 +264,15 @@ func (in *DraftThesisInput) ValidateForLock(adapter *Adapter) error {
 	}
 	// Pillar sub-criteria required for all expected pillars.
 	// Keys normalized to uppercase per storage convention ({"Q1","Q2",...}).
+	// BTC monetary_12 scorecard uses M1-M6 per the BTC adapter MD (Six-Pillar
+	// Monetary-Asset Scorecard §3); BTC v1 fixture stores {"M1":...,"M6":...}.
+	// v1.22.13 fixes a latent bug where this validator expected P1-P6 instead
+	// of M1-M6 (unexercised because no monetary_12 thesis was ever locked via
+	// D25 — BTC v1 was a seed fixture). Going forward both prefixes are
+	// accepted in the validator (M1-M6 canonical; P1-P6 alias for legacy code).
 	expectedKeys := []string{"Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9"}
 	if adapter.ScorecardType == ScorecardMonetary12 {
-		expectedKeys = []string{"P1", "P2", "P3", "P4", "P5", "P6"}
+		expectedKeys = []string{"M1", "M2", "M3", "M4", "M5", "M6"}
 	}
 	// Case-insensitive lookup over the input (accept both "q1" and "Q1").
 	normSubs := map[string][]int{}

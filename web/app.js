@@ -10194,13 +10194,17 @@ const D25_SCHEMA = {
       'Investor / backer quality',
     ] },
   },
+  // monetary_12 canonical keys M1-M6 per BTC adapter MD §3 (Six-Pillar
+  // Monetary-Asset Scorecard). BTC v1 fixture stores {"M1":..,"M6":..}.
+  // Generic fallback labels here; D25_SCHEMA_BY_ADAPTER.btc has canonical
+  // sub-criteria extracted from the BTC adapter MD.
   monetary_12: {
-    P1: { label: 'Macro Regime Alignment', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
-    P2: { label: 'Adoption & Network', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
-    P3: { label: 'Supply & Demand', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
-    P4: { label: 'Security & Decentralization', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
-    P5: { label: 'Narrative & Sentiment', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
-    P6: { label: 'Technicals & Cycle', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    M1: { label: 'Cycle Phase', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    M2: { label: 'Macro Regime', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    M3: { label: 'Flows', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    M4: { label: 'Network Health', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    M5: { label: 'Sentiment', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
+    M6: { label: 'Technical & Structural Regime', subs: ['Sub-criterion 1', 'Sub-criterion 2'] },
   },
 };
 
@@ -10271,7 +10275,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q6": {
-      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "label": "Security & Decentralization",
       "subs": [
         "Validator / staker count",
         "Geographic decentralization",
@@ -10288,7 +10292,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q8": {
-      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "label": "Technicals & Regime Alignment",
       "subs": [
         "Price vs 200-day MA",
         "Price vs 200-week MA (log scale)",
@@ -10299,7 +10303,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q9": {
-      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "label": "Team & Founder Risk",
       "subs": [
         "Founder credibility",
         "Team operational track record",
@@ -10358,7 +10362,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q6": {
-      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "label": "Security & Decentralization",
       "subs": [
         "L2BEAT Stage classification",
         "Sequencer decentralization",
@@ -10375,7 +10379,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q8": {
-      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "label": "Technicals & Regime Alignment",
       "subs": [
         "Price vs 50-day MA",
         "Price vs 200-day MA",
@@ -10387,7 +10391,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q9": {
-      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "label": "Team & Founder Risk",
       "subs": [
         "Founder/parent organization credibility",
         "Team operational track record",
@@ -10448,7 +10452,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q6": {
-      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "label": "Security & Decentralization",
       "subs": [
         "Smart contract audit history",
         "Time in production without major exploit",
@@ -10465,7 +10469,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q8": {
-      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "label": "Technicals & Regime Alignment",
       "subs": [
         "Price vs 50-day MA",
         "Price vs 200-day MA",
@@ -10477,7 +10481,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q9": {
-      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "label": "Team & Founder Risk",
       "subs": [
         "Founder / core team credibility",
         "Team operational track record",
@@ -10538,7 +10542,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q6": {
-      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "label": "Security & Decentralization",
       "subs": [
         "Smart contract audit history",
         "Operational track record",
@@ -10555,7 +10559,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q8": {
-      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "label": "Technicals & Regime Alignment",
       "subs": [
         "Price vs 50-day MA",
         "Price vs 200-day MA",
@@ -10567,7 +10571,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q9": {
-      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "label": "Team & Founder Risk",
       "subs": [
         "Founder/core team credibility",
         "Team operational track record",
@@ -10628,7 +10632,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q6": {
-      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "label": "Security & Decentralization",
       "subs": [
         "Smart contract audit history",
         "Operational reliability (service uptime)",
@@ -10645,7 +10649,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q8": {
-      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "label": "Technicals & Regime Alignment",
       "subs": [
         "Price vs 50-day MA",
         "Price vs 200-day MA",
@@ -10657,7 +10661,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q9": {
-      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "label": "Team & Founder Risk",
       "subs": [
         "Founder/core team credibility",
         "Team operational track record",
@@ -10718,7 +10722,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q6": {
-      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "label": "Security & Decentralization",
       "subs": [
         "Smart contract audit history",
         "Custody Verification Tier (CRITICAL)",
@@ -10735,7 +10739,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q8": {
-      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "label": "Technicals & Regime Alignment",
       "subs": [
         "Price vs 50-day MA (for governance tokens) OR NAV deviation (for direct asset tokens)",
         "Price vs 200-day MA (governance) OR multi-year NAV consistency (asset tokens)",
@@ -10747,7 +10751,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q9": {
-      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "label": "Team & Founder Risk",
       "subs": [
         "Founder / core team credibility (TradFi side)",
         "Founder / core team credibility (Crypto side)",
@@ -10805,7 +10809,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q6": {
-      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "label": "Security & Decentralization",
       "subs": [
         "Smart contract audit history",
         "Mint authority / admin keys",
@@ -10821,7 +10825,7 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q8": {
-      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "label": "Technicals & Regime Alignment",
       "subs": [
         "Price vs 50-day MA",
         "Price vs 200-day MA",
@@ -10833,13 +10837,66 @@ const D25_SCHEMA_BY_ADAPTER = {
       ]
     },
     "Q9": {
-      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "label": "Team & Founder Risk",
       "subs": [
         "Founder credibility",
         "Team operational track record",
         "Insider / team token lock-ups",
         "Foundation / treasury health",
         "Prior project history"
+      ]
+    }
+  },
+  "btc": {
+    "M1": {
+      "label": "Cycle Phase",
+      "subs": [
+        "200WMA position",
+        "Cowen log regression band",
+        "Cowen Risk Indicator (0–1 composite)"
+      ]
+    },
+    "M2": {
+      "label": "Macro Regime",
+      "subs": [
+        "DXY trend (level + 4-week direction)",
+        "US 2-Year yield trend",
+        "ISM Manufacturing PMI",
+        "Global M2 ROC (when 9e Phase 2 ships)"
+      ]
+    },
+    "M3": {
+      "label": "Flows",
+      "subs": [
+        "ETF 7-day net flows",
+        "Stablecoin supply trend (USDT + USDC, 30d)",
+        "Sovereign / corporate treasury announcements (90d window)"
+      ]
+    },
+    "M4": {
+      "label": "Network Health",
+      "subs": [
+        "Hash rate (90d trend)",
+        "Active addresses (90d MA)",
+        "MVRV-Z score",
+        "Miner balance / sell pressure"
+      ]
+    },
+    "M5": {
+      "label": "Sentiment",
+      "subs": [
+        "Crypto Fear & Greed Index",
+        "Funding rates (perp markets, when 9e Phase 2 ships)",
+        "Google Trends \"bitcoin\" (90d relative)"
+      ]
+    },
+    "M6": {
+      "label": "Technical & Structural Regime",
+      "subs": [
+        "Price vs 200-week MA",
+        "Weekly RSI",
+        "Cycle structure (higher highs / higher lows)",
+        "Wrapper / custodian quality (sub-type-dependent)"
       ]
     }
   }
@@ -11778,9 +11835,11 @@ async function d25SaveDraft(mode, symbol, version) {
 
 async function d25LockDraft(mode, symbol, version) {
   // First save (so latest field state is persisted), then lock.
+  d25ClearAllFieldErrors();
   const f = _d25FormState;
   if (!f.symbol || !f.name) {
-    alert('Symbol and Name are required.');
+    if (!f.symbol) d25ShowFieldError('d25-symbol', 'Symbol is required.');
+    if (!f.name) d25ShowFieldError('d25-name', 'Name is required.');
     return;
   }
   const payload = d25BuildPayload(f);
@@ -11805,8 +11864,106 @@ async function d25LockDraft(mode, symbol, version) {
     state.cryptoView = 'list';
     renderCryptoTheses();
   } catch (e) {
-    alert('Lock failed: ' + e.message);
+    d25SurfaceLockError(e.message || String(e));
   }
+}
+
+// ---------- D25 inline error rendering (P2.AC9 polish)
+
+// Map backend field names → DOM input IDs for inline error placement.
+// When the backend rejects with ErrMissingMandatoryField{Field: "<name>"},
+// the error message contains `missing mandatory field "<name>"`. We parse
+// that and look up the input ID here. Falls back to top-of-form banner
+// for unmappable errors.
+const D25_FIELD_TO_INPUT_ID = {
+  q4q5Ryr: 'd25-ryr',
+  q5PaidRevenueUSD: 'd25-paid-rev',
+  q5EmissionsUSD: 'd25-emissions',
+  networkAgeMonths: 'd25-age',
+  q5Rabr: 'd25-rabr',
+  q5VerifiedAssetValueUSD: 'd25-vav',
+  q5TokenSupplyAtParUSD: 'd25-supply-par',
+  q5AuditDate: 'd25-audit-date',
+  q5Auditor: 'd25-auditor',
+  q6CustodyTier: 'd25-custody-tier',
+  q5Mechanism: 'd25-q5-mech',
+};
+
+function d25ClearAllFieldErrors() {
+  for (const el of document.querySelectorAll('.d25-field-error')) el.remove();
+  for (const el of document.querySelectorAll('.d25-field.has-error')) el.classList.remove('has-error');
+  const banner = document.getElementById('d25-lock-error-banner');
+  if (banner) banner.remove();
+}
+
+function d25ShowFieldError(inputId, message) {
+  const input = document.getElementById(inputId);
+  if (!input) return false;
+  const fieldEl = input.closest('.d25-field');
+  if (fieldEl) {
+    fieldEl.classList.add('has-error');
+    // Remove any existing field error first
+    const existing = fieldEl.querySelector('.d25-field-error');
+    if (existing) existing.remove();
+    const err = document.createElement('div');
+    err.className = 'd25-field-error';
+    err.textContent = message;
+    fieldEl.appendChild(err);
+  } else {
+    // No wrapping .d25-field — fall back to inline div after input
+    const err = document.createElement('div');
+    err.className = 'd25-field-error';
+    err.textContent = message;
+    input.parentElement.insertBefore(err, input.nextSibling);
+  }
+  input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  return true;
+}
+
+function d25SurfaceLockError(message) {
+  // Parse "missing mandatory field "<name>": <reason>" pattern.
+  const m = message.match(/missing mandatory field "([^"]+)":\s*(.*)/);
+  if (m) {
+    const field = m[1];
+    const reason = m[2] || message;
+    const inputId = D25_FIELD_TO_INPUT_ID[field];
+    if (inputId && d25ShowFieldError(inputId, reason)) {
+      return;
+    }
+  }
+  // Parse "pillar QN sub-criteria required for lock" pattern.
+  const pm = message.match(/^pillar (Q\d+) sub-criteria required for lock$/i);
+  if (pm) {
+    const pillar = pm[1].toUpperCase();
+    const scoreEl = document.getElementById(`d25-pillar-${pillar}-score`);
+    if (scoreEl) {
+      const block = scoreEl.closest('.d25-pillar-block');
+      if (block) {
+        block.classList.add('has-error');
+        let err = block.querySelector('.d25-field-error');
+        if (!err) {
+          err = document.createElement('div');
+          err.className = 'd25-field-error';
+          block.appendChild(err);
+        }
+        err.textContent = `Pillar ${pillar} requires all sub-criteria scored before lock.`;
+        block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+    }
+  }
+  // Fallback: top-of-form banner so error stays visible.
+  const main = document.getElementById('d25-form-main');
+  if (!main) {
+    alert('Lock failed: ' + message);
+    return;
+  }
+  const banner = document.createElement('div');
+  banner.id = 'd25-lock-error-banner';
+  banner.className = 'd25-lock-error-banner';
+  banner.textContent = 'Lock failed: ' + message;
+  main.prepend(banner);
+  main.scrollTop = 0;
 }
 
 boot();

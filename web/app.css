@@ -4312,3 +4312,39 @@ a.score-badge { display: inline-block; }
   font-size: 0.88rem;
   font-family: 'SF Mono', Menlo, Monaco, monospace;
 }
+
+/* ============================================================================
+   D25 P2 polish — inline error rendering (P2.AC9).
+============================================================================ */
+
+.d25-field-error {
+  color: #fca5a5;
+  font-size: 0.78rem;
+  margin-top: 0.25rem;
+  padding: 0.3rem 0.45rem;
+  background: rgba(220, 38, 38, 0.08);
+  border-left: 2px solid #dc2626;
+  border-radius: 0 3px 3px 0;
+}
+
+.d25-field.has-error input,
+.d25-field.has-error select,
+.d25-field.has-error textarea {
+  border-color: #dc2626 !important;
+  background: rgba(220, 38, 38, 0.05);
+}
+
+.d25-pillar-block.has-error {
+  border-color: #dc2626;
+  background: rgba(220, 38, 38, 0.04);
+}
+
+.d25-lock-error-banner {
+  margin: 0 0 1rem 0;
+  padding: 0.65rem 0.9rem;
+  background: rgba(220, 38, 38, 0.15);
+  border-left: 3px solid #dc2626;
+  color: #fca5a5;
+  font-size: 0.9rem;
+  border-radius: 0 4px 4px 0;
+}
