@@ -4165,6 +4165,103 @@ a.score-badge { display: inline-block; }
   margin: 0.75rem 0;
 }
 
+/* SC-12 — crypto locked-thesis MD drop box + ingest banner + reconciliation badge */
+.d25-ingest-zone {
+  margin: 0 0 0.75rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px dashed var(--border, #2a2a2a);
+  border-radius: 6px;
+  background: var(--card-bg, #1a1a1a);
+  text-align: center;
+  cursor: pointer;
+  color: var(--text-dim, #888);
+  font-size: 0.9rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+.d25-ingest-zone:hover,
+.d25-ingest-zone:focus-visible {
+  border-color: var(--accent, #4a9eff);
+  color: var(--text, #ddd);
+  outline: none;
+}
+.d25-ingest-zone.dragover {
+  border-color: var(--accent, #4a9eff);
+  border-style: solid;
+  background: rgba(74, 158, 255, 0.08);
+  color: var(--text, #ddd);
+}
+.d25-ingest-zone-text strong { color: var(--text, #ddd); }
+
+.d25-ingest-banner {
+  margin: 0 0 1.25rem 0;
+  padding: 0.85rem 1rem;
+  background: rgba(74, 158, 255, 0.08);
+  border: 1px solid rgba(74, 158, 255, 0.35);
+  border-radius: 6px;
+}
+.d25-ingest-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+.d25-ingest-title { font-weight: 600; }
+.d25-ingest-hybrid {
+  margin-left: 0.5rem;
+  font-weight: 400;
+  font-size: 0.82rem;
+  color: var(--text-dim, #888);
+}
+.d25-ingest-flags {
+  font-size: 0.85rem;
+  color: #fcd34d;
+}
+.d25-ingest-flags.ok { color: #6ee7a8; }
+.d25-ingest-flags ul {
+  margin: 0.35rem 0 0 0;
+  padding-left: 1.25rem;
+}
+.d25-ingest-flags li { margin: 0.15rem 0; }
+
+.d25-recon-badge {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+}
+.d25-recon-badge.ok { background: rgba(16, 185, 129, 0.18); color: #6ee7a8; }
+.d25-recon-badge.err { background: rgba(220, 38, 38, 0.18); color: #fca5a5; }
+
+/* SC-13 — guided stock thesis form */
+.modal-wide { max-width: 760px; width: 92vw; }
+.st-pattern-row { display: flex; gap: 1.5rem; margin-bottom: 0.75rem; }
+.st-pattern-row label { display: flex; align-items: center; gap: 0.35rem; }
+.st-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem 1rem;
+}
+.st-grid .st-full { grid-column: 1 / -1; }
+.st-grid .form-row { margin: 0; }
+.st-grid label { display: block; font-size: 0.8rem; color: var(--text-dim, #888); margin-bottom: 0.2rem; }
+.st-grid label.st-check { display: flex; align-items: center; gap: 0.4rem; color: var(--text, #ddd); }
+.st-grid input, .st-grid select, .st-grid textarea { width: 100%; box-sizing: border-box; }
+.st-preview-wrap { margin-top: 1rem; }
+.st-preview-head { font-size: 0.8rem; color: var(--text-dim, #888); margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.st-preview {
+  background: #0e0e0e;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #cbd5e1;
+}
+
 .d25-form-layout {
   display: grid;
   grid-template-columns: 1fr 320px;

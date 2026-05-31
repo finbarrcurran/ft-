@@ -9319,6 +9319,7 @@ async function renderTheses() {
         </div>
         <input type="file" id="dz-file-input" accept=".md,text/markdown" multiple hidden />
         <button class="btn-ghost" id="dz-browse">Choose file(s)…</button>
+        <button class="btn-ghost" id="dz-guided" title="Fill a guided form → generates a strict-format MD → uploads it">✍️ Guided form…</button>
         <button class="btn-ghost" id="dz-refresh" title="Re-pull from GitHub now">⟳ Refresh</button>
       </div>
       <div id="dz-status"></div>
@@ -9378,6 +9379,7 @@ function wireThesesEvents() {
 
   $('#dz-browse')?.addEventListener('click', () => fi.click());
   fi.addEventListener('change', () => handleThesisDrop([...fi.files]));
+  $('#dz-guided')?.addEventListener('click', () => openStockThesisForm());
 
   ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => {
     e.preventDefault(); e.stopPropagation(); dz.classList.add('dragging');
@@ -9495,6 +9497,210 @@ function setDropStatus(kind, msg) {
   if (!el) return;
   const cls = kind === 'error' ? 'loss' : kind === 'ok' ? 'gain' : 'dim';
   el.innerHTML = `<div class="${cls}" style="padding:0.5rem 0">${escapeHTML(msg)}</div>`;
+}
+
+// ============================================================
+// SC-13 — Stock theses guided form → strict-format MD → existing
+// /api/theses/upload (GitHub-first preserved; no DB-first lifecycle,
+// no new table). The serializer guarantees the exact format the
+// server parser expects (em-dashes, `>`-prefixed metadata, sub-type
+// in backticks on the Adapter line, standalone Final Score line).
+// (Handover SC-13 / Format Spec §1–§4.)
+// ============================================================
+
+// Canonical operating-stock adapter names the parser recognises (Format Spec §4).
+const STOCK_ADAPTERS = [
+  'Pharma',
+  'AI-Infra/Semi',
+  'Hydrocarbons',
+  'Energy-Power',
+  'Defense',
+  'Mining/Metals',
+  'Industrial-Electrical',
+  'Industrial Electrical Equipment',
+  'Cloud-Infra',
+  'AI-Frontier-Tech',
+];
+
+// Serialize the guided-form payload to a strict-format locked-thesis MD.
+function serializeStockThesisMD(d) {
+  const dash = '—'; // em-dash U+2014
+  const lines = [];
+  lines.push(`# ${d.ticker} ${dash} ${d.company} ${dash} Locked Thesis ${d.version}`);
+  lines.push('');
+  lines.push(`> **Ticker:** ${d.ticker}${d.listing ? ` (${d.listing})` : ''}`);
+  if (d.pattern === 'asset_hedge') {
+    lines.push(`> **Framework:** Asset-Hedge Scorecard (4-pillar /8)`);
+    if (d.instrumentType) lines.push(`> **Instrument Type:** ${d.instrumentType}`);
+  } else {
+    if (d.explicitFramework) lines.push(`> **Framework:** 8-Q Operating Stock (/16)`);
+    const subPart = d.subType ? ` (\`${d.subType}\` sub-type ${dash} new)` : '';
+    lines.push(`> **Adapter:** ${d.adapter}${subPart}`);
+  }
+  lines.push(`> **Status:** ${d.status}${d.statusDate ? ` ${dash} ${d.statusDate}` : ''}`);
+  lines.push(`> **Final Score:** ${d.score} / ${d.maxScore} ${dash} ${d.verdict}`);
+  lines.push(`> **Personal use only. Not investment advice.**`);
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  lines.push(d.body && d.body.trim() ? d.body.trim() : `## Thesis\n\n_(body to be completed)_`);
+  lines.push('');
+  return lines.join('\n');
+}
+
+function openStockThesisForm() {
+  closeImportModal();
+  const today = new Date().toISOString().slice(0, 10);
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  const adapterOpts = STOCK_ADAPTERS.map(a => `<option value="${escapeHTML(a)}">${escapeHTML(a)}</option>`).join('');
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal modal-wide" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Guided stock thesis</div>
+            <div class="desc">Generates a strict-format MD and uploads it via the existing path (→ GitHub → theses index).</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row st-pattern-row">
+            <label><input type="radio" name="st-pattern" value="operating" checked> Operating stock <span class="dim">(/16)</span></label>
+            <label><input type="radio" name="st-pattern" value="asset_hedge"> Asset-hedge <span class="dim">(/8)</span></label>
+          </div>
+          <div class="st-grid">
+            <div class="form-row"><label for="st-ticker">Ticker *</label><input id="st-ticker" type="text" placeholder="TSM" style="text-transform:uppercase"></div>
+            <div class="form-row"><label for="st-version">Version</label><input id="st-version" type="text" value="v1"></div>
+            <div class="form-row st-full"><label for="st-company">Company / full name *</label><input id="st-company" type="text" placeholder="Taiwan Semiconductor Manufacturing Co. Ltd."></div>
+            <div class="form-row st-full"><label for="st-listing">Listing notes <span class="dim">(Ticker parens)</span></label><input id="st-listing" type="text" placeholder="NYSE ADR / 2330.TW (TWSE primary)"></div>
+
+            <div class="form-row st-operating"><label for="st-adapter">Adapter *</label><select id="st-adapter">${adapterOpts}</select></div>
+            <div class="form-row st-operating"><label for="st-subtype">Sub-type <span class="dim">(free-form)</span></label><input id="st-subtype" type="text" placeholder="pure-play-foundry"></div>
+            <div class="form-row st-operating st-full"><label class="st-check"><input id="st-explicit-fw" type="checkbox"> Include explicit <code>Framework: 8-Q Operating Stock (/16)</code> line (Pattern C)</label></div>
+
+            <div class="form-row st-hedge st-full" hidden><label for="st-instrument">Instrument Type *</label><input id="st-instrument" type="text" placeholder="Physical-silver-backed ETF — price-tracking"></div>
+
+            <div class="form-row"><label for="st-status">Status</label><select id="st-status"><option>Locked</option><option>Draft</option><option>Superseded</option></select></div>
+            <div class="form-row"><label for="st-status-date">Status date</label><input id="st-status-date" type="date" value="${today}"></div>
+
+            <div class="form-row"><label for="st-score">Final score *</label><input id="st-score" type="number" min="0" step="1" placeholder="13"></div>
+            <div class="form-row"><label for="st-max">Out of</label><input id="st-max" type="number" value="16" readonly></div>
+            <div class="form-row st-full"><label for="st-verdict">Verdict *</label><input id="st-verdict" type="text" placeholder="Core anchor / Strong watchlist / etc."></div>
+            <div class="form-row st-full"><label for="st-body">Body markdown <span class="dim">(optional)</span></label><textarea id="st-body" rows="6" placeholder="## Action recommendation&#10;..."></textarea></div>
+          </div>
+          <div class="st-preview-wrap">
+            <div class="st-preview-head">Preview <span class="dim">(this exact MD is uploaded)</span></div>
+            <pre class="st-preview" id="st-preview"></pre>
+          </div>
+          <div class="error" id="st-err"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="st-cancel">Cancel</button>
+          <button class="btn-primary" id="st-submit">Generate + upload</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+
+  const collect = () => {
+    const pattern = (document.querySelector('input[name="st-pattern"]:checked') || {}).value || 'operating';
+    return {
+      pattern,
+      ticker: $('#st-ticker').value.trim().toUpperCase(),
+      version: ($('#st-version').value.trim() || 'v1').replace(/^v?/i, 'v'),
+      company: $('#st-company').value.trim(),
+      listing: $('#st-listing').value.trim(),
+      adapter: $('#st-adapter').value,
+      subType: $('#st-subtype').value.trim(),
+      explicitFramework: $('#st-explicit-fw').checked,
+      instrumentType: $('#st-instrument').value.trim(),
+      status: $('#st-status').value,
+      statusDate: $('#st-status-date').value,
+      score: $('#st-score').value.trim(),
+      maxScore: pattern === 'asset_hedge' ? 8 : 16,
+      verdict: $('#st-verdict').value.trim(),
+      body: $('#st-body').value,
+    };
+  };
+
+  const syncPatternUI = () => {
+    const pattern = (document.querySelector('input[name="st-pattern"]:checked') || {}).value || 'operating';
+    const isHedge = pattern === 'asset_hedge';
+    document.querySelectorAll('.st-operating').forEach(el => el.hidden = isHedge);
+    document.querySelectorAll('.st-hedge').forEach(el => el.hidden = !isHedge);
+    $('#st-max').value = isHedge ? 8 : 16;
+  };
+
+  const refreshPreview = () => {
+    syncPatternUI();
+    const d = collect();
+    d.ticker = d.ticker || '<TICKER>';
+    d.company = d.company || '<Company>';
+    d.verdict = d.verdict || '<verdict>';
+    d.score = d.score === '' ? '<N>' : d.score;
+    $('#st-preview').textContent = serializeStockThesisMD(d);
+  };
+
+  root.querySelectorAll('input, select, textarea').forEach(el => {
+    el.addEventListener('input', refreshPreview);
+    el.addEventListener('change', refreshPreview);
+  });
+  refreshPreview();
+
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#st-cancel').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+
+  $('#st-submit').addEventListener('click', async () => {
+    const err = $('#st-err');
+    err.textContent = '';
+    const d = collect();
+    // Validation (catch problems here rather than via an upload failure — Format Spec §6).
+    const missing = [];
+    if (!d.ticker) missing.push('Ticker');
+    if (!d.company) missing.push('Company');
+    if (d.score === '' || isNaN(Number(d.score))) missing.push('Final score');
+    if (!d.verdict) missing.push('Verdict');
+    if (d.pattern === 'asset_hedge' && !d.instrumentType) missing.push('Instrument Type');
+    if (missing.length) { err.textContent = 'Required: ' + missing.join(', ') + '.'; return; }
+    if (Number(d.score) < 0 || Number(d.score) > d.maxScore) { err.textContent = `Final score must be 0–${d.maxScore}.`; return; }
+    if (d.pattern !== 'asset_hedge' && !STOCK_ADAPTERS.includes(d.adapter)) {
+      err.textContent = `Adapter "${d.adapter}" isn't a recognised parser adapter — pick one from the list (new adapters need an FT parser change).`;
+      return;
+    }
+
+    const md = serializeStockThesisMD(d);
+    const fname = `${d.ticker}_${d.version}_locked.md`;
+    const file = new File([md], fname, { type: 'text/markdown' });
+    const form = new FormData();
+    form.append('thesis', file);
+
+    const submitBtn = $('#st-submit');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Uploading…';
+    try {
+      const resp = await fetch('/api/theses/upload', { method: 'POST', credentials: 'same-origin', body: form });
+      const txt = await resp.text();
+      if (!resp.ok) {
+        let msg = txt; try { msg = JSON.parse(txt).error || txt; } catch {}
+        err.textContent = `Upload failed: ${msg}`;
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Generate + upload';
+        return;
+      }
+      const result = JSON.parse(txt);
+      closeImportModal();
+      const scorePart = result.score != null ? ` ${result.score}/${result.maxScore}` : '';
+      setDropStatus('ok', `✓ Pushed ${result.ticker} v${result.version} (${result.adapter}${scorePart}) — commit ${result.commitSha.slice(0, 7)}. View on GitHub: ${result.githubUrl}`);
+      setTimeout(() => renderTheses(), 600);
+    } catch (e) {
+      err.textContent = e.message;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Generate + upload';
+    }
+  });
 }
 
 async function handleThesisDrop(files) {
@@ -9919,6 +10125,10 @@ async function renderCryptoTheses() {
       <button class="btn-ghost" id="d25-open-drafts">📝 Draft theses…</button>
       <button class="btn-primary" id="d25-open-create">+ Create new thesis</button>
     </div>
+    <div class="d25-ingest-zone" id="d25-ingest-zone" tabindex="0" role="button" aria-label="Drop a locked-thesis markdown file to pre-fill the D25 form">
+      <input type="file" id="d25-ingest-input" accept=".md,text/markdown" hidden>
+      <span class="d25-ingest-zone-text">📥 Drop a <strong>crypto locked-thesis .md</strong> here (or click) to parse &amp; pre-fill the D25 form</span>
+    </div>
     ${renderCrossThesisTable(theses)}
     ${renderAdapterRepository(adapters, selected)}
   `;
@@ -9932,6 +10142,27 @@ async function renderCryptoTheses() {
     state.cryptoView = 'drafts';
     renderCryptoDraftsList();
   });
+
+  // SC-12: locked-thesis MD drop box (click / drag-drop) → parse → pre-fill.
+  const izone = $('#d25-ingest-zone');
+  const iinput = $('#d25-ingest-input');
+  if (izone && iinput) {
+    izone.addEventListener('click', () => iinput.click());
+    izone.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); iinput.click(); }
+    });
+    iinput.addEventListener('change', () => {
+      if (iinput.files && iinput.files[0]) handleCryptoThesisFile(iinput.files[0]);
+    });
+    izone.addEventListener('dragover', (ev) => { ev.preventDefault(); izone.classList.add('dragover'); });
+    izone.addEventListener('dragleave', () => izone.classList.remove('dragover'));
+    izone.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      izone.classList.remove('dragover');
+      const file = ev.dataTransfer?.files?.[0];
+      if (file) handleCryptoThesisFile(file);
+    });
+  }
 
   // Wire allocation save.
   wireAllocationPanel();
@@ -11539,6 +11770,273 @@ async function renderCryptoDraftsList() {
   }
 }
 
+// ============================================================
+// SC-12 — Crypto locked-thesis MD drop box → parse → pre-fill
+// the D25 create form → reconciliation badge → user reviews +
+// locks via the existing path. Crypto-only; the manual D25 form
+// is unchanged. Parse-confident-or-blank: any pillar whose score
+// can't be read is left blank + flagged, never inferred.
+// (Handover SC-12 / Crypto Supplement C2–C7.)
+// ============================================================
+
+// Adapter display-name (from the MD "Adapter:" line) → form slug.
+// NOTE: the MD/registry says "Infrastructure" but the form/API slug is `infra`.
+const CRYPTO_ADAPTER_NAME_TO_SLUG = {
+  btc: 'btc', bitcoin: 'btc',
+  l1: 'l1', l2: 'l2',
+  defi: 'defi', depin: 'depin', rwa: 'rwa',
+  infrastructure: 'infra', infra: 'infra',
+  speculative: 'speculative',
+};
+
+const CRYPTO_HORIZON_NAME_TO_SLUG = {
+  'never-sell': 'never_sell', 'never sell': 'never_sell',
+  'cycle': 'cycle',
+  'multi-year': 'multi_year', 'multi year': 'multi_year',
+  'medium': 'medium',
+  'short': 'trade', 'trade': 'trade',
+  'tbd': 'tbd',
+};
+
+function cryptoNormalizeAdapterName(name) {
+  if (!name) return '';
+  return CRYPTO_ADAPTER_NAME_TO_SLUG[name.trim().toLowerCase()] || '';
+}
+
+// Best-effort map of a Q5 named-mechanism phrase → the 14-value enum.
+// Mechanism does not affect the reconciliation total, so an unmapped value
+// is flagged (not guessed) and left for the user to pick.
+function cryptoMapQ5Mechanism(text) {
+  const t = (text || '').toLowerCase();
+  if (!t) return '';
+  if (t.includes('buyback') && t.includes('stake')) return 'buyback_stake';
+  if (t.includes('buyback')) return 'buyback';
+  if (t.includes('real yield') || t.includes('real-yield')) return 'real_yield_staking';
+  if (t.includes('burn and mint') || t.includes('burn-and-mint') || t.includes('bme')) return 'burn_and_mint';
+  if (t.includes('fee switch') || t.includes('fee-switch')) return 'governance_with_fee_switch';
+  if (t.includes('fee share') || t.includes('fee-share')) return 'fee_share';
+  if (t.includes('fee burn') || t.includes('fee-burn')) return 'fee_burn';
+  if (t.includes('dsr') || t.includes('surplus')) return 'dsr_surplus';
+  if (t.includes('direct asset') || t.includes('asset claim')) return 'direct_asset_claim';
+  if (t.includes('required for service') || t.includes('required-for-service')) return 'required_for_service';
+  if (t.includes('staking yield') || t.includes('staking')) return 'staking_yield';
+  if (t.includes('governance')) return 'governance_only';
+  if (t.includes('burn')) return 'fee_burn';
+  return '';
+}
+
+// parseCryptoLockedThesis: pure text → structured parse result.
+// Returns {ok:false, error} for non-thesis files (e.g. XVM pre-filter block,
+// whose title isn't "… — Locked Thesis vN"). On success returns
+// {ok:true, meta, pillarScores, parsedFinalScore, flags}.
+function parseCryptoLockedThesis(text) {
+  const flags = [];
+
+  // Title: "# <SYMBOL> — <Name> — Locked Thesis v<N>" (em-dashes). This alone
+  // rejects pre-filter/disposition records (no "Locked Thesis vN" tail).
+  const titleRe = /^#\s+([A-Za-z0-9._-]+)\s+[—-]\s+(.+?)\s+[—-]\s+Locked\s+Thesis\s+v(\d+)\s*$/m;
+  const tm = text.match(titleRe);
+  if (!tm) {
+    return { ok: false, error: 'Not a locked-thesis MD. The title must read "# <SYMBOL> — <Name> — Locked Thesis v<N>". Pre-filter block / disposition records (e.g. XVM) are not ingestible as theses.' };
+  }
+  const meta = {
+    symbol: tm[1].toUpperCase(),
+    name: tm[2].trim(),
+    version: 'v' + tm[3],
+    adapterSlug: '', secondaryAdapterSlug: '', subType: '',
+    horizon: '', btcBeta: '', primaryChainSymbol: '',
+    q5Mechanism: '', q5MechanismNote: '',
+  };
+
+  // Final Score (required) — the raw pillar total we reconcile against.
+  const fsm = text.match(/^>\s*\*\*Final Score:\*\*\s*(\d+)\s*\/\s*(\d+)/m);
+  if (!fsm) {
+    return { ok: false, error: 'No "> **Final Score:** N/M" line found — cannot ingest without a stated score to reconcile against.' };
+  }
+  const parsedFinalScore = { raw: parseInt(fsm[1], 10), max: parseInt(fsm[2], 10) };
+
+  // Adapter line (+ optional hybrid secondary).
+  const adm = text.match(/^>\s*\*\*Adapter:\*\*\s*(.+)$/m);
+  if (adm) {
+    const line = adm[1];
+    const pm = line.match(/^([A-Za-z0-9 ._-]+?)\s*\(`([^`]+)`/);
+    if (pm) {
+      meta.adapterSlug = cryptoNormalizeAdapterName(pm[1]);
+      meta.subType = pm[2].trim();
+      if (!meta.adapterSlug) flags.push(`Adapter "${pm[1].trim()}" not recognised — pick the adapter manually.`);
+    } else {
+      flags.push('Could not parse the Adapter line — set adapter + sub-type manually.');
+    }
+    const sm = line.match(/\+\s*([A-Za-z0-9 ._-]+?)\s*\(`([^`]+)`[^)]*secondary/i);
+    if (sm) {
+      meta.secondaryAdapterSlug = cryptoNormalizeAdapterName(sm[1]);
+      if (!meta.secondaryAdapterSlug) flags.push(`Secondary (hybrid) adapter "${sm[1].trim()}" not recognised.`);
+    }
+  } else {
+    flags.push('No Adapter line found — set adapter manually.');
+  }
+
+  // Holding Horizon.
+  const hzm = text.match(/^>\s*\*\*Holding Horizon:\*\*\s*([A-Za-z][A-Za-z -]*?)(?:\s*\(|\s*$|\s+—)/m);
+  if (hzm) {
+    const key = hzm[1].trim().toLowerCase();
+    meta.horizon = CRYPTO_HORIZON_NAME_TO_SLUG[key] || CRYPTO_HORIZON_NAME_TO_SLUG[key.split(/\s+/)[0]] || '';
+    if (!meta.horizon) flags.push(`Holding Horizon "${hzm[1].trim()}" not mapped — please set it.`);
+  }
+
+  // BTC-Beta.
+  const btm = text.match(/^>\s*\*\*BTC-Beta:\*\*\s*([A-Za-z-]+)/m);
+  if (btm) {
+    const b = btm[1].trim().toLowerCase();
+    if (['high', 'medium', 'low', 'inverse', 'reference'].includes(b)) meta.btcBeta = b;
+    else flags.push(`BTC-Beta "${btm[1].trim()}" not mapped.`);
+  }
+
+  // Parent Chain Thesis → protocol_host / platform_parent driver (primary chain).
+  const pcm = text.match(/^>\s*\*\*Parent Chain Thesis:\*\*\s*(.+)$/m);
+  if (pcm && !/^none/i.test(pcm[1].trim())) {
+    const ppm = pcm[1].match(/([A-Z0-9._-]+)\s+v(\d+)/);
+    if (ppm) meta.primaryChainSymbol = ppm[1].toUpperCase();
+  }
+
+  // Per-pillar scores from "### Q<n> — …: **<score>**".
+  const pillarScores = {};
+  const pillarRe = /^###\s+([QM])(\d+)\b.*:\s*\*\*(\d+)\*\*/gm;
+  let pmx;
+  while ((pmx = pillarRe.exec(text)) !== null) {
+    pillarScores[parseInt(pmx[2], 10)] = parseInt(pmx[3], 10);
+  }
+
+  // Cross-check / fallback against the Score-derivation table row:
+  // "| Score | 2 | 1 | 1 | 2 | 0 | 1 | 2 | 1 | 1 | **11/18** |".
+  const dm = text.match(/^\|\s*Score\s*\|([^\n]+?)\|\s*\*\*(\d+)\s*\/\s*\d+\*\*\s*\|/m);
+  if (dm) {
+    const cells = dm[1].split('|').map(s => s.trim()).filter(s => s !== '');
+    cells.forEach((c, i) => {
+      const s = parseInt(c, 10);
+      const n = i + 1;
+      if (!Number.isFinite(s)) return;
+      if (pillarScores[n] === undefined) pillarScores[n] = s;
+      else if (pillarScores[n] !== s) flags.push(`Q${n}: header score ${pillarScores[n]} ≠ derivation-table score ${s} — using header; please verify.`);
+    });
+  }
+
+  // Q5 named mechanism + $ figure.
+  const q5m = text.match(/\*\*Named mechanism[^:]*:\*\*\s*\*?([^*\n]+?)\*?\s*$/m);
+  if (q5m) {
+    meta.q5MechanismNote = q5m[1].trim();
+    meta.q5Mechanism = cryptoMapQ5Mechanism(q5m[1]);
+    if (!meta.q5Mechanism) flags.push('Q5 mechanism — could not map the named mechanism to an enum value; please select.');
+  }
+
+  return { ok: true, meta, pillarScores, parsedFinalScore, flags };
+}
+
+// Read a dropped/selected file, parse, and (if a thesis) pre-fill the form.
+async function handleCryptoThesisFile(file) {
+  if (!/\.(md|markdown)$/i.test(file.name) && file.type !== 'text/markdown') {
+    alert('Please drop a markdown (.md) locked-thesis file.');
+    return;
+  }
+  let text = '';
+  try { text = await file.text(); } catch (e) { alert('Could not read file: ' + e.message); return; }
+  const parsed = parseCryptoLockedThesis(text);
+  if (!parsed.ok) {
+    alert('Not ingestible as a crypto thesis:\n\n' + parsed.error);
+    return;
+  }
+  state.cryptoView = 'create';
+  await ingestCryptoThesis(parsed);
+}
+
+// Build a D25 draft from the parse result and render the create form pre-filled.
+async function ingestCryptoThesis(parsed) {
+  let adapters = [];
+  try {
+    const res = await api('/api/crypto/adapters');
+    adapters = (res.adapters || []).filter(a => a.status === 'locked');
+  } catch (e) {
+    alert('Adapter load failed: ' + e.message);
+    return;
+  }
+
+  const flags = parsed.flags.slice();
+  const m = parsed.meta;
+  const draft = d25EmptyDraft();
+  draft.symbol = m.symbol;
+  draft.version = m.version;
+  draft.name = m.name;
+  draft.subType = m.subType || '';
+  if (m.horizon) draft.horizon = m.horizon;
+  if (m.btcBeta) draft.btcBeta = m.btcBeta;
+  if (m.primaryChainSymbol) draft.primaryChainSymbol = m.primaryChainSymbol;
+  if (m.q5Mechanism) draft.q5Mechanism = m.q5Mechanism;
+  if (m.q5MechanismNote) draft.q5MechanismNote = m.q5MechanismNote;
+
+  // Resolve primary adapter against the locked-adapter list.
+  let adapterObj = null;
+  if (m.adapterSlug) {
+    adapterObj = adapters.find(a => a.slug === m.adapterSlug);
+    if (adapterObj) draft.adapterSlug = m.adapterSlug;
+    else flags.push(`Adapter "${m.adapterSlug}" is not a locked adapter — defaulting to ${draft.adapterSlug}; pick manually.`);
+  }
+  if (!adapterObj) adapterObj = adapters.find(a => a.slug === draft.adapterSlug) || adapters[0];
+
+  // Secondary (hybrid) adapter — round-trips via payload even without a form control.
+  if (m.secondaryAdapterSlug) {
+    if (adapters.find(a => a.slug === m.secondaryAdapterSlug)) draft.secondaryAdapterSlug = m.secondaryAdapterSlug;
+    else flags.push(`Secondary adapter "${m.secondaryAdapterSlug}" not locked — left unset.`);
+  }
+
+  // Express each parsed pillar score through the form's sub-inputs: filling all
+  // schema subs with the pillar score deterministically rounds back to it, so the
+  // engine reconciles exactly. MD sub-rows don't match the form's sub counts, so a
+  // 1:1 sub map isn't safe — the pillar score is the confident parse. Pillars with
+  // no parsed score are left blank + flagged (never inferred).
+  const pillars = d25PillarsForAdapter(adapterObj);
+  draft.subCriteria = {};
+  for (const key of Object.keys(pillars)) {
+    const n = parseInt(key.replace(/^[QM]/, ''), 10);
+    const score = parsed.pillarScores[n];
+    const def = pillars[key];
+    if (score === undefined || !Number.isFinite(score)) {
+      flags.push(`${key}: pillar score not found in the MD — left blank, please complete.`);
+      continue;
+    }
+    draft.subCriteria[key] = new Array(def.subs.length).fill(score);
+  }
+
+  await renderCryptoFormPage({ mode: 'create', adapters, initial: draft });
+  _d25ParsedFinalScore = { raw: parsed.parsedFinalScore.raw, max: parsed.parsedFinalScore.max };
+  d25RenderSummary();
+  d25RenderIngestBanner(parsed, flags, draft);
+}
+
+// Banner above the form: parse provenance + reconciliation guidance + flags.
+function d25RenderIngestBanner(parsed, flags, draft) {
+  const layout = document.querySelector('.d25-form-layout');
+  if (!layout) return;
+  const existing = document.getElementById('d25-ingest-banner');
+  if (existing) existing.remove();
+  const banner = document.createElement('div');
+  banner.id = 'd25-ingest-banner';
+  banner.className = 'd25-ingest-banner';
+  const hybrid = draft.secondaryAdapterSlug
+    ? `<span class="d25-ingest-hybrid">hybrid: + <code>${escapeHTML(draft.secondaryAdapterSlug)}</code> secondary (advisory, will be saved)</span>`
+    : '';
+  const flagHtml = flags.length
+    ? `<div class="d25-ingest-flags"><strong>${flags.length} item${flags.length > 1 ? 's' : ''} to review before lock:</strong><ul>${flags.map(f => `<li>${escapeHTML(f)}</li>`).join('')}</ul></div>`
+    : `<div class="d25-ingest-flags ok">✓ All pillars and metadata parsed cleanly — check the reconciliation badge, then lock.</div>`;
+  banner.innerHTML = `
+    <div class="d25-ingest-head">
+      <span class="d25-ingest-title">📥 Pre-filled from <code>${escapeHTML(parsed.meta.symbol)} ${escapeHTML(parsed.meta.version)}</code> locked-thesis MD ${hybrid}</span>
+      <span class="dim">Parse-confident-or-blank — review, fix any flags, then lock via the existing button (cascades fire on lock).</span>
+    </div>
+    ${flagHtml}
+  `;
+  layout.parentNode.insertBefore(banner, layout);
+}
+
 // ---------- Create page
 
 async function renderCryptoCreatePage() {
@@ -11664,10 +12162,17 @@ function d25ThesisToFormState(t) {
 let _d25FormState = null;
 let _d25Adapters = [];
 let _d25LockedTheses = null;
+// SC-12: when an MD is ingested, this holds the parsed Final Score so the live
+// summary can show a reconciliation badge (computed total vs parsed). Null for
+// the plain manual create/edit flow.
+let _d25ParsedFinalScore = null;
 
 async function renderCryptoFormPage({ mode, symbol, version, adapters, initial }) {
   _d25FormState = JSON.parse(JSON.stringify(initial)); // deep clone
   _d25Adapters = adapters;
+  _d25ParsedFinalScore = null; // cleared for manual flow; ingest re-sets it after render
+  const _staleBanner = document.getElementById('d25-ingest-banner');
+  if (_staleBanner) _staleBanner.remove();
   // Cache locked theses for cascade dropdown (Infrastructure only)
   try {
     const r = await api('/api/crypto/theses');
@@ -12194,6 +12699,8 @@ function d25RenderSummary() {
     ? `<span class="loss">🛑 TRIGGERED</span> (${triggeredVetos.map(v => v[0]).join(', ')})`
     : '<span class="ok">clean</span>';
 
+  const reconRow = d25ReconRowHTML(result.total);
+
   const pane = $('#d25-summary-pane');
   pane.innerHTML = `
     <div class="d25-summary-card">
@@ -12227,9 +12734,25 @@ function d25RenderSummary() {
         ${bandPill(finalBand)}
         ${vetoActive ? '<span class="dim"> (VETO override)</span>' : (result.ppgCapApplied ? '<span class="dim"> (PPG cap)</span>' : '')}
       </div>
+      ${reconRow}
       ${vetoActive ? '<p class="d25-veto-banner">🛑 VETO will trigger — band forced to Exit on lock regardless of pillar math.</p>' : ''}
     </div>
   `;
+}
+
+// SC-12 reconciliation badge — only shown after an MD ingest. Compares the live
+// engine's raw total against the Final Score parsed from the MD.
+function d25ReconRowHTML(computedTotal) {
+  if (!_d25ParsedFinalScore) return '';
+  const stated = _d25ParsedFinalScore.raw;
+  const ok = computedTotal === stated;
+  const body = ok
+    ? `✓ ${computedTotal}/${_d25ParsedFinalScore.max} matches parsed Final Score`
+    : `✗ parsed ${stated}, form computes ${computedTotal} (Δ ${computedTotal - stated > 0 ? '+' : ''}${computedTotal - stated}) — check sub-scores`;
+  return `<div class="d25-summary-row d25-recon-row">
+        <span>Reconciliation</span>
+        <span class="d25-recon-badge ${ok ? 'ok' : 'err'}">${body}</span>
+      </div>`;
 }
 
 // ---------- Save + Lock actions
@@ -12247,6 +12770,7 @@ function d25BuildPayload(f) {
     name: f.name,
     coinGeckoId: f.coinGeckoId || undefined,
     adapterSlug: f.adapterSlug,
+    secondaryAdapterSlug: f.secondaryAdapterSlug || undefined,
     subType: f.subType || undefined,
     primaryChainSymbol: f.primaryChainSymbol || undefined,
     horizon: f.horizon,
