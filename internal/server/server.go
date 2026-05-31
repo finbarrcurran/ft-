@@ -270,6 +270,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/crypto/theses", s.requireUser(s.handleCryptoThesisCreate))
 	s.mux.HandleFunc("PUT /api/crypto/theses/{symbol}/{version}", s.requireUser(s.handleCryptoThesisUpdateDraft))
 	s.mux.HandleFunc("POST /api/crypto/theses/{symbol}/{version}/lock", s.requireUser(s.handleCryptoThesisLock))
+	s.mux.HandleFunc("POST /api/crypto/theses/{symbol}/{version}/acknowledge-cascade", s.requireUser(s.handleCryptoThesisAcknowledgeCascade))
 	s.mux.HandleFunc("DELETE /api/crypto/theses/{symbol}/{version}", s.requireUser(s.handleCryptoThesisDelete))
 	s.mux.HandleFunc("GET /api/crypto/theses/{symbol}/{version}", s.requireUserOrToken(s.handleCryptoThesisGet))
 	s.mux.HandleFunc("GET /api/crypto/theses/{symbol}/{version}/events", s.requireUserOrToken(s.handleCryptoThesisEvents))

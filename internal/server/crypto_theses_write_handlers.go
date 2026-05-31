@@ -17,6 +17,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"ft/internal/cryptotheses"
 	"net/http"
@@ -133,4 +134,49 @@ func mapWriteErr(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusBadRequest, err.Error())
 	}
+}
+
+// POST /api/crypto/theses/{symbol}/{version}/acknowledge-cascade  (D26)
+//
+// Body (optional):
+//   { "note": "free-text explanation of acknowledgment" }
+//
+// Transitions a needs-review thesis back to locked. Marks all unresolved
+// cascade_events for the thesis as resolved. Appends an event_rescore
+// history row.
+func (s *Server) handleCryptoThesisAcknowledgeCascade(w http.ResponseWriter, r *http.Request) {
+	symbol := r.PathValue("symbol")
+	version := r.PathValue("version")
+	var body struct {
+		Note string `json:"note,omitempty"`
+	}
+	// Body is optional; ignore decode error
+	_ = decodeJSONOptional(r, &body)
+	res, err := s.cryptoWrite.AcknowledgeCascade(r.Context(), symbol, version, body.Note)
+	if err != nil {
+		mapAcknowledgeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"acknowledged": res})
+}
+
+func mapAcknowledgeErr(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, cryptotheses.ErrThesisNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, cryptotheses.ErrNotNeedsReview):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, cryptotheses.ErrPPGNowFails):
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
+}
+
+// decodeJSONOptional decodes JSON body without writing an error on parse failure.
+// Used for endpoints where the body is optional.
+func decodeJSONOptional(r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, 1<<20)
+	dec := json.NewDecoder(r.Body)
+	return dec.Decode(dst)
 }

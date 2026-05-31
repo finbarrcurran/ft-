@@ -4283,3 +4283,32 @@ a.score-badge { display: inline-block; }
     position: static;
   }
 }
+
+/* ============================================================================
+   D26 — needs-review cascade acknowledgment UI.
+============================================================================ */
+
+.d26-needsreview-box {
+  background: rgba(99, 102, 241, 0.12);
+  border-left: 3px solid #6366f1;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  border-radius: 0 4px 4px 0;
+  font-size: 0.95rem;
+}
+
+.d26-event-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+
+.d26-event-list li {
+  padding: 0.4rem 0.6rem;
+  background: var(--input-bg, #0d0d0d);
+  border: 1px solid var(--border-dim, #1f1f1f);
+  border-radius: 3px;
+  margin-bottom: 0.3rem;
+  font-size: 0.88rem;
+  font-family: 'SF Mono', Menlo, Monaco, monospace;
+}

@@ -9753,6 +9753,15 @@ async function openCryptoThesisDetail(symbol, version) {
       ${escapeHTML(t.activeVetoReason || '')}
     </div>` : '';
 
+  // D26: needs-review acknowledgment banner — surfaces when cascade engine
+  // flagged this thesis. Lets user inspect cascade_events + re-lock.
+  const needsReviewBlock = (t.status === 'needs-review') ? `
+    <div class="d26-needsreview-box">
+      <strong>🔄 NEEDS REVIEW</strong> — cascade engine flagged this thesis after a parent thesis band change.
+      <br>
+      <button class="btn-primary" id="d26-show-ack" style="margin-top:0.5rem;">Review cascade events + re-lock…</button>
+    </div>` : '';
+
   modal.innerHTML = `
     <div class="modal modal-wide">
       <div class="modal-head">
@@ -9764,6 +9773,7 @@ async function openCryptoThesisDetail(symbol, version) {
       </div>
       <div class="modal-body">
         ${vetoBlock}
+        ${needsReviewBlock}
         <div class="ca-meta-grid">
           <div><span class="dim">Adapter:</span> <code>${escapeHTML(t.adapterSlug)}</code> (${escapeHTML(t.scorecardType)})${t.secondaryAdapterSlug ? ` <span class="ct-hybrid-tag" title="Hybrid coin — secondary adapter advisory only per Spec 9l §13">+ ${escapeHTML(t.secondaryAdapterSlug)} advisory</span>` : ''}</div>
           <div><span class="dim">Horizon:</span> ${escapeHTML(t.holdingHorizon)}</div>
@@ -9790,6 +9800,82 @@ async function openCryptoThesisDetail(symbol, version) {
   `;
   document.body.appendChild(modal);
   for (const c of modal.querySelectorAll('[data-close]')) c.addEventListener('click', () => modal.remove());
+
+  // D26 — wire acknowledge cascade flow.
+  const ackBtn = modal.querySelector('#d26-show-ack');
+  if (ackBtn) {
+    ackBtn.addEventListener('click', () => d26OpenAcknowledgeFlow(t, modal));
+  }
+}
+
+async function d26OpenAcknowledgeFlow(thesis, parentModal) {
+  // Fetch unresolved cascade_events for this thesis.
+  let events = [];
+  try {
+    const res = await api(`/api/crypto/theses/${encodeURIComponent(thesis.coinSymbol)}/${encodeURIComponent(thesis.version)}/events?unresolvedOnly=true`);
+    events = res.events || [];
+  } catch (e) {
+    alert('Cascade event load failed: ' + e.message);
+    return;
+  }
+
+  const eventRows = events.length === 0
+    ? '<p class="dim">No unresolved cascade events found. (This thesis may have been flagged before cascade_events audit was active; you can still acknowledge to re-lock.)</p>'
+    : '<ul class="d26-event-list">' + events.map(ev =>
+      `<li><strong>${escapeHTML(ev.dependencyType)}</strong> <span class="dim">${escapeHTML(ev.priority)}</span> — <code>${escapeHTML(ev.triggerReason)}</code> → <em>${escapeHTML(ev.action)}</em> <span class="dim">(${new Date(ev.createdAt * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC)</span></li>`
+    ).join('') + '</ul>';
+
+  const confirmModal = document.createElement('div');
+  confirmModal.className = 'modal-backdrop';
+  confirmModal.innerHTML = `
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Acknowledge cascade impact — ${escapeHTML(thesis.coinSymbol)} v${escapeHTML(thesis.version)}</h3>
+        <button class="btn-ghost" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        <p>Re-locking this thesis after reviewing the cascade engine's flagging. This action:</p>
+        <ul class="dim" style="margin: 0.5rem 0 1rem 1.5rem;">
+          <li>Marks all unresolved cascade events for this thesis as resolved</li>
+          <li>Writes an <code>event_rescore</code> audit row with reason <code>cascade_acknowledgment</code></li>
+          <li>Transitions status <code>needs-review</code> → <code>locked</code></li>
+        </ul>
+        <h4>Triggering cascade events (${events.length}):</h4>
+        ${eventRows}
+        <label class="d25-field d25-field-full" style="margin-top: 1rem;">
+          <span>Acknowledgment note (optional)</span>
+          <input type="text" id="d26-ack-note" placeholder="e.g. reviewed parent band drop, fundamentals unchanged">
+        </label>
+      </div>
+      <div class="modal-foot" style="padding: 0.75rem 1.25rem; display: flex; justify-content: flex-end; gap: 0.5rem; border-top: 1px solid var(--border, #2a2a2a);">
+        <button class="btn-ghost" data-close>Cancel</button>
+        <button class="btn-primary" id="d26-confirm-ack">Acknowledge + re-lock</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(confirmModal);
+  for (const c of confirmModal.querySelectorAll('[data-close]')) c.addEventListener('click', () => confirmModal.remove());
+
+  confirmModal.querySelector('#d26-confirm-ack').addEventListener('click', async () => {
+    const note = confirmModal.querySelector('#d26-ack-note').value || '';
+    try {
+      const res = await api(`/api/crypto/theses/${encodeURIComponent(thesis.coinSymbol)}/${encodeURIComponent(thesis.version)}/acknowledge-cascade`, {
+        method: 'POST',
+        body: JSON.stringify({ note }),
+      });
+      const r = res.acknowledged;
+      alert(`Acknowledged: ${r.symbol} v${r.version}\n` +
+            `Status: ${r.previousStatus} → ${r.newStatus}\n` +
+            `Cascade events resolved: ${r.cascadeEventsResolvedCount}\n` +
+            `History row id: ${r.historyRowId}`);
+      confirmModal.remove();
+      parentModal.remove();
+      // Re-render Crypto Theses tab so updated status reflects in the cross-thesis table.
+      renderCryptoTheses();
+    } catch (e) {
+      alert('Acknowledge failed: ' + e.message);
+    }
+  });
 }
 
 async function loadCryptoAdapterRightPane(slug) {
