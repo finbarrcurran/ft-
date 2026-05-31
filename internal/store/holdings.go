@@ -30,6 +30,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         forecast_low, forecast_mean, forecast_high, forecast_fetched_at,
         currency,
         sector_universe_id,
+        sector_adapter_subtype,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -419,6 +420,8 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	var currency sql.NullString
 	// Spec 9f D1:
 	var sectorUniverseID sql.NullInt64
+	// Migration 0034/0035 — SC-01 bottleneck tag:
+	var sectorAdapterSubtype sql.NullString
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -436,6 +439,7 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&fLow, &fMean, &fHigh, &fFetched,
 		&currency,
 		&sectorUniverseID,
+		&sectorAdapterSubtype,
 		&updatedAt,
 	); err != nil {
 		return nil, err
@@ -445,6 +449,7 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		v := sectorUniverseID.Int64
 		h.SectorUniverseID = &v
 	}
+	h.SectorAdapterSubtype = nsToPtrNonEmpty(sectorAdapterSubtype)
 	h.ThesisLink = nsToPtrNonEmpty(thesisLink)
 	h.RealizedPnLUSD = realizedPnL
 	h.Volatility12mPct = nfToPtr(vol12m)

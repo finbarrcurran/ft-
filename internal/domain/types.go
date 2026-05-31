@@ -155,6 +155,11 @@ type StockHolding struct {
 	// Sector_Holdings_Mapping_v1.md at migration 0019. User can re-tag.
 	SectorUniverseID *int64 `json:"sectorUniverseId,omitempty"`
 
+	// Migration 0034/0035 — "family:subtype" adapter tag (e.g.
+	// "ai-infra-semi:gpu-accelerator"). Drives the SC-01 bottleneck donut
+	// (self-maintaining: change the tag, the donut slice follows). Nullable.
+	SectorAdapterSubtype *string `json:"sectorAdapterSubtype,omitempty"`
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 

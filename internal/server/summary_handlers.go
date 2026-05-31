@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -205,19 +206,17 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	sectorLegend := buildLegend(sectorSlices, currency, fx)
 
 	// ---- Spec 9b D7/D8 — bottleneck (stocks) + phase (crypto) donuts -----
-	stockIDs := make([]int64, 0, len(stocks))
-	for _, h := range stocks {
-		stockIDs = append(stockIDs, h.ID)
-	}
+	// SC-01: the bottleneck donut now derives its slice at read time from
+	// stock_holdings.sector_adapter_subtype (self-maintaining, L1) rather
+	// than the never-populated framework_scores.tags_json. The crypto phase
+	// donut still reads framework_scores tags (unchanged).
 	cryptoIDs := make([]int64, 0, len(cryptos))
 	for _, c := range cryptos {
 		cryptoIDs = append(cryptoIDs, c.ID)
 	}
-	stockScores, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "holding", stockIDs)
 	cryptoScores, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "holding", cryptoIDs)
 
-	bottleneck := buildStockTagDonut(stocks, stockScores, "bottleneck_position",
-		stocksValue, currency, fx, "bottleneck")
+	bottleneck := buildBottleneckDonut(stocks, stocksValue, currency, fx)
 	phase := buildCryptoTagDonut(cryptos, cryptoScores, "cycle_phase",
 		cryptoValueUSD, currency, fx, "phase")
 
@@ -445,26 +444,112 @@ func cryptoValueForDonut(h *domain.CryptoHolding) float64 {
 	return 0
 }
 
-func buildStockTagDonut(holdings []*domain.StockHolding, scores map[int64]*domain.FrameworkScore, tagKey string, totalValue float64, currency string, fx float64, label string) tagDonutOut {
+// ----- SC-01: bottleneck donut (self-maintaining) -------------------------
+//
+// The bottleneck donut derives its slices at read time from each holding's
+// sector_adapter_subtype tag (migration 0034/0035) — no writes to the
+// append-only framework_scores history (Snag S3), and it tracks re-tags with
+// zero extra action (L1). Off-chain holdings are excluded from the donut but
+// still counted in the M denominator (L2).
+
+// subtypeToBottleneckSlice maps a bare sub-type (the part after the
+// "family:" prefix the column stores) to its slice on the AI bottleneck
+// chain. Anything not listed — cloud, pharma, gold/silver/streaming,
+// asset-hedge, defense, hydrocarbons, quantum-frontier, NULL — is off the
+// chain by design (→ Untagged).
+var subtypeToBottleneckSlice = map[string]string{
+	"gpu-accelerator":     "GPU",
+	"foundry":             "GPU",
+	"semicap-litho":       "GPU",
+	"chip-ip":             "CPU",
+	"edge-silicon":        "Edge",
+	"optical-datacom":     "Optical",
+	"custom-silicon-asic": "Optical", // S1 — judgment default (MRVL)
+	"ems-odm":             "Optical",
+	"specialty-chemicals": "Chemicals",
+	"memory-hbm":          "HBM",
+	"advanced-packaging":  "HBM",
+	"diversified-ie":      "Power",
+	"lithium":             "Battery",
+}
+
+// bottleneckSliceFor returns the bottleneck slice for a holding's
+// sector_adapter_subtype, or "" (Untagged) when off-chain.
+func bottleneckSliceFor(subtype *string) string {
+	if subtype == nil || *subtype == "" {
+		return ""
+	}
+	key := *subtype
+	if i := strings.LastIndex(key, ":"); i >= 0 {
+		key = key[i+1:]
+	}
+	return subtypeToBottleneckSlice[key]
+}
+
+// buildBottleneckDonut renders the AI-bottleneck-chain donut directly from
+// holdings' sector_adapter_subtype. taggedCount (N) is the number of
+// on-chain holdings; the client renders whenever N ≥ 1 and labels the card
+// "N of M stocks on the AI bottleneck chain". SC-01.
+func buildBottleneckDonut(holdings []*domain.StockHolding, totalValue float64, currency string, fx float64) tagDonutOut {
 	tally := map[string]float64{}
+	tickersBySlice := map[string][]string{}
 	tagged := 0
 	for _, h := range holdings {
-		v := stockValueForDonut(h)
-		tag := tagFromScore(scores[h.ID], tagKey)
-		if tag == "" {
-			tally["Untagged"] += v
-		} else {
-			tally[tag] += v
-			tagged++
+		slice := bottleneckSliceFor(h.SectorAdapterSubtype)
+		if slice == "" {
+			continue // off-chain — excluded from the donut, counted in M
+		}
+		tally[slice] += stockValueForDonut(h)
+		tagged++
+		tk := h.Name
+		if h.Ticker != nil && *h.Ticker != "" {
+			tk = *h.Ticker
+		}
+		tickersBySlice[slice] = append(tickersBySlice[slice], tk)
+	}
+	type row struct {
+		Name  string
+		Value float64
+	}
+	rows := make([]row, 0, len(tally))
+	for k, v := range tally {
+		if v > 0 {
+			rows = append(rows, row{k, v})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Value > rows[j].Value })
+	pal := donut.Palette(len(rows))
+	slices := make([]donut.Slice, 0, len(rows))
+	for i, r := range rows {
+		slices = append(slices, donut.Slice{Label: r.Name, Value: r.Value, Color: pal[i]})
+	}
+	svg := donut.Render(slices, donut.Options{
+		Width: 200, Height: 200,
+		CenterText: fmtMoney(totalValue, currency, fx),
+		CenterSub:  "AI chain",
+	})
+	// Legend carries per-slice tickers so the client can list them on hover.
+	legend := buildLegend(slices, currency, fx)
+	for _, lr := range legend {
+		if lbl, ok := lr["label"].(string); ok {
+			lr["tickers"] = tickersBySlice[lbl]
 		}
 	}
 	coverage := 0.0
 	if len(holdings) > 0 {
 		coverage = float64(tagged) / float64(len(holdings))
 	}
-	return renderTagDonut(tally, totalValue, currency, fx, label, tagged, coverage)
+	return tagDonutOut{
+		"svg":         svg,
+		"legend":      legend,
+		"coverage":    coverage,
+		"taggedCount": tagged,
+	}
 }
 
+// buildCryptoTagDonut still reads framework_scores tags for the crypto
+// cycle-phase donut (D8) — unchanged by SC-01, which only re-pointed the
+// stock bottleneck donut.
 func buildCryptoTagDonut(holdings []*domain.CryptoHolding, scores map[int64]*domain.FrameworkScore, tagKey string, totalValue float64, currency string, fx float64, label string) tagDonutOut {
 	tally := map[string]float64{}
 	tagged := 0

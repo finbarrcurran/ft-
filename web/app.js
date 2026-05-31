@@ -216,7 +216,11 @@ function scoreCell(score, clickable, kind, id) {
   if (stale) cls.push('stale');
   if (clickable) cls.push('clickable');
   if (isThesis) cls.push('thesis-source');
-  const tickMark = score.passes ? ' ✓' : '';
+  // SC-10 — crypto thesis scores carry a band ("accumulate" → "Accumulate");
+  // render it inline ("13/18 — Accumulate") and let the band stand in for the
+  // pass tick so crypto rows aren't doubly-decorated.
+  const bandMark = score.band ? ` — ${score.band.charAt(0).toUpperCase()}${score.band.slice(1)}` : '';
+  const tickMark = (score.passes && !score.band) ? ' ✓' : '';
   const staleMark = stale ? ` ⚠ ${score.staleDays}d` : '';
   // v1.19B — 🔒 prefix when the score came from a locked thesis
   // (theses_index). Tooltip switches to thesis context. Click-through
@@ -236,9 +240,9 @@ function scoreCell(score, clickable, kind, id) {
     // Wrap in an anchor so the locked-thesis row links straight to the
     // canonical MD file. Stop click bubbling so the rescore handler
     // doesn't fire underneath.
-    return `<a href="${escapeHTML(score.githubUrl)}" target="_blank" rel="noopener" class="${cls.join(' ')}" ${attrs} title="${tooltip}" onclick="event.stopPropagation()">${lockIcon}${score.totalScore}/${score.maxScore}${tickMark}${staleMark}</a>`;
+    return `<a href="${escapeHTML(score.githubUrl)}" target="_blank" rel="noopener" class="${cls.join(' ')}" ${attrs} title="${tooltip}" onclick="event.stopPropagation()">${lockIcon}${score.totalScore}/${score.maxScore}${bandMark}${tickMark}${staleMark}</a>`;
   }
-  return `<span class="${cls.join(' ')}" ${attrs} title="${tooltip}">${lockIcon}${score.totalScore}/${score.maxScore}${tickMark}${staleMark}</span>`;
+  return `<span class="${cls.join(' ')}" ${attrs} title="${tooltip}">${lockIcon}${score.totalScore}/${score.maxScore}${bandMark}${tickMark}${staleMark}</span>`;
 }
 
 // marketCell — Spec 5 D3. Per-row market column from {open, onBreak, nextChange, nextChangeKind, name, tzName}.
@@ -1549,11 +1553,11 @@ async function renderSummary() {
   // older than 90 days. Fetched lazily; if the user hasn't visited Stocks/
   // Crypto yet, we pull fresh lists in the background.
   const staleBanner = `<div id="stale-score-banner"></div>`;
-  // Spec 11 D6: stale-thesis nudge — holdings with no thesis notes in 90+
-  // days. Same lazy fetch pattern; silent if zero stale.
-  const staleThesisBanner = `<div id="stale-thesis-banner"></div>`;
+  // SC-02 — the Spec 11 D6 thesis_notes "no notes in 90+ days" nudge is
+  // retired (Fin doesn't use Add-Note). The panel is hidden; the code path
+  // (updateStaleThesisBanner / /api/notes/stale) is intentionally kept.
 
-  content.innerHTML = staleBanner + staleThesisBanner + toggle + kpiRow + donutRow + tagDonuts + footer;
+  content.innerHTML = staleBanner + toggle + kpiRow + donutRow + tagDonuts + footer;
 
   // Wire toggle clicks
   for (const btn of document.querySelectorAll('.ct-btn')) {
@@ -1567,10 +1571,8 @@ async function renderSummary() {
   // Flash any KPI value that moved since the last render (Spec 2 D7).
   flashOnRender();
 
-  // Stale-score nudge — defer to keep this render snappy.
+  // SC-02 — thesis coverage + freshness nudge (defer to keep render snappy).
   updateStaleScoreBanner();
-  // Spec 11 D6 — stale-thesis nudge.
-  updateStaleThesisBanner();
 
   // Spec 12 D2 — cash KPI editable. Click + Enter/Space (a11y) both fire.
   const cashEl = document.querySelector('#kpi-cash');
@@ -1718,14 +1720,19 @@ function renderTagDonuts(s) {
   }
 
   function donut(title, svg, legend) {
-    const legendHTML = (legend || []).map(row => `
+    const legendHTML = (legend || []).map(row => {
+      // SC-01 — bottleneck legend rows carry the tickers on each slice; show
+      // them on hover so the slice → holdings mapping is discoverable.
+      const tickerTitle = (row.tickers && row.tickers.length)
+        ? ` title="${escapeHTML(row.tickers.join(', '))}"` : '';
+      return `
       <li>
         <span class="legend-dot" style="background:${row.color}"></span>
-        <span class="legend-label">${escapeHTML(row.label)}</span>
+        <span class="legend-label"${tickerTitle}>${escapeHTML(row.label)}</span>
         <span class="legend-value num">${escapeHTML(row.valueStr)}</span>
         ${row.pct != null ? `<span class="legend-pct num dim">${row.pct.toFixed(1)}%</span>` : ''}
-      </li>
-    `).join('');
+      </li>`;
+    }).join('');
     return `
       <div class="donut-card">
         <div class="donut-title">${escapeHTML(title)}</div>
@@ -1735,10 +1742,15 @@ function renderTagDonuts(s) {
     `;
   }
 
-  const bnReady = (cov.bottleneck || 0) >= 0.5;
+  // SC-01 (L2) — render whenever ≥1 stock is on the AI bottleneck chain
+  // (was a flat ≥50% coverage gate). Header reads "N of M stocks on the AI
+  // bottleneck chain"; below 1, fall back to the score-tagging placeholder.
+  const bnTagged = cn.stocksTagged || 0;
+  const bnReady = bnTagged >= 1;
+  const bnTitle = `${bnTagged} of ${cn.stocks || 0} stocks on the AI bottleneck chain`;
   sections.push(bnReady
-    ? donut('Bottleneck (stocks)', s.donuts.bottleneck, s.legends.bottleneck)
-    : placeholder('Bottleneck (stocks)', cn.stocks || 0, cn.stocksTagged || 0, 'stocks'));
+    ? donut(bnTitle, s.donuts.bottleneck, s.legends.bottleneck)
+    : placeholder('Bottleneck (stocks)', cn.stocks || 0, bnTagged, 'stocks'));
 
   const phReady = (cov.phase || 0) >= 0.5;
   sections.push(phReady
@@ -1765,51 +1777,68 @@ async function updateStaleScoreBanner() {
   } catch (_) {
     return; // silent — banner is a nudge, not critical
   }
-  const flagged = []; // { kind, id, ticker, name, status, days }
-  for (const h of (stocks || [])) {
-    if (!h.score) flagged.push({ kind: 'stock', id: h.id, ticker: h.ticker || h.name, name: h.name, status: 'unscored', days: null });
-    else if (h.score.staleDays > 90) flagged.push({ kind: 'stock', id: h.id, ticker: h.ticker || h.name, name: h.name, status: 'stale', days: h.score.staleDays });
-  }
-  for (const h of (crypto || [])) {
-    if (!h.score) flagged.push({ kind: 'crypto', id: h.id, ticker: h.symbol, name: h.name, status: 'unscored', days: null });
-    else if (h.score.staleDays > 90) flagged.push({ kind: 'crypto', id: h.id, ticker: h.symbol, name: h.name, status: 'stale', days: h.score.staleDays });
-  }
-  if (flagged.length === 0) {
+  // SC-02 — two honest signals against the real thesis tables (theses_index /
+  // crypto_theses), surfaced through the per-holding score overlay
+  // (source === 'thesis'). Replaces the old "needs framework scoring" nudge,
+  // which read the never-populated framework_scores and so flagged every row.
+  //   • Coverage  — holding has no locked thesis at all.
+  //   • Freshness — thesis is >90d old OR earnings posted since the lock
+  //                 (earnings_urgency === 'revision_needed', stocks only).
+  const hasThesis = (h) => !!(h.score && h.score.source === 'thesis');
+  const noThesis = [];    // { kind, id, ticker, name }
+  const staleThesis = []; // { kind, id, ticker, name, reason, days }
+  const classify = (h, kind, ticker) => {
+    if (!hasThesis(h)) {
+      noThesis.push({ kind, id: h.id, ticker, name: h.name });
+      return;
+    }
+    const days = h.score.staleDays || 0;
+    const revision = h.score.earningsUrgency === 'revision_needed';
+    if (days > 90 || revision) {
+      staleThesis.push({ kind, id: h.id, ticker, name: h.name,
+        reason: revision ? 'earnings since update' : `${days}d old`, days });
+    }
+  };
+  for (const h of (stocks || [])) classify(h, 'stock', h.ticker || h.name);
+  for (const h of (crypto || [])) classify(h, 'crypto', h.symbol);
+
+  if (noThesis.length === 0 && staleThesis.length === 0) {
     el.innerHTML = '';
     return;
   }
-  flagged.sort((a, b) => {
-    // unscored before stale; among stale, oldest first.
-    if (a.status !== b.status) return a.status === 'unscored' ? -1 : 1;
-    return (b.days || 0) - (a.days || 0);
-  });
-  const unscored = flagged.filter(f => f.status === 'unscored').length;
-  const stale    = flagged.filter(f => f.status === 'stale').length;
-  const total = flagged.length;
-  const parts = [];
-  if (unscored) parts.push(`${unscored} unscored`);
-  if (stale) parts.push(`${stale} stale (>90d)`);
+  staleThesis.sort((a, b) => (b.days || 0) - (a.days || 0));
 
-  // Backlog polish — banner now click-to-expand with per-row jump links.
-  const items = flagged.slice(0, 10).map(f => {
-    const tag = f.status === 'unscored'
-      ? '<span class="dim">unscored</span>'
-      : `<span class="amber-text">${f.days}d stale</span>`;
-    return `<li><a href="#" data-stale-score-kind="${escapeHTML(f.kind)}" data-stale-score-id="${f.id}">${escapeHTML(f.ticker)}</a> <span class="dim">— ${escapeHTML(f.name)}</span> · ${tag}</li>`;
-  }).join('');
+  const linkItem = (f, suffix) =>
+    `<li><a href="#" data-stale-score-kind="${escapeHTML(f.kind)}" data-stale-score-id="${f.id}">${escapeHTML(f.ticker)}</a> <span class="dim">— ${escapeHTML(f.name)}</span>${suffix || ''}</li>`;
 
-  el.innerHTML = `
-    <details class="stale-banner stale-banner-collapsible">
-      <summary>
-        ⚠ <strong>${total}</strong> holding${total === 1 ? '' : 's'} need${total === 1 ? 's' : ''} framework scoring — ${parts.join(', ')}.
-        <span class="dim">Click to expand.</span>
-      </summary>
-      <ul class="stale-list">${items}</ul>
-      ${total > 10 ? `<p class="dim">+ ${total - 10} more…</p>` : ''}
-    </details>
-  `;
-  // Wire ticker links → open holding detail page directly (which has the
-  // rescore button now via click-to-rescore polish item).
+  const blocks = [];
+  if (noThesis.length) {
+    const items = noThesis.slice(0, 10).map(f => linkItem(f)).join('');
+    blocks.push(`
+      <details class="stale-banner stale-banner-collapsible">
+        <summary>
+          📋 <strong>${noThesis.length}</strong> holding${noThesis.length === 1 ? '' : 's'} without a thesis.
+          <span class="dim">Click to expand.</span>
+        </summary>
+        <ul class="stale-list">${items}</ul>
+        ${noThesis.length > 10 ? `<p class="dim">+ ${noThesis.length - 10} more…</p>` : ''}
+      </details>`);
+  }
+  if (staleThesis.length) {
+    const items = staleThesis.slice(0, 10).map(f =>
+      linkItem(f, ` · <span class="amber-text">${escapeHTML(f.reason)}</span>`)).join('');
+    blocks.push(`
+      <details class="stale-banner stale-banner-collapsible">
+        <summary>
+          ⚠ <strong>${staleThesis.length}</strong> thesis refresh${staleThesis.length === 1 ? '' : 'es'} due — >90d or earnings since update.
+          <span class="dim">Click to expand.</span>
+        </summary>
+        <ul class="stale-list">${items}</ul>
+        ${staleThesis.length > 10 ? `<p class="dim">+ ${staleThesis.length - 10} more…</p>` : ''}
+      </details>`);
+  }
+  el.innerHTML = blocks.join('');
+  // Wire ticker links → open holding detail page directly.
   el.querySelectorAll('[data-stale-score-kind]').forEach(a => {
     a.addEventListener('click', (ev) => {
       ev.preventDefault();

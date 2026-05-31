@@ -31,6 +31,12 @@ type scoreSummary struct {
 	SubType     string `json:"subType,omitempty"`    // thesis sub-type — v1.19B
 	GitHubURL   string `json:"githubUrl,omitempty"`  // canonical thesis URL — v1.19B
 	LockedDate  string `json:"lockedDate,omitempty"` // ISO YYYY-MM-DD — v1.19B
+	// SC-10 — Band is set for crypto thesis scores (crypto_theses.band) so
+	// the Crypto tab can render "13/18 — Accumulate". Empty for stocks.
+	Band string `json:"band,omitempty"`
+	// SC-02 — earnings_urgency carried through for the Summary freshness
+	// nudge ('revision_needed' = earnings posted since the lock). Stocks only.
+	EarningsUrgency string `json:"earningsUrgency,omitempty"`
 }
 
 // stockResp is the API shape returned by /api/holdings/stocks. The holding
@@ -158,16 +164,18 @@ func (s *Server) handleListCrypto(w http.ResponseWriter, r *http.Request) {
 	}
 	closes, _ := s.store.GetAllSparklineCloses(r.Context(), "crypto", symbols, 30)
 	scoreByID, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "holding", ids)
-	// v1.19B — same thesis-overlay logic as stocks. Useful for the few
-	// crypto names that may have an Asset-Hedge or other locked thesis
-	// (e.g. GLD/SLV when they appear in the crypto column by symbol).
-	thesisBySymbol, _ := s.store.ThesisScoresByTicker(r.Context(), symbols)
+	// SC-10 — crypto SCORE comes from crypto_theses (Spec 9k), keyed by
+	// coin symbol. Previously this called ThesisScoresByTicker, which only
+	// reads theses_index (stocks) and therefore always missed crypto
+	// symbols → blank column. Now the locked crypto thesis wins over the
+	// (empty) manual framework_scores, scale-aware via max_score.
+	cryptoThesisBySymbol, _ := s.store.CryptoThesisScoresBySymbol(r.Context(), symbols)
 
 	out := make([]cryptoResp, 0, len(holdings))
 	for _, h := range holdings {
 		series := closes[h.Symbol]
 		slPct, tpPct := domain.SuggestCryptoRisk(h.VolTier)
-		score := pickScore(scoreByID[h.ID], thesisBySymbol, h.Symbol)
+		score := pickCryptoScore(scoreByID[h.ID], cryptoThesisBySymbol, h.Symbol)
 		out = append(out, cryptoResp{
 			CryptoHolding:   h,
 			Metrics:         metrics.ComputeCrypto(h),
@@ -226,11 +234,43 @@ func thesisScoreToSummary(tr *store.ThesisScoreRow) *scoreSummary {
 		FrameworkID: tr.Adapter,
 		ScoredAt:    tr.LockedDate, // already ISO YYYY-MM-DD
 		StaleDays:   stale,
+		Source:          "thesis",
+		Adapter:         tr.Adapter,
+		SubType:         tr.SubType,
+		GitHubURL:       tr.GitHubURL,
+		LockedDate:      tr.LockedDate,
+		EarningsUrgency: tr.EarningsUrgency,
+	}
+}
+
+// cryptoThesisScoreToSummary maps a store.CryptoThesisScoreRow → scoreSummary
+// with Source="thesis" and Band populated so the Crypto tab renders
+// "13/18 — Accumulate". Scale is carried via MaxScore (12 BTC / 18 alt). SC-10.
+func cryptoThesisScoreToSummary(cr *store.CryptoThesisScoreRow) *scoreSummary {
+	if cr == nil {
+		return nil
+	}
+	// "Passes" drives the green/amber badge styling. For a crypto thesis we
+	// treat Strong/Accumulate as a pass; Hold/Trim/Exit as not.
+	passes := cr.Band == "strong" || cr.Band == "accumulate"
+	stale := 0
+	if cr.LockedDate != "" {
+		if t, err := time.Parse("2006-01-02", cr.LockedDate); err == nil {
+			stale = int(time.Since(t).Hours() / 24)
+		}
+	}
+	return &scoreSummary{
+		TotalScore:  cr.Score,
+		MaxScore:    cr.MaxScore,
+		Passes:      passes,
+		FrameworkID: cr.ScorecardType,
+		ScoredAt:    cr.LockedDate,
+		StaleDays:   stale,
 		Source:      "thesis",
-		Adapter:     tr.Adapter,
-		SubType:     tr.SubType,
-		GitHubURL:   tr.GitHubURL,
-		LockedDate:  tr.LockedDate,
+		Adapter:     cr.ScorecardType,
+		GitHubURL:   cr.GitHubURL,
+		LockedDate:  cr.LockedDate,
+		Band:        cr.Band,
 	}
 }
 
@@ -240,6 +280,17 @@ func pickScore(manual *domain.FrameworkScore, thesisByTicker map[string]*store.T
 	if ticker != "" {
 		if t, ok := thesisByTicker[strings.ToUpper(ticker)]; ok && t != nil {
 			return thesisScoreToSummary(t)
+		}
+	}
+	return toScoreSummary(manual)
+}
+
+// pickCryptoScore — crypto analogue of pickScore: locked crypto thesis
+// (preferred) over manual framework score. SC-10.
+func pickCryptoScore(manual *domain.FrameworkScore, cryptoThesisBySymbol map[string]*store.CryptoThesisScoreRow, symbol string) *scoreSummary {
+	if symbol != "" {
+		if t, ok := cryptoThesisBySymbol[strings.ToUpper(symbol)]; ok && t != nil {
+			return cryptoThesisScoreToSummary(t)
 		}
 	}
 	return toScoreSummary(manual)
