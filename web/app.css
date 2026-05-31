@@ -3749,6 +3749,74 @@ input.autofilled, select.autofilled {
 .sl-method-toggle .slm-btn:disabled { opacity: 0.5; cursor: default; }
 .sl-method-toggle .slm-lock { font-size: 0.7rem; opacity: 0.8; }
 
+/* === SC-09 — reusable contextual hover-explainers === */
+.ft-explain {
+  display: inline-block;
+  margin-left: 0.2rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  line-height: 0.95rem;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--dim, #9aa4b2);
+  border-radius: 50%;
+  cursor: help;
+  opacity: 0.65;
+  vertical-align: middle;
+  font-style: normal;
+}
+.ft-explain:hover, .ft-explain:focus {
+  opacity: 1;
+  color: #e6efff;
+  outline: none;
+}
+.ft-explainer-pop {
+  position: absolute;
+  z-index: 9000;
+  max-width: 320px;
+  background: #161b24;
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+  padding: 0.6rem 0.7rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #cdd6e2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.ft-explainer-pop.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+.ft-explainer-pop .fe-term {
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.2rem;
+}
+.ft-explainer-pop .fe-def { color: #cdd6e2; }
+.ft-explainer-pop .fe-calc {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  font-variant-numeric: tabular-nums;
+  color: #9aa4b2;
+}
+.ft-explainer-pop .fe-calc-label {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6f7b8c;
+  margin-right: 0.3rem;
+}
+/* SC-06 — keep regime choice buttons able to host the ⓘ inline */
+.regime-choice-btn { position: relative; }
+.regime-choice-btn .ft-explain { margin-left: 0.35rem; }
+
 /* Thesis-source score badge — slight visual distinction */
 .score-badge.thesis-source {
   border: 1px solid rgba(245,158,11,0.45);

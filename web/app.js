@@ -145,6 +145,132 @@ function escapeHTML(s) {
   })[c]);
 }
 
+// ===== SC-09 — reusable contextual hover-explainers ======================
+//
+// A single glossary map (term key → {term, definition, calculation?}) drives a
+// shared floating explainer. Drop an `explainerMark(key)` ⓘ next to any header
+// label or inside a cell; a document-level delegated handler shows the popover
+// on hover/focus. Adding a glossary entry requires NO component change (AC #3),
+// and any consumer (SC-06 regime toggles being the first) reuses it for free.
+const FT_GLOSSARY = {
+  'dist-to-sl': {
+    term: 'Dist to SL',
+    definition: 'How far the current price sits above your stop. Reflects the active SL method.',
+    calculation: '(price − SL) / price.',
+  },
+  'dist-to-tp': {
+    term: 'Dist to TP',
+    definition: 'How far the current price sits below your target.',
+    calculation: '(TP − price) / price.',
+  },
+  '12m-vol': {
+    term: '12m Vol',
+    definition: 'Annualised volatility over the last 12 months. Higher = wider expected swings; feeds the Vol-envelope stop.',
+  },
+  'proposed-sl': {
+    term: 'Proposed SL',
+    definition: 'Suggested stop-loss level. A manual stop always overrides the method.',
+    calculation: 'Vol-envelope: entry × (1 − 12m vol − safety %). Technical: support − (vol-tier × weekly ATR).',
+  },
+  'score': {
+    term: 'Score',
+    definition: 'Locked thesis score. Blank = no thesis yet.',
+    calculation: 'Crypto: /12 (BTC) or /18 (alts). Stocks: /16.',
+  },
+  'vol-tier': {
+    term: 'Vol tier',
+    definition: 'Volatility bucket that sets the technical-stop ATR multiple.',
+    calculation: 'ATR ÷ price bucketed low / medium / high / extreme.',
+  },
+  // SC-06 — Jordi regime toggles. Copy reflects the live two-tier proximity
+  // rule shipped in SC-08 (75% amber, tightening to 85% in Shifting/Defensive).
+  'regime-stable': {
+    term: 'Stable',
+    definition: 'Normal operation. Entry-zone (new-buy) alerts fire. Proximity alerts at 75% of the way to your stop/target.',
+  },
+  'regime-shifting': {
+    term: 'Shifting',
+    definition: 'Caution. Proximity alerts tighten to 85% of the way to stop/target. Entry-zone alerts still fire.',
+  },
+  'regime-defensive': {
+    term: 'Defensive',
+    definition: 'Risk-off. New-entry (watchlist) alerts are silenced — the dashboard won’t nudge you into new positions. Proximity alerts tighten to 85%. Effective regime = the more defensive of Jordi and Cowen.',
+  },
+};
+
+// explainerMark — a small ⓘ trigger for a glossary key. Returns '' for unknown
+// keys so callers can drop it in unconditionally (e.g. value-derived keys).
+function explainerMark(key, extraClass = '') {
+  if (!FT_GLOSSARY[key]) return '';
+  return `<span class="ft-explain${extraClass ? ' ' + extraClass : ''}" data-explain="${key}" tabindex="0" role="button" aria-label="What is this?">ⓘ</span>`;
+}
+
+let _explainEl = null;
+let _explainHideTimer = null;
+function ensureExplainEl() {
+  if (_explainEl) return _explainEl;
+  _explainEl = document.createElement('div');
+  _explainEl.className = 'ft-explainer-pop';
+  _explainEl.setAttribute('aria-hidden', 'true');
+  _explainEl.addEventListener('mouseenter', () => {
+    if (_explainHideTimer) { clearTimeout(_explainHideTimer); _explainHideTimer = null; }
+  });
+  _explainEl.addEventListener('mouseleave', hideExplainerSoon);
+  document.body.appendChild(_explainEl);
+  return _explainEl;
+}
+function showExplainer(target) {
+  const g = FT_GLOSSARY[target.dataset.explain];
+  if (!g) return;
+  const el = ensureExplainEl();
+  el.innerHTML = `
+    <div class="fe-term">${escapeHTML(g.term)}</div>
+    <div class="fe-def">${escapeHTML(g.definition)}</div>
+    ${g.calculation ? `<div class="fe-calc"><span class="fe-calc-label">Calc</span> ${escapeHTML(g.calculation)}</div>` : ''}
+  `;
+  el.classList.add('show');
+  el.setAttribute('aria-hidden', 'false');
+  const r = target.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  let top = r.bottom + 8 + window.scrollY;
+  if (r.bottom + 8 + er.height > window.innerHeight) {
+    top = r.top - er.height - 8 + window.scrollY; // flip above when no room below
+  }
+  let left = r.left + window.scrollX;
+  const maxLeft = window.scrollX + window.innerWidth - er.width - 8;
+  if (left > maxLeft) left = Math.max(window.scrollX + 8, maxLeft);
+  if (left < window.scrollX + 8) left = window.scrollX + 8;
+  el.style.top = `${top}px`;
+  el.style.left = `${left}px`;
+}
+function hideExplainerSoon() {
+  if (_explainHideTimer) clearTimeout(_explainHideTimer);
+  _explainHideTimer = setTimeout(() => {
+    if (_explainEl) {
+      _explainEl.classList.remove('show');
+      _explainEl.setAttribute('aria-hidden', 'true');
+    }
+  }, 120);
+}
+// Wired once at boot. Event delegation on document means any [data-explain]
+// added by any future render Just Works — no per-render re-wiring (AC #3).
+function wireGlobalExplainers() {
+  const enter = (e) => {
+    const t = e.target.closest && e.target.closest('[data-explain]');
+    if (!t) return;
+    if (_explainHideTimer) { clearTimeout(_explainHideTimer); _explainHideTimer = null; }
+    showExplainer(t);
+  };
+  const leave = (e) => {
+    const t = e.target.closest && e.target.closest('[data-explain]');
+    if (t) hideExplainerSoon();
+  };
+  document.addEventListener('mouseover', enter);
+  document.addEventListener('mouseout', leave);
+  document.addEventListener('focusin', enter);
+  document.addEventListener('focusout', leave);
+}
+
 // suggestedDelta compares the manual SL/TP price against the suggested % rule
 // to surface an ↑ / ↓ icon (Spec 3 D11). Returns {icon, title} for the cell.
 //
@@ -720,6 +846,7 @@ function openManualRegimeModal(side) {
               <label class="regime-choice-btn regime-${v === 'stable' ? 'good' : v === 'shifting' ? 'amber' : v === 'defensive' ? 'bad' : 'dim'} ${v === cur ? 'selected' : ''}">
                 <input type="radio" name="regime" value="${v}" ${v === cur ? 'checked' : ''} />
                 <span>${v.toUpperCase()}</span>
+                ${side === 'jordi' ? explainerMark('regime-' + v) : ''}
               </label>
             `).join('')}
           </div>
@@ -2474,15 +2601,15 @@ async function renderStocks() {
             </th>
             <th class="num" title="Profit/loss as a percentage of invested capital">P&amp;L %</th>
             <th class="num" title="Relative Strength Index over 14 periods. >70 = overbought, <30 = oversold.">RSI(14)</th>
-            <th class="num" title="Effective stop-loss (price | % from current). Manual override wins; otherwise computed from the per-row method — T: Technical (support − vol×ATR), V: Vol-envelope (entry − annual-vol band). Set on eToro manually.">Proposed SL</th>
+            <th class="num" title="Effective stop-loss (price | % from current). Manual override wins; otherwise computed from the per-row method — T: Technical (support − vol×ATR), V: Vol-envelope (entry − annual-vol band). Set on eToro manually.">Proposed SL ${explainerMark('proposed-sl')}</th>
             <th class="num" title="Recommended take-profit level (price | % from current). Set on eToro manually.">Proposed TP</th>
-            <th class="num" title="How close the current price is to the proposed stop-loss.">Dist to SL</th>
-            <th class="num" title="How close the current price is to the take-profit target (positive = room to run; turns green near/at target).">Dist to TP</th>
-            <th class="num" title="Annualized realized volatility over the past 12 months.">12m Vol</th>
+            <th class="num">Dist to SL ${explainerMark('dist-to-sl')}</th>
+            <th class="num">Dist to TP ${explainerMark('dist-to-tp')}</th>
+            <th class="num">12m Vol ${explainerMark('12m-vol')}</th>
             <th title="Next earnings">Earn</th>
             <th title="Next ex-dividend">Ex-Div</th>
             <th title="30-day price sparkline (daily closes).">30-day</th>
-            <th title="Latest Jordi framework score. Click to rescore.">Score</th>
+            <th title="Latest Jordi framework score. Click to rescore.">Score ${explainerMark('score')}</th>
             <th title="Exchange hours for this ticker">Market</th>
             <th>Note</th>
             <th></th>
@@ -4396,6 +4523,7 @@ async function renderSettings() {
 // ---------- boot ----------------------------------------------------------
 
 async function boot() {
+  wireGlobalExplainers(); // SC-09 — one-time delegated hover-explainer wiring
   try {
     const s = await api('/api/auth/state');
     if (s.state === 'needs_setup') {
