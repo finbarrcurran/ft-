@@ -10204,6 +10204,647 @@ const D25_SCHEMA = {
   },
 };
 
+// ---------- D25_SCHEMA_BY_ADAPTER — per-adapter sub-criterion overrides
+//
+// Closes the Phase 2 architectural Q A TODO. Extracted from live DB
+// crypto_adapters.markdown_current via tools/extract_adapter_schemas.py
+// during v1.22.12 polish work. Falls back to generic D25_SCHEMA when
+// adapter not in this map.
+//
+// Sub-criterion counts differ from generic D25_SCHEMA — e.g., L1 Q1 has
+// 3 sub-criteria (Narrative state / durability / mispricing) while
+// generic Q1 has 4. The form re-renders fully when adapter changes
+// (existing adapterSel change handler resets subCriteria), so this is
+// safe to swap dynamically.
+//
+// Re-extract via:
+//   ssh curran@jarvis "sudo -u ft python3 \
+//     /opt/ft/src/tools/extract_adapter_schemas.py /var/lib/ft/ft.db" \
+//     > web/app_d25_schema.js
+// then splice into this block.
+
+const D25_SCHEMA_BY_ADAPTER = {
+  "l1": {
+    "Q1": {
+      "label": "Bottleneck / Narrative State",
+      "subs": [
+        "Narrative state",
+        "Narrative durability",
+        "Mispricing vs narrative"
+      ]
+    },
+    "Q2": {
+      "label": "Tokenomics",
+      "subs": [
+        "Inflation rate (net of burn)",
+        "Unlock schedule (next 12 months)",
+        "Distribution concentration (top 100 holders)",
+        "Insider / team / VC overhang",
+        "Supply cap structure"
+      ]
+    },
+    "Q3": {
+      "label": "Moat / Network Effect",
+      "subs": [
+        "Active developer count (Electric Capital quarterly)",
+        "TVL durability (6-month MA vs prior peak)",
+        "Stablecoin issuance on chain",
+        "Cross-chain dependency"
+      ]
+    },
+    "Q4": {
+      "label": "Adoption Intensity",
+      "subs": [
+        "Daily active addresses (90d MA vs prior 90d)",
+        "Transaction count (90d MA, weighted by value, not raw count)",
+        "Fee revenue (90d, USD-denominated)",
+        "Stablecoin transfer volume on chain (settled USD value)",
+        "Developer activity (commits, deployments per quarter)"
+      ]
+    },
+    "Q5": {
+      "label": "Value Accrual",
+      "subs": [
+        "Mechanism strength",
+        "Annualized $ vs FDV",
+        "Trend (90d)"
+      ]
+    },
+    "Q6": {
+      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "subs": [
+        "Validator / staker count",
+        "Geographic decentralization",
+        "Client diversity",
+        "Audit history + exploit record",
+        "Governance capture risk",
+        "Regulatory exposure"
+      ]
+    },
+    "Q7": {
+      "label": "Catalyst",
+      "subs": [
+        "Highest-scoring catalyst within window"
+      ]
+    },
+    "Q8": {
+      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "subs": [
+        "Price vs 200-day MA",
+        "Price vs 200-week MA (log scale)",
+        "Weekly RSI",
+        "9e Cowen cycle alignment",
+        "ETH/BTC ratio (for non-ETH L1s)",
+        "9e Pal macro regime"
+      ]
+    },
+    "Q9": {
+      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "subs": [
+        "Founder credibility",
+        "Team operational track record",
+        "Insider / team token lock-ups",
+        "Foundation / DAO health",
+        "Prior project history"
+      ]
+    }
+  },
+  "l2": {
+    "Q1": {
+      "label": "Bottleneck / Narrative State",
+      "subs": [
+        "Narrative state",
+        "Narrative durability",
+        "Mispricing vs narrative",
+        "Position within L2 narrative rotation"
+      ]
+    },
+    "Q2": {
+      "label": "Tokenomics",
+      "subs": [
+        "Inflation rate (net of any burn)",
+        "Unlock schedule (next 12 months)",
+        "Distribution concentration (top 100 holders)",
+        "Insider / team / VC overhang",
+        "Token utility (separate from L2 utility)"
+      ]
+    },
+    "Q3": {
+      "label": "Moat / Network Effect",
+      "subs": [
+        "TVL share within parent L1 L2 ecosystem",
+        "Application ecosystem depth",
+        "Daily active users vs sibling L2s",
+        "Stablecoin TVL on chain",
+        "Switching costs for users"
+      ]
+    },
+    "Q4": {
+      "label": "Adoption Intensity",
+      "subs": [
+        "Daily transactions (90d MA, value-weighted)",
+        "Daily active users (90d MA)",
+        "Sequencer fee revenue (90d, USD)",
+        "Stablecoin transfer volume on chain",
+        "Developer deployments (new contracts)"
+      ]
+    },
+    "Q5": {
+      "label": "Value Accrual",
+      "subs": [
+        "Mechanism strength",
+        "Annualized $ vs FDV",
+        "Trend (90d)"
+      ]
+    },
+    "Q6": {
+      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "subs": [
+        "L2BEAT Stage classification",
+        "Sequencer decentralization",
+        "Fraud / validity proof status",
+        "Audit history + exploit record",
+        "Upgrade key / security council risk",
+        "Regulatory exposure"
+      ]
+    },
+    "Q7": {
+      "label": "Catalyst",
+      "subs": [
+        "Highest-scoring catalyst within window"
+      ]
+    },
+    "Q8": {
+      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "subs": [
+        "Price vs 50-day MA",
+        "Price vs 200-day MA",
+        "Weekly RSI",
+        "9e Cowen cycle alignment",
+        "Parent L1 thesis band",
+        "L2/parent ratio (token vs parent L1 token)",
+        "9e Pal macro regime"
+      ]
+    },
+    "Q9": {
+      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "subs": [
+        "Founder/parent organization credibility",
+        "Team operational track record",
+        "Foundation / DAO governance health",
+        "Sequencer operator dependency risk",
+        "Insider / team token lock-ups",
+        "Prior project history"
+      ]
+    }
+  },
+  "defi": {
+    "Q1": {
+      "label": "Bottleneck / Narrative State",
+      "subs": [
+        "Narrative state",
+        "Narrative durability",
+        "Mispricing vs narrative",
+        "Position within DeFi sub-sector rotation"
+      ]
+    },
+    "Q2": {
+      "label": "Tokenomics",
+      "subs": [
+        "Inflation rate (net of any burn)",
+        "Unlock schedule (next 12 months)",
+        "Distribution concentration (top 100 holders)",
+        "Insider / team / VC overhang",
+        "Token utility (separate from governance)"
+      ]
+    },
+    "Q3": {
+      "label": "Moat / Network Effect",
+      "subs": [
+        "TVL share within sub-category",
+        "Integration count (composability)",
+        "Multi-cycle persistence",
+        "**Multi-chain deployment quality** (sub-type-dependent — see §3)",
+        "Treasury value vs FDV"
+      ]
+    },
+    "Q4": {
+      "label": "Adoption Intensity",
+      "subs": [
+        "Primary sub-type metric (90d trend)",
+        "Active user count (90d MA)",
+        "Revenue trend (90d, USD-denominated)",
+        "Cross-protocol composability usage",
+        "Developer activity"
+      ]
+    },
+    "Q5": {
+      "label": "Value Accrual",
+      "subs": [
+        "Mechanism strength",
+        "Annualized $ vs FDV (yield-equivalent)",
+        "Trend (90d)",
+        "Sustainability"
+      ]
+    },
+    "Q6": {
+      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "subs": [
+        "Smart contract audit history",
+        "Time in production without major exploit",
+        "Admin keys / upgrade mechanism",
+        "Oracle dependency risk",
+        "Regulatory exposure",
+        "Governance capture risk"
+      ]
+    },
+    "Q7": {
+      "label": "Catalyst",
+      "subs": [
+        "Highest-scoring catalyst within window"
+      ]
+    },
+    "Q8": {
+      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "subs": [
+        "Price vs 50-day MA",
+        "Price vs 200-day MA",
+        "Weekly RSI",
+        "9e Cowen cycle alignment",
+        "Parent host chain thesis band",
+        "Token/parent ratio (protocol vs host chain token)",
+        "9e Pal macro regime"
+      ]
+    },
+    "Q9": {
+      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "subs": [
+        "Founder / core team credibility",
+        "Team operational track record",
+        "Foundation / DAO governance health",
+        "Insider / team token lock-ups",
+        "Prior project history",
+        "Post-founder maturity (relevant for older protocols)"
+      ]
+    }
+  },
+  "infra": {
+    "Q1": {
+      "label": "Bottleneck / Narrative State",
+      "subs": [
+        "Narrative state",
+        "Narrative durability",
+        "Mispricing vs narrative",
+        "Position within infrastructure rotation"
+      ]
+    },
+    "Q2": {
+      "label": "Tokenomics",
+      "subs": [
+        "Inflation rate (net of any burn)",
+        "Unlock schedule (next 12 months)",
+        "Distribution concentration (top 100 holders)",
+        "Insider / team / VC overhang",
+        "Token utility (separate from governance)"
+      ]
+    },
+    "Q3": {
+      "label": "Moat / Network Effect",
+      "subs": [
+        "Integration count within sub-category",
+        "Multi-chain deployment breadth",
+        "Operational history",
+        "Switching cost for integrated protocols",
+        "Operator/validator decentralization"
+      ]
+    },
+    "Q4": {
+      "label": "Adoption Intensity",
+      "subs": [
+        "Primary sub-type metric (90d trend)",
+        "Integration / consumer count (90d)",
+        "Service revenue (90d, USD-denominated)",
+        "New chain / new market expansion",
+        "Operator/validator growth"
+      ]
+    },
+    "Q5": {
+      "label": "Value Accrual",
+      "subs": [
+        "Mechanism strength",
+        "Annualized $ vs FDV",
+        "Trend (90d)",
+        "Sustainability"
+      ]
+    },
+    "Q6": {
+      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "subs": [
+        "Smart contract audit history",
+        "Operational track record",
+        "Decentralization of service providers",
+        "Sub-type-specific reliability metric",
+        "Upgrade key / governance risk",
+        "Regulatory exposure"
+      ]
+    },
+    "Q7": {
+      "label": "Catalyst",
+      "subs": [
+        "Highest-scoring catalyst within window"
+      ]
+    },
+    "Q8": {
+      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "subs": [
+        "Price vs 50-day MA",
+        "Price vs 200-day MA",
+        "Weekly RSI",
+        "9e Cowen cycle alignment",
+        "Parent host chain thesis band",
+        "Token/parent ratio (Infrastructure token vs host chain token)",
+        "9e Pal macro regime"
+      ]
+    },
+    "Q9": {
+      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "subs": [
+        "Founder/core team credibility",
+        "Team operational track record",
+        "Foundation / DAO governance health",
+        "Insider / team token lock-ups",
+        "Multi-year roadmap delivery",
+        "Post-founder maturity"
+      ]
+    }
+  },
+  "depin": {
+    "Q1": {
+      "label": "Bottleneck / Narrative State",
+      "subs": [
+        "Narrative state",
+        "Narrative durability",
+        "Mispricing vs narrative",
+        "Position within DePIN rotation"
+      ]
+    },
+    "Q2": {
+      "label": "Tokenomics",
+      "subs": [
+        "Inflation rate (net of any burn, including contributor emissions)",
+        "Unlock schedule (next 12 months)",
+        "Distribution concentration (top 100 holders)",
+        "Insider / team / VC overhang",
+        "Emissions schedule design"
+      ]
+    },
+    "Q3": {
+      "label": "Moat / Network Effect",
+      "subs": [
+        "Deployed infrastructure scale within sub-category",
+        "Geographic / market coverage",
+        "Paying customer diversity (top 10 = % of revenue)",
+        "Multi-year operational track record",
+        "Customer integration depth (switching cost)"
+      ]
+    },
+    "Q4": {
+      "label": "Adoption Intensity",
+      "subs": [
+        "Primary sub-type metric (90d trend)",
+        "Paying customer count (90d trend)",
+        "Service revenue (90d, USD-denominated)",
+        "RYR trend (90d)",
+        "Geographic / market expansion"
+      ]
+    },
+    "Q5": {
+      "label": "Value Accrual",
+      "subs": [
+        "Mechanism strength",
+        "RYR level (90d avg) — primary sustainability marker",
+        "Annualized $ accrual vs FDV",
+        "Trend (90d)"
+      ]
+    },
+    "Q6": {
+      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "subs": [
+        "Smart contract audit history",
+        "Operational reliability (service uptime)",
+        "Contributor decentralization",
+        "Geographic decentralization",
+        "Hardware vendor concentration risk",
+        "Regulatory exposure"
+      ]
+    },
+    "Q7": {
+      "label": "Catalyst",
+      "subs": [
+        "Highest-scoring catalyst within window"
+      ]
+    },
+    "Q8": {
+      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "subs": [
+        "Price vs 50-day MA",
+        "Price vs 200-day MA",
+        "Weekly RSI",
+        "9e Cowen cycle alignment",
+        "Parent host chain thesis band",
+        "Token/parent ratio",
+        "9e Pal macro regime"
+      ]
+    },
+    "Q9": {
+      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "subs": [
+        "Founder/core team credibility",
+        "Team operational track record",
+        "Foundation / DAO governance health",
+        "Insider / team token lock-ups",
+        "Hardware / operations partnership quality",
+        "Multi-year roadmap delivery"
+      ]
+    }
+  },
+  "rwa": {
+    "Q1": {
+      "label": "Bottleneck / Narrative State",
+      "subs": [
+        "Narrative state",
+        "Narrative durability",
+        "Mispricing vs narrative",
+        "Position within RWA rotation"
+      ]
+    },
+    "Q2": {
+      "label": "Tokenomics",
+      "subs": [
+        "Token supply mechanism",
+        "Unlock schedule (next 12 months) — applies to RWA governance tokens",
+        "Distribution concentration (top 100 holders)",
+        "Insider / team / VC overhang (governance tokens)",
+        "Token-to-asset relationship clarity"
+      ]
+    },
+    "Q3": {
+      "label": "Moat / Network Effect",
+      "subs": [
+        "AUM scale within sub-category",
+        "Institutional / brand quality",
+        "Regulatory wrapper quality",
+        "Yield/cost spread vs traditional alternative",
+        "DeFi composability"
+      ]
+    },
+    "Q4": {
+      "label": "Adoption Intensity",
+      "subs": [
+        "AUM trend (90d)",
+        "Holder count (90d)",
+        "Sub-type-specific operational metric",
+        "New institutional / large customer onboarding",
+        "Integration depth (DeFi protocols accepting / building on this RWA)"
+      ]
+    },
+    "Q5": {
+      "label": "Value Accrual",
+      "subs": [
+        "Mechanism strength",
+        "RABR (primary backing marker)",
+        "Annualized $ accrual vs FDV",
+        "Trend (90d)"
+      ]
+    },
+    "Q6": {
+      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "subs": [
+        "Smart contract audit history",
+        "Custody Verification Tier (CRITICAL)",
+        "Custodian quality",
+        "Legal recoverability",
+        "Regulatory exposure",
+        "Smart contract upgrade governance"
+      ]
+    },
+    "Q7": {
+      "label": "Catalyst",
+      "subs": [
+        "Highest-scoring catalyst within window"
+      ]
+    },
+    "Q8": {
+      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "subs": [
+        "Price vs 50-day MA (for governance tokens) OR NAV deviation (for direct asset tokens)",
+        "Price vs 200-day MA (governance) OR multi-year NAV consistency (asset tokens)",
+        "9e Cowen cycle alignment",
+        "9e Pal macro regime",
+        "Parent host chain thesis band",
+        "Yield/asset price environment vs RWA token economics",
+        "Macro-driven sub-type rotation favorability"
+      ]
+    },
+    "Q9": {
+      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "subs": [
+        "Founder / core team credibility (TradFi side)",
+        "Founder / core team credibility (Crypto side)",
+        "Foundation / DAO governance health",
+        "Insider / team token lock-ups (governance tokens)",
+        "Auditor / custodian relationship quality",
+        "Multi-year operational delivery"
+      ]
+    }
+  },
+  "speculative": {
+    "Q1": {
+      "label": "Bottleneck / Narrative State",
+      "subs": [
+        "**Narrative state** (universal)",
+        "Narrative durability",
+        "Mispricing vs narrative",
+        "**Attention velocity** (sub-type specific)"
+      ]
+    },
+    "Q2": {
+      "label": "Tokenomics",
+      "subs": [
+        "Inflation / emission rate (next 12mo)",
+        "Unlock schedule (next 90d)",
+        "Distribution concentration (top 100 holders)",
+        "Insider / team / VC overhang",
+        "Supply cap structure"
+      ]
+    },
+    "Q3": {
+      "label": "Moat / Network Effect",
+      "subs": [
+        "Community cohesion",
+        "Exchange listing depth",
+        "Brand / cultural footprint",
+        "**Sub-type-specific moat** (sub-type dependent)"
+      ]
+    },
+    "Q4": {
+      "label": "Adoption Intensity",
+      "subs": [
+        "Active holder count (90d MA)",
+        "Holder concentration trend",
+        "**Liquidity depth** (DEX + CEX combined)",
+        "**Sub-type-specific engagement** (sub-type dependent — see below)"
+      ]
+    },
+    "Q5": {
+      "label": "Value Accrual",
+      "subs": [
+        "Mechanism strength",
+        "Annualized $ vs FDV",
+        "Trend (90d)"
+      ]
+    },
+    "Q6": {
+      "label": "Security D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Decentralization",
+      "subs": [
+        "Smart contract audit history",
+        "Mint authority / admin keys",
+        "Regulatory exposure",
+        "Exchange delisting risk",
+        "Custody risk for sub-type"
+      ]
+    },
+    "Q7": {
+      "label": "Catalyst",
+      "subs": [
+        "Highest-scoring catalyst within window"
+      ]
+    },
+    "Q8": {
+      "label": "Technicals D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Regime Alignment",
+      "subs": [
+        "Price vs 50-day MA",
+        "Price vs 200-day MA",
+        "Daily RSI",
+        "Volume profile (30d)",
+        "9e Cowen cycle alignment",
+        "Risk-on / risk-off macro (Pal regime)",
+        "ETH/BTC ratio (for alt-cycle confirmation)"
+      ]
+    },
+    "Q9": {
+      "label": "Team D25_SCHEMA_BY_ADAPTER_INLINE_PLACEHOLDER Founder Risk",
+      "subs": [
+        "Founder credibility",
+        "Team operational track record",
+        "Insider / team token lock-ups",
+        "Foundation / treasury health",
+        "Prior project history"
+      ]
+    }
+  }
+};
+
 // Q5 mechanism dropdown options (post-Migration 0033, 14 values)
 const D25_Q5_MECHANISMS = [
   ['fee_burn', 'fee_burn (ETH-style)'],
@@ -10527,11 +11168,22 @@ function d25CurrentAdapter() {
   return _d25Adapters.find(a => a.slug === _d25FormState.adapterSlug);
 }
 
+// d25PillarsForAdapter returns the per-pillar schema for the given adapter,
+// preferring D25_SCHEMA_BY_ADAPTER (canonical labels extracted from adapter
+// MDs) and falling back to the generic D25_SCHEMA when adapter not mapped.
+function d25PillarsForAdapter(adapter) {
+  const sc = adapter?.scorecardType || 'alt_18';
+  if (adapter?.slug && D25_SCHEMA_BY_ADAPTER[adapter.slug]) {
+    return D25_SCHEMA_BY_ADAPTER[adapter.slug];
+  }
+  return D25_SCHEMA[sc] || D25_SCHEMA.alt_18;
+}
+
 function d25RenderForm() {
   const f = _d25FormState;
   const adapter = d25CurrentAdapter();
   const scorecardType = adapter?.scorecardType || 'alt_18';
-  const pillars = D25_SCHEMA[scorecardType] || D25_SCHEMA.alt_18;
+  const pillars = d25PillarsForAdapter(adapter);
 
   const pillarBlocks = Object.entries(pillars).map(([key, def]) => {
     const subs = f.subCriteria[key] || new Array(def.subs.length).fill(0);
@@ -10905,8 +11557,7 @@ function d25WireFormInputs() {
       const val = parseInt(radio.value, 10);
       if (!_d25FormState.subCriteria[k]) {
         const adapter = d25CurrentAdapter();
-        const sc = adapter?.scorecardType || 'alt_18';
-        const def = (D25_SCHEMA[sc] || D25_SCHEMA.alt_18)[k];
+        const def = d25PillarsForAdapter(adapter)[k];
         _d25FormState.subCriteria[k] = new Array(def.subs.length).fill(0);
       }
       _d25FormState.subCriteria[k][idx] = val;
@@ -10918,7 +11569,7 @@ function d25WireFormInputs() {
 function d25RecomputeAndRender() {
   const adapter = d25CurrentAdapter();
   const sc = adapter?.scorecardType || 'alt_18';
-  const pillars = D25_SCHEMA[sc] || D25_SCHEMA.alt_18;
+  const pillars = d25PillarsForAdapter(adapter);
   for (const [key, def] of Object.entries(pillars)) {
     const subs = _d25FormState.subCriteria[key] || new Array(def.subs.length).fill(0);
     const score = d25ComputePillarScore(subs);
@@ -10959,7 +11610,7 @@ function d25RenderSummary() {
   const f = _d25FormState;
   const adapter = d25CurrentAdapter();
   const sc = adapter?.scorecardType || 'alt_18';
-  const pillars = D25_SCHEMA[sc] || D25_SCHEMA.alt_18;
+  const pillars = d25PillarsForAdapter(adapter);
 
   const scores = {};
   for (const key of Object.keys(pillars)) {
