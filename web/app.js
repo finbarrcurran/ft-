@@ -4942,6 +4942,14 @@ async function renderScreener() {
 // Backlog polish 2026-05-17 — watchlist column sort state.
 if (state.watchlistSort == null) state.watchlistSort = { key: 'addedAt', dir: 'desc' };
 
+// SC-15 — flat vs grouped-by-sector view. The toggle choice persists across
+// sessions (localStorage); collapsed-group state is session-only (in-memory).
+if (state.watchlistGroupBy == null) {
+  try { state.watchlistGroupBy = localStorage.getItem('ft.watchlistGroupBy') === 'sector' ? 'sector' : 'flat'; }
+  catch (_) { state.watchlistGroupBy = 'flat'; }
+}
+if (state.watchlistCollapsedGroups == null) state.watchlistCollapsedGroups = new Set();
+
 async function renderWatchlist() {
   const res = await api('/api/watchlist');
   state.watchlist = res.watchlist || [];
@@ -4972,19 +4980,18 @@ async function renderWatchlist() {
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
-  const rows = sorted.map((e) => {
+  const wlRowHTML = (e) => {
     const dist = distanceToEntry(e.currentPrice, e.targetEntryLow, e.targetEntryHigh, !!e.alertSuppressed);
     const target = e.targetEntryLow != null && e.targetEntryHigh != null
       ? `$${fmtNum2.format(e.targetEntryLow)}–$${fmtNum2.format(e.targetEntryHigh)}`
       : e.targetEntryLow != null ? `≥ $${fmtNum2.format(e.targetEntryLow)}`
       : e.targetEntryHigh != null ? `≤ $${fmtNum2.format(e.targetEntryHigh)}`
       : '—';
-    const score = e.latestScore;
-    const passed = score && score.totalScore >= (score.maxScore - 4); // default 12/16
-    const scoreCell = score
-      ? `<span class="score-badge ${passed ? 'pass' : 'fail'}">${score.totalScore}/${score.maxScore}${passed ? ' ✓' : ''}</span>`
-      : `<span class="dim">unscored</span>`;
-    const tag = score && score.tagsJson ? parseFirstTag(score.tagsJson) : null;
+    // SC-14 — SCORE column reads the thesis-preferred score (theses_index for
+    // stocks, crypto_theses for crypto), rendered via the shared scoreCell()
+    // helper so it matches the Stocks/Crypto tabs (🔒 lock, band, stale, link).
+    const scoreCellHTML = scoreCell(e.score, false, e.kind, e.id);
+    const tag = e.latestScore && e.latestScore.tagsJson ? parseFirstTag(e.latestScore.tagsJson) : null;
     const tagCell = tag ? `<span class="tag-pill">${escapeHTML(tag)}</span>` : `<span class="dim">—</span>`;
     const added = relativeAge(e.addedAt);
     const note = e.note
@@ -5008,13 +5015,13 @@ async function renderWatchlist() {
     return `
       <tr data-wid="${e.id}">
         <td><strong>${escapeHTML(e.ticker)}</strong>${sectorFlowPill(e.sectorUniverseId, sectorTagMap)}</td>
-        <td>${escapeHTML(e.companyName || '—')}</td>
+        <td>${escapeHTML(e.companyName || '—')}${watchlistGapChips(e)}</td>
         <td><span class="dim">${escapeHTML(e.sector || '—')}</span></td>
         <td class="num">${dash(e.currentPrice, fmtNum2)}</td>
         ${forecastCell}
         <td class="num">${target}</td>
         <td><span class="${dist.cls}"${dist.title ? ` title="${escapeHTML(dist.title)}"` : ''}>${dist.label}</span></td>
-        <td>${scoreCell}</td>
+        <td>${scoreCellHTML}</td>
         <td>${tagCell}</td>
         <td class="market-cell">${marketCell(e.market)}</td>
         <td><span class="dim">${added}</span></td>
@@ -5027,7 +5034,32 @@ async function renderWatchlist() {
         </td>
       </tr>
     `;
-  }).join('');
+  };
+
+  // SC-15 — build tbody flat or grouped-by-sector. Flat is the historical
+  // path (unchanged). Grouped emits a collapsible header per sector, ordered
+  // by user_sector_ordering when set else alphabetically, "Unsectored" last.
+  const groupBy = state.watchlistGroupBy;
+  let tbody;
+  if (groupBy === 'sector') {
+    const groups = watchlistGroups(sorted, sectorTagMap);
+    tbody = groups.map((g) => {
+      const collapsed = state.watchlistCollapsedGroups.has(g.key);
+      const caret = collapsed ? '▸' : '▾';
+      const header = `
+        <tr class="wl-group-header${collapsed ? ' collapsed' : ''}" data-wl-group="${escapeHTML(g.key)}" tabindex="0" role="button" aria-expanded="${collapsed ? 'false' : 'true'}" title="Click to ${collapsed ? 'expand' : 'collapse'}">
+          <td colspan="13">
+            <span class="wl-group-caret">${caret}</span>
+            <span class="wl-group-name">${escapeHTML(g.name)}</span>
+            <span class="wl-group-count">${g.entries.length}</span>
+          </td>
+        </tr>`;
+      const body = collapsed ? '' : g.entries.map(wlRowHTML).join('');
+      return header + body;
+    }).join('');
+  } else {
+    tbody = sorted.map(wlRowHTML).join('');
+  }
 
   // Sortable column header helper.
   const sortHeader = (key, label, extraClass) => {
@@ -5044,6 +5076,10 @@ async function renderWatchlist() {
       <button class="btn-ghost" id="add-watchlist-stock">+ Add stock</button>
       <button class="btn-ghost" id="add-watchlist-crypto">+ Add crypto</button>
       <a class="btn-ghost" href="/api/export.csv?tab=watchlist" download title="Download current rows as CSV">⬇ Download CSV</a>
+      <div class="wl-view-toggle" role="group" aria-label="Watchlist grouping">
+        <button class="wl-view-btn ${groupBy === 'flat' ? 'active' : ''}" data-wl-view="flat" title="Show all rows in one flat table">Flat</button>
+        <button class="wl-view-btn ${groupBy === 'sector' ? 'active' : ''}" data-wl-view="sector" title="Group rows into collapsible sections by sector">By sector</button>
+      </div>
     </div>
     <div class="tablewrap">
       <table class="holdings watchlist">
@@ -5064,7 +5100,7 @@ async function renderWatchlist() {
             <th></th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody>${tbody}</tbody>
       </table>
     </div>
   `;
@@ -5072,6 +5108,29 @@ async function renderWatchlist() {
   $('#add-watchlist-crypto').addEventListener('click', () => openWatchlistModal({ kind: 'crypto', mode: 'add' }));
   for (const btn of document.querySelectorAll('.row-mini')) {
     btn.addEventListener('click', () => onWatchlistAction(btn.dataset.act, parseInt(btn.dataset.wid, 10)));
+  }
+  // SC-15 — view toggle (flat ↔ by-sector), choice persisted to localStorage.
+  for (const btn of document.querySelectorAll('.wl-view-btn')) {
+    btn.addEventListener('click', () => {
+      const v = btn.dataset.wlView === 'sector' ? 'sector' : 'flat';
+      if (v === state.watchlistGroupBy) return;
+      state.watchlistGroupBy = v;
+      try { localStorage.setItem('ft.watchlistGroupBy', v); } catch (_) {}
+      renderWatchlist();
+    });
+  }
+  // SC-15 — collapsible group headers (click or Enter/Space toggles the section).
+  for (const gh of document.querySelectorAll('.wl-group-header')) {
+    const toggle = () => {
+      const key = gh.dataset.wlGroup;
+      if (state.watchlistCollapsedGroups.has(key)) state.watchlistCollapsedGroups.delete(key);
+      else state.watchlistCollapsedGroups.add(key);
+      renderWatchlist();
+    };
+    gh.addEventListener('click', toggle);
+    gh.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); }
+    });
   }
   // Wire column-header clicks.
   for (const th of document.querySelectorAll('.wl-sortable')) {
@@ -5085,6 +5144,57 @@ async function renderWatchlist() {
       renderWatchlist();
     });
   }
+}
+
+// watchlistGroups — SC-15. Buckets pre-sorted watchlist entries by
+// sector_universe_id, preserving the global column sort within each bucket.
+// Group order: user_sector_ordering (display_order_user) ascending when set,
+// else alphabetical by display name; the "Unsectored" bucket (no sector id)
+// always sorts last. sectorTagMap is the id → {name, order} lookup from
+// getSectorTagMap(); ids absent from it fall back to a "Sector <id>" label.
+function watchlistGroups(sortedEntries, sectorTagMap) {
+  const groups = new Map();
+  for (const e of sortedEntries) {
+    const id = e.sectorUniverseId;
+    const key = id == null ? '__unsectored__' : String(id);
+    if (!groups.has(key)) {
+      const meta = id != null && sectorTagMap ? sectorTagMap.get(id) : null;
+      groups.set(key, {
+        key,
+        id: id == null ? null : id,
+        name: id == null ? 'Unsectored' : (meta && meta.name ? meta.name : `Sector ${id}`),
+        order: meta && meta.order != null ? meta.order : null,
+        entries: [],
+      });
+    }
+    groups.get(key).entries.push(e);
+  }
+  const arr = [...groups.values()];
+  arr.sort((a, b) => {
+    if (a.id == null) return 1;          // Unsectored always last
+    if (b.id == null) return -1;
+    if (a.order != null && b.order != null && a.order !== b.order) return a.order - b.order;
+    if (a.order != null && b.order == null) return -1;  // ordered before unordered
+    if (a.order == null && b.order != null) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  return arr;
+}
+
+// watchlistGapChips — SC-16 enrich-and-flag surfacing. Renders subtle chips
+// when a row is missing enrichment: "needs data" (no current price — the
+// provider couldn't resolve it) and "needs sector" (no sector_universe_id —
+// never auto-guessed; the user assigns it via Edit, then it groups under
+// SC-15). Empty string when the row is fully enriched.
+function watchlistGapChips(e) {
+  const chips = [];
+  if (e.currentPrice == null) {
+    chips.push('<span class="wl-gap-chip needs-data" title="Price not resolved on add — edit to fill, or refresh">needs data</span>');
+  }
+  if (e.sectorUniverseId == null) {
+    chips.push('<span class="wl-gap-chip needs-sector" title="Not yet assigned to the sector taxonomy — edit to set a sector">needs sector</span>');
+  }
+  return chips.length ? ` ${chips.join(' ')}` : '';
 }
 
 // compareWatchlistRows — typed comparator per column key.
@@ -5113,7 +5223,8 @@ function compareWatchlistRows(a, b, key) {
       return distance(a) - distance(b);
     }
     case 'score': {
-      const s = (e) => (e.latestScore ? e.latestScore.totalScore : -1);
+      // SC-14 — sort by the thesis-preferred score (matches the column).
+      const s = (e) => (e.score ? e.score.totalScore : -1);
       return s(a) - s(b);
     }
     case 'addedAt':
@@ -8605,7 +8716,7 @@ async function getSectorTagMap() {
     const r = await api('/api/sector-rotation/metrics');
     const m = new Map();
     for (const s of (r.sectors || [])) {
-      m.set(s.sectorId, { name: s.displayName, tag: s.tag, code: s.code });
+      m.set(s.sectorId, { name: s.displayName, tag: s.tag, code: s.code, order: s.displayOrderUser });
     }
     _sectorTagCache.byId = m;
     _sectorTagCache.fetchedAt = Date.now();

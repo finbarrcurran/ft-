@@ -18,11 +18,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"ft/internal/domain"
 	"ft/internal/frameworks"
+	"ft/internal/market"
 	"ft/internal/marketdata"
 	"ft/internal/regime"
 	"ft/internal/store"
@@ -54,6 +56,12 @@ type watchlistRow struct {
 	*domain.WatchlistEntry
 	LatestScore *domain.FrameworkScore `json:"latestScore,omitempty"`
 
+	// SC-14 — thesis-preferred SCORE, mirroring the Stocks/Crypto tabs.
+	// Locked thesis (theses_index for stocks / crypto_theses for crypto)
+	// wins over the legacy manual framework_scores; nil when neither exists.
+	// The frontend renders this via the shared scoreCell() helper.
+	Score *scoreSummary `json:"score,omitempty"`
+
 	// Spec 9b D6: entry-zone state per regime.
 	//   InRange       — current price falls within [low, high]
 	//   AlertActive   — entry-zone alerts permitted (effective regime == stable)
@@ -82,6 +90,21 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, e.ID)
 	}
 	scoreByID, _ := s.store.LatestFrameworkScoresMany(r.Context(), userID, "watchlist", ids)
+	// SC-14 — overlay locked-thesis scores so the Watchlist SCORE column
+	// tracks the same source of truth as the Stocks/Crypto tabs. Stocks read
+	// theses_index by ticker; crypto reads crypto_theses by symbol. Thesis
+	// wins over the (now-empty) manual framework_scores via pickScore.
+	stockTickers := make([]string, 0, len(entries))
+	cryptoSymbols := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.Kind == "crypto" {
+			cryptoSymbols = append(cryptoSymbols, e.Ticker)
+		} else {
+			stockTickers = append(stockTickers, e.Ticker)
+		}
+	}
+	thesisByTicker, _ := s.store.ThesisScoresByTicker(r.Context(), stockTickers)
+	cryptoThesisBySymbol, _ := s.store.CryptoThesisScoresBySymbol(r.Context(), cryptoSymbols)
 	eff := s.currentEffectiveRegime(r.Context())
 	alertsActive := regime.GatesWatchlistEntryZone(eff)
 
@@ -100,9 +123,17 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// SC-14 — thesis-preferred score (manual framework_scores as fallback).
+		var score *scoreSummary
+		if e.Kind == "crypto" {
+			score = pickCryptoScore(scoreByID[e.ID], cryptoThesisBySymbol, e.Ticker)
+		} else {
+			score = pickScore(scoreByID[e.ID], thesisByTicker, e.Ticker)
+		}
 		out = append(out, watchlistRow{
 			WatchlistEntry:  e,
 			LatestScore:     scoreByID[e.ID],
+			Score:           score,
 			InRange:         inRange,
 			AlertActive:     inRange && alertsActive,
 			AlertSuppressed: inRange && !alertsActive,
@@ -164,12 +195,77 @@ func (s *Server) handleCreateWatchlist(w http.ResponseWriter, r *http.Request) {
 		Note:             trimStrPtrW(req.Note),
 		SectorUniverseID: req.SectorUniverseID, // Spec 9f D9
 	}
+	// SC-16 — enrich a manually-added row (company name + price + free-text
+	// sector) so bare ticker-adds don't land blank. Enrich-and-flag: fills
+	// only the fields the caller left empty (non-destructive); never guesses
+	// a sector_universe_id, so unsectored rows surface in SC-15's "Unsectored"
+	// group with a "needs sector" hint, and rows the provider couldn't price
+	// show "needs data". Best-effort — provider failure leaves fields blank.
+	s.enrichWatchlistEntry(r.Context(), e)
 	created, err := s.store.CreateWatchlistEntry(r.Context(), e)
 	if err != nil {
 		mapStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": created.ID})
+}
+
+// enrichWatchlistEntry fills missing company name / current price / free-text
+// sector for a manually-added row using the providers FT already uses
+// elsewhere (Yahoo profile + the stock-quote chain; CoinGecko for crypto).
+// SC-16 (D16.1/D16.2):
+//   - Non-destructive: only blank fields are filled; caller-supplied values
+//     (e.g. from the Edit-modal lookup) are never overwritten.
+//   - Never guesses sector_universe_id — the free-text GICS string Yahoo
+//     returns doesn't map 1:1 to the 34-row taxonomy, so the row stays
+//     "Unsectored" until the user assigns it (surfaced by SC-15).
+//   - Best-effort: provider errors/timeouts leave fields blank so the UI can
+//     flag "needs data"; they never block the create.
+func (s *Server) enrichWatchlistEntry(ctx context.Context, e *domain.WatchlistEntry) {
+	if e.CompanyName != nil && e.CurrentPrice != nil && e.Sector != nil {
+		return // nothing to fill
+	}
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	if e.Kind == "crypto" {
+		// CoinGecko profile: name + category (no free synchronous EUR price
+		// source here, so CurrentPrice stays nil → UI flags "needs data").
+		if p, err := market.LookupCryptoBySymbol(ctx, e.Ticker); err == nil && p != nil {
+			if e.CompanyName == nil && p.Name != "" {
+				e.CompanyName = ptrString(p.Name)
+			}
+			if e.Sector == nil && p.Category != "" {
+				e.Sector = ptrString(p.Category)
+			}
+		}
+		return
+	}
+
+	// Stock: name + free-text sector from the Yahoo profile.
+	if e.CompanyName == nil || e.Sector == nil {
+		if p, err := market.FetchYahooProfile(ctx, e.Ticker); err == nil && p != nil {
+			if e.CompanyName == nil && p.Name != "" {
+				e.CompanyName = ptrString(p.Name)
+			}
+			if e.Sector == nil && p.Sector != "" {
+				e.Sector = ptrString(p.Sector)
+			}
+		}
+	}
+	// Current price from the same quote chain the rest of FT uses
+	// (Finnhub → TwelveData → Yahoo).
+	if e.CurrentPrice == nil {
+		if q, err := market.FetchStockQuote(ctx, e.Ticker); err == nil && q != nil {
+			if q.Price > 0 {
+				v := q.Price
+				e.CurrentPrice = &v
+			}
+			if e.CompanyName == nil && q.Name != "" {
+				e.CompanyName = ptrString(q.Name)
+			}
+		}
+	}
 }
 
 // PUT /api/watchlist/{id}

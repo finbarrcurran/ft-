@@ -2428,6 +2428,86 @@ input.autofilled, select.autofilled {
   font-family: var(--font-mono);
 }
 
+/* SC-16 — enrich-and-flag chips on watchlist rows (UI-derived, no schema). */
+.wl-gap-chip {
+  display: inline-block;
+  border-radius: var(--radius2);
+  padding: 0.02rem 0.35rem;
+  margin-left: 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: help;
+}
+.wl-gap-chip.needs-data {
+  background: rgb(var(--color-loss) / 0.14);
+  color: rgb(var(--color-loss));
+  border: 1px solid rgb(var(--color-loss) / 0.32);
+}
+.wl-gap-chip.needs-sector {
+  background: rgb(var(--color-amber, 230 160 30) / 0.14);
+  color: rgb(var(--color-amber, 230 160 30));
+  border: 1px solid rgb(var(--color-amber, 230 160 30) / 0.32);
+}
+
+/* SC-15 — Watchlist flat ↔ by-sector view toggle (segmented control). */
+.wl-view-toggle {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius2);
+  overflow: hidden;
+}
+.wl-view-btn {
+  background: transparent;
+  color: rgb(var(--color-text-dim));
+  border: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.wl-view-btn + .wl-view-btn { border-left: 1px solid rgb(var(--color-border)); }
+.wl-view-btn:hover { color: rgb(var(--color-text)); }
+.wl-view-btn.active {
+  background: rgb(var(--color-accent) / 0.16);
+  color: rgb(var(--color-accent));
+  font-weight: 600;
+}
+
+/* SC-15 — collapsible per-sector group header row. */
+.watchlist .wl-group-header > td {
+  background: rgb(var(--color-accent) / 0.05);
+  border-top: 1px solid rgb(var(--color-border-strong));
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+}
+.watchlist .wl-group-header:hover > td { background: rgb(var(--color-accent) / 0.1); }
+.wl-group-caret {
+  display: inline-block;
+  width: 1em;
+  color: rgb(var(--color-text-dim));
+}
+.wl-group-name {
+  font-weight: 600;
+  text-transform: uppercase;
+  color: rgb(var(--color-text));
+}
+.wl-group-count {
+  margin-left: 0.5rem;
+  padding: 0.02rem 0.4rem;
+  border-radius: var(--radius2);
+  background: rgb(var(--color-text-dim) / 0.18);
+  color: rgb(var(--color-text-dim));
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 /* Score screen */
 .modal.score-modal {
   max-width: 720px;
