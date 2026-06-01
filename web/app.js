@@ -538,7 +538,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'signals' ? 'active' : ''}" data-tab="signals">Signals${state.signalsAlarmCount > 0 ? ` <span class="tab-badge loss">🔴 ${state.signalsAlarmCount}</span>` : ''}</button>
         <button class="tab ${state.tab === 'performance' ? 'active' : ''}" data-tab="performance">Performance</button>
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
-        <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Sector Rotation</button>
+        <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Macro Regime &amp; Sector Rotation</button>
         <button class="tab ${state.tab === 'scorecards' ? 'active' : ''}" data-tab="scorecards">Scorecards</button>
         <button class="tab ${state.tab === 'theses' ? 'active' : ''}" data-tab="theses">Stock Theses${state.thesesRevisionCount > 0 ? ` <span class="tab-badge warn">⚠ ${state.thesesRevisionCount}</span>` : ''}</button>
         <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
@@ -8663,6 +8663,278 @@ function pctReturn(v, digits) {
   return `<span class="${cls}">${x >= 0 ? '+' : ''}${x.toFixed(digits != null ? digits : 1)}%</span>`;
 }
 
+// ===================== Spec 9p — Macro Regime layer =====================
+// The macro band that sits above the existing Sector Rotation table.
+// Backbone = growth × inflation quadrant (§A); P2 adds the playbook
+// doctrine + divergence overlay + suggest-a-Jordi-regime (D5/D6/D8).
+// Source of truth = /api/macro/regime (deterministic server classifier).
+
+let _macroBandOpen = true; // collapsed state persists across renders within a session
+
+const MACRO_QUADRANT_TONE = {
+  Q1: 'gain', Q2: 'amber-text', Q3: 'loss', Q4: 'loss', unclassified: 'dim',
+};
+const MACRO_QUADRANT_BLURB = {
+  Q1: 'Growth accelerating, inflation decelerating — risk-on, long-duration.',
+  Q2: 'Growth + inflation accelerating — reflation, cyclicals & hard assets.',
+  Q3: 'Growth decelerating, inflation accelerating — stagflation, defensives & gold.',
+  Q4: 'Growth + inflation decelerating — deflation/recession, duration & quality.',
+  unclassified: 'Not enough fresh data to classify the quadrant yet.',
+};
+
+// Format an indicator's level for display (units differ by group).
+function fmtMacroValue(ind) {
+  if (ind.value == null) return '—';
+  const v = ind.value;
+  switch (ind.group) {
+    case 'cpi': return `${v.toFixed(1)}% YoY`;
+    case 'liquidity': return `$${(v / 1000).toFixed(1)}T`;
+    case 'rates': return `${v.toFixed(2)}%`;
+    case 'curve': return `${v.toFixed(2)}%`;
+    case 'credit': return `${v.toFixed(2)}%`;
+    case 'dollar': return v.toFixed(1);
+    default: return v.toFixed(1); // regional_fed / output / employment
+  }
+}
+// Format an indicator's rate-of-change with the right units.
+function fmtMacroRoc(ind) {
+  if (ind.roc == null) return '<span class="dim">—</span>';
+  const r = ind.roc;
+  const sign = r > 0 ? '+' : '';
+  let txt;
+  switch (ind.group) {
+    case 'cpi': txt = `${sign}${r.toFixed(2)}pp`; break;          // pct-points of YoY change
+    case 'liquidity': txt = `${sign}${r.toFixed(1)}% 13wk`; break;
+    case 'regional_fed': case 'curve': txt = `${sign}${r.toFixed(1)}`; break; // absolute delta
+    default: txt = `${sign}${r.toFixed(1)}%`;
+  }
+  const arrow = r > 0 ? '▲' : r < 0 ? '▼' : '→';
+  const cls = r > 0 ? 'gain' : r < 0 ? 'loss' : 'dim';
+  return `<span class="${cls}">${arrow} ${txt}</span>`;
+}
+// Generic small sparkline for a macro indicator's history.
+function macroSparkSvg(points) {
+  if (!points || points.length < 2) return '';
+  const w = 64, h = 18;
+  const min = Math.min(...points), max = Math.max(...points);
+  const rng = max - min || 1;
+  const stepX = w / (points.length - 1);
+  const coords = points.map((p, i) => `${(i * stepX).toFixed(1)},${(h - ((p - min) / rng) * h).toFixed(1)}`).join(' ');
+  return `<svg class="macro-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${coords}" fill="none" stroke="rgb(150,155,165)" stroke-width="1.3"/></svg>`;
+}
+
+function macroIndicatorCard(ind) {
+  const stale = ind.fetchError ? `<span class="macro-stale" title="${escapeHTML(ind.fetchError)}">stale</span>` : '';
+  return `
+    <div class="macro-card" title="FRED: ${escapeHTML(ind.fredId || '')}">
+      <div class="macro-card-name">${escapeHTML(ind.name)} ${stale}</div>
+      <div class="macro-card-val">${escapeHTML(fmtMacroValue(ind))}</div>
+      <div class="macro-card-roc">${fmtMacroRoc(ind)}</div>
+      <div class="macro-card-spark">${macroSparkSvg(ind.history)}</div>
+    </div>`;
+}
+
+// Augmenting-state chips from the regime read.
+function macroAugmentChips(rg) {
+  const chips = [];
+  const add = (label, val, tone) => { if (val) chips.push(`<span class="macro-chip ${tone || ''}">${label}: <strong>${escapeHTML(val)}</strong></span>`); };
+  add('Rates', rg.ratesRegime, rg.ratesRegime === 'hiking' ? 'loss' : rg.ratesRegime === 'cutting' ? 'gain' : 'dim');
+  add('Liquidity', rg.liquidityRegime, rg.liquidityRegime === 'expansion' ? 'gain' : 'loss');
+  add('Curve', rg.curveRegime, rg.curveRegime === 'inverted' ? 'loss' : 'dim');
+  add('Credit', rg.creditRegime, rg.creditRegime === 'widening' ? 'loss' : 'gain');
+  add('Dollar', rg.dollarRegime, 'dim');
+  return chips.join('');
+}
+
+// Render the whole macro band. `macro` = /api/macro/regime payload (or null).
+function renderMacroBand(macro) {
+  if (!macro) {
+    return `<div class="macro-band"><div class="dim" style="padding:0.6rem">Macro regime data unavailable (FRED fetch pending). The nightly job populates this at 01:00 UTC; or click <strong>Refresh</strong> once available.</div></div>`;
+  }
+  const rg = macro.regime;
+  const inds = macro.indicators || [];
+  const byAxis = (ax) => inds.filter(i => i.axis === ax).map(macroIndicatorCard).join('');
+  const open = _macroBandOpen ? ' open' : '';
+
+  // Regime banner.
+  let banner;
+  if (!macro.hasRegime || !rg || rg.quadrant === 'unclassified' || !rg.quadrant) {
+    banner = `<div class="macro-banner dim"><strong>Regime: Unclassified</strong> — ${escapeHTML(MACRO_QUADRANT_BLURB.unclassified)}</div>`;
+  } else {
+    const tone = MACRO_QUADRANT_TONE[rg.quadrant] || 'dim';
+    const gArrow = rg.growthDir === 'accel' ? '▲ accel' : rg.growthDir === 'decel' ? '▼ decel' : '—';
+    const iArrow = rg.inflationDir === 'accel' ? '▲ accel' : rg.inflationDir === 'decel' ? '▼ decel' : '—';
+    const conf = rg.confidence || 'low';
+    const flags = (rg.thematicFlags || []).map(f => `<span class="macro-chip macro-flag">${escapeHTML(f.replace(/_/g, ' '))}</span>`).join('');
+    banner = `
+      <div class="macro-banner">
+        <div class="macro-banner-main">
+          <span class="macro-quad ${tone}">${escapeHTML(rg.quadrant)} · ${escapeHTML(rg.shorthand)}</span>
+          <span class="macro-conf macro-conf-${conf}" title="Classifier confidence">${escapeHTML(conf)} confidence</span>
+        </div>
+        <div class="macro-banner-axes">
+          <span>Growth <strong class="${rg.growthDir === 'accel' ? 'gain' : 'loss'}">${gArrow}</strong></span>
+          <span>Inflation <strong class="${rg.inflationDir === 'accel' ? 'loss' : 'gain'}">${iArrow}</strong></span>
+        </div>
+        <div class="macro-banner-blurb dim">${escapeHTML(MACRO_QUADRANT_BLURB[rg.quadrant] || '')}</div>
+        <div class="macro-augment">${macroAugmentChips(rg)} ${flags}</div>
+      </div>`;
+  }
+
+  // ISM override row.
+  const ism = macro.ism || {};
+  const ismStr = ism.value != null
+    ? `current override <strong>${ism.value.toFixed(1)}</strong> ${ism.fresh ? '<span class="gain">(fresh)</span>' : '<span class="loss">(stale → nowcast)</span>'}`
+    : '<span class="dim">none — using regional-Fed nowcast</span>';
+
+  // Suggested Jordi (D8) — suggest-only.
+  let jordiSuggest = '';
+  if (macro.hasRegime && rg && rg.suggestedJordi && rg.suggestedJordi !== 'unclassified') {
+    jordiSuggest = `
+      <div class="macro-jordi-suggest">
+        <span class="dim">Suggested Jordi regime:</span>
+        <span class="macro-jordi-val">${escapeHTML(rg.suggestedJordi)}</span>
+        <button class="btn-ghost btn-mini" id="macro-apply-jordi" data-jordi="${escapeHTML(rg.suggestedJordi)}" title="Apply this as your Jordi manual toggle (you stay in control — never auto-set)">Apply →</button>
+        <span class="dim" style="font-size:0.7rem">suggest-only, never auto-applied</span>
+      </div>`;
+  }
+
+  // Playbook (D5) for the live regime.
+  let playbookBlock = '';
+  if (macro.hasRegime && rg && rg.quadrant && rg.quadrant !== 'unclassified' && Array.isArray(macro.playbook) && macro.playbook.length) {
+    const col = (stance, label, tone) => {
+      const items = macro.playbook.filter(p => p.stance === stance);
+      if (!items.length) return '';
+      return `<div class="macro-pb-col"><div class="macro-pb-head ${tone}">${label}</div>${items.map(p =>
+        `<span class="macro-pb-item" title="${escapeHTML(p.rationale || '')}">${escapeHTML(p.assetOrSector)}</span>`).join('')}</div>`;
+    };
+    playbookBlock = `
+      <div class="macro-playbook">
+        <div class="macro-pb-title">In <strong>${escapeHTML(rg.shorthand)}</strong>, historically:</div>
+        <div class="macro-pb-cols">
+          ${col('favored', 'Favoured', 'gain')}
+          ${col('neutral', 'Neutral', 'dim')}
+          ${col('avoid', 'Avoid', 'loss')}
+        </div>
+      </div>`;
+  }
+
+  return `
+    <details class="macro-band"${open} id="macro-band">
+      <summary class="macro-summary">
+        <span class="macro-summary-title">📊 Macro Regime</span>
+        ${macro.hasRegime && rg && rg.quadrant && rg.quadrant !== 'unclassified'
+          ? `<span class="macro-summary-quad ${MACRO_QUADRANT_TONE[rg.quadrant] || 'dim'}">${escapeHTML(rg.quadrant)} · ${escapeHTML(rg.shorthand)}</span>`
+          : '<span class="dim">Unclassified</span>'}
+        <span class="macro-summary-actions">
+          <button class="btn-ghost btn-mini" id="macro-refresh" title="Re-fetch FRED + reclassify now">↻ Refresh</button>
+        </span>
+      </summary>
+      <div class="macro-body">
+        ${banner}
+        ${jordiSuggest}
+        <div class="macro-axes">
+          <div class="macro-axis"><div class="macro-axis-label">Growth</div><div class="macro-axis-cards">${byAxis('growth')}</div></div>
+          <div class="macro-axis"><div class="macro-axis-label">Inflation</div><div class="macro-axis-cards">${byAxis('inflation')}</div></div>
+          <div class="macro-axis"><div class="macro-axis-label">Augmenting</div><div class="macro-axis-cards">${byAxis('augment')}</div></div>
+        </div>
+        <div class="macro-ism">
+          <span class="dim">ISM override:</span> ${ismStr}
+          <input type="number" id="macro-ism-input" min="0" max="100" step="0.1" placeholder="e.g. 48.5" class="macro-ism-input">
+          <button class="btn-ghost btn-mini" id="macro-ism-save">Save ISM</button>
+        </div>
+        ${playbookBlock}
+        <p class="dim macro-foot">Deterministic growth×inflation quadrant from FRED series (rate-of-change framed). Nightly fetch 01:00 UTC; regime recomputes on new monthly prints. Personal use only. Not investment advice.</p>
+      </div>
+    </details>`;
+}
+
+// ---- Divergence overlay (P2 D6) ----
+// Map a sector row to a playbook asset-class stance by keyword. Returns
+// {stance, key} or null. Fuzzy but clearly-labelled judgment overlay.
+const SECTOR_PLAYBOOK_SYNONYMS = [
+  { re: /\b(ai|semi|gpu|chip|silicon|foundry)\b/i, keys: ['ai-semi'] },
+  { re: /\bcloud|software|saas|data center|datacenter\b/i, keys: ['cloud', 'long-duration growth', 'high-beta tech', 'growth/tech'] },
+  { re: /\bgold\b/i, keys: ['gold'] },
+  { re: /\bsilver\b/i, keys: ['silver'] },
+  { re: /\b(lithium|copper|material|mining|metal)\b/i, keys: ['mining/materials', 'mining', 'lithium'] },
+  { re: /\b(energy|oil|gas|hydrocarbon|power|utilit|electric|grid)\b/i, keys: ['hydrocarbons/energy', 'energy', 'hydrocarbons', 'industrials/power'] },
+  { re: /\b(defense|defence|aerospace|military)\b/i, keys: ['defense'] },
+  { re: /\b(pharma|health|staple|consumer staple|tobacco)\b/i, keys: ['defensives'] },
+  { re: /\b(bank|financ|credit|insur)\b/i, keys: ['credit', 'value'] },
+  { re: /\b(industrial|machin)\b/i, keys: ['industrials/power', 'cyclicals'] },
+  { re: /\b(btc|bitcoin|eth|crypto)\b/i, keys: ['btc/eth', 'btc', 'crypto alts'] },
+];
+function playbookStanceForSector(sector, playbookRows) {
+  if (!Array.isArray(playbookRows) || !playbookRows.length) return null;
+  const hay = `${sector.displayName} ${sector.code} ${sector.parentGics}`.toLowerCase();
+  const lookup = {};
+  for (const p of playbookRows) lookup[p.assetOrSector.toLowerCase()] = p;
+  for (const syn of SECTOR_PLAYBOOK_SYNONYMS) {
+    if (!syn.re.test(hay)) continue;
+    for (const k of syn.keys) {
+      if (lookup[k]) return { stance: lookup[k].stance, key: lookup[k].assetOrSector, rationale: lookup[k].rationale };
+    }
+  }
+  return null;
+}
+function divergenceMarker(sector, playbookRows) {
+  const m = playbookStanceForSector(sector, playbookRows);
+  if (!m) return '';
+  const held = (sector.holdingsCount || 0) > 0;
+  const cfg = {
+    favored: { sym: '✓', tone: 'gain', label: 'Favoured' },
+    neutral: { sym: '○', tone: 'dim', label: 'Neutral' },
+    avoid: { sym: '✕', tone: 'loss', label: 'Avoid' },
+  }[m.stance] || { sym: '', tone: 'dim', label: '' };
+  const warn = (m.stance === 'avoid' && held)
+    ? `<span class="macro-diverge-warn" title="You hold a sector this regime's playbook says to avoid">⚠ holding a disfavoured sector</span>`
+    : '';
+  return `<span class="macro-diverge ${cfg.tone}" title="${cfg.label} in this regime (matched: ${escapeHTML(m.key)})">${cfg.sym} ${cfg.label}</span>${warn}`;
+}
+
+function wireMacroBand(content, macro) {
+  const band = content.querySelector('#macro-band');
+  if (band) {
+    band.addEventListener('toggle', () => { _macroBandOpen = band.open; });
+  }
+  const refreshBtn = content.querySelector('#macro-refresh');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      refreshBtn.disabled = true; refreshBtn.textContent = '↻ fetching…';
+      try { await api('/api/macro/refresh', { method: 'POST', body: '{}' }); await renderSectorRotation(); }
+      catch (e) { refreshBtn.textContent = '↻ failed'; refreshBtn.disabled = false; }
+    });
+  }
+  const ismSave = content.querySelector('#macro-ism-save');
+  if (ismSave) {
+    ismSave.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      const inp = content.querySelector('#macro-ism-input');
+      const v = parseFloat(inp.value);
+      if (isNaN(v) || v < 0 || v > 100) { inp.focus(); return; }
+      ismSave.disabled = true; ismSave.textContent = 'saving…';
+      try { await api('/api/macro/ism', { method: 'POST', body: JSON.stringify({ value: v }) }); await renderSectorRotation(); }
+      catch (e) { ismSave.textContent = 'failed'; ismSave.disabled = false; }
+    });
+  }
+  const applyJordi = content.querySelector('#macro-apply-jordi');
+  if (applyJordi) {
+    applyJordi.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      const regime = applyJordi.dataset.jordi;
+      if (!regime) return;
+      applyJordi.disabled = true; applyJordi.textContent = 'applying…';
+      try {
+        await api('/api/regime/jordi', { method: 'POST', body: JSON.stringify({ regime, note: 'Applied from macro-regime suggestion (Spec 9p)' }) });
+        applyJordi.textContent = 'applied ✓';
+        await renderSectorRotation();
+      } catch (e) { applyJordi.textContent = 'failed'; applyJordi.disabled = false; }
+    });
+  }
+}
+
 let _sectorSort = { key: 'return3m', dir: 'desc' };
 // Spec 9f D9 — Whitespace filter mode.
 //   'all'        → every sector (default)
@@ -8673,11 +8945,12 @@ async function renderSectorRotation() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading sector rotation…</div>';
 
-  let data, regime;
+  let data, regime, macro;
   try {
-    [data, regime] = await Promise.all([
+    [data, regime, macro] = await Promise.all([
       api('/api/sector-rotation/metrics'),
       api('/api/regime').catch(() => null),
+      api('/api/macro/regime').catch(() => null),
     ]);
   } catch (e) {
     content.innerHTML = `<div class="empty"><div class="loss">sector rotation failed: ${escapeHTML(e.message)}</div></div>`;
@@ -8749,6 +9022,7 @@ async function renderSectorRotation() {
       <td class="sr-name">
         <div><strong>${escapeHTML(s.displayName)}</strong> ${scBtn}</div>
         <div class="dim" style="font-size:0.72rem">${escapeHTML(s.parentGics)} · ${escapeHTML(s.etfTickerPrimary)}${s.jordiStage != null ? ' · stage ' + s.jordiStage : ''}</div>
+        ${macro && macro.hasRegime ? `<div class="sr-diverge-row">${divergenceMarker(s, macro.playbook)}</div>` : ''}
       </td>
       <td class="num">${pctReturn(s.return1w, 1)}</td>
       <td class="num">${pctReturn(s.return1m, 1)}</td>
@@ -8787,6 +9061,7 @@ async function renderSectorRotation() {
   `;
 
   content.innerHTML = `
+    ${renderMacroBand(macro)}
     ${macroStrip}
     <div class="table-toolbar">
       ${filterToggle}
@@ -8829,6 +9104,9 @@ async function renderSectorRotation() {
       <div id="sr-digest-list" class="dim">loading…</div>
     </details>
   `;
+
+  // Spec 9p — wire the macro band (refresh / ISM override / apply-Jordi / collapse).
+  wireMacroBand(content, macro);
 
   // Spec 9f D9 — filter toggle.
   for (const btn of content.querySelectorAll('.srf-btn[data-srf]')) {

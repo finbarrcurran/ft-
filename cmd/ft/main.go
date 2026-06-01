@@ -21,6 +21,7 @@ import (
 	"ft/internal/health"
 	"ft/internal/llm"
 	"ft/internal/macro"
+	"ft/internal/macroregime"
 	"ft/internal/market"
 	"ft/internal/marketdata"
 	"ft/internal/performance"
@@ -409,6 +410,29 @@ func runServe() {
 			defer cancel()
 			if err := refresher.RefreshAllAndSnapshot(ctx); err != nil {
 				slog.Error("crypto indicators: daily snapshot", "err", err)
+			}
+		})
+	}()
+
+	// Spec 9p — daily Macro Regime refresh + snapshot at 01:00 UTC, plus a
+	// startup refresh after a 45s warm-up so the macro band has a regime read
+	// on first visit. FRED-only (reuses cryptoindicators/providers.FREDClient).
+	go func() {
+		mrSvc := macroregime.New(st.DB)
+		mrRefresher := macroregime.NewRefresher(mrSvc, cfg.FREDApiKey)
+
+		time.Sleep(45 * time.Second)
+		warmCtx, warmCancel := context.WithTimeout(bgCtx, 2*time.Minute)
+		if err := mrRefresher.RefreshAll(warmCtx); err != nil {
+			slog.Warn("macro regime: initial refresh failed", "err", err)
+		}
+		warmCancel()
+
+		scheduleAt(bgCtx, 1, 0, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 5*time.Minute)
+			defer cancel()
+			if err := mrRefresher.RefreshAllAndSnapshot(ctx); err != nil {
+				slog.Error("macro regime: daily snapshot", "err", err)
 			}
 		})
 	}()

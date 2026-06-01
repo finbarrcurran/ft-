@@ -14,6 +14,7 @@ import (
 	"ft/internal/cryptotheses"
 	"ft/internal/domain"
 	"ft/internal/llm"
+	"ft/internal/macroregime"
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
 	"ft/internal/signals"
@@ -42,6 +43,7 @@ type Server struct {
 	theses           *theses.Engine            // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
 	cryptoIndicators *cryptoindicators.Service // Spec 9e Phase 1
 	signals          *signals.Service          // Spec 9k Phase A
+	macroRegime      *macroregime.Service      // Spec 9p
 	mux              *http.ServeMux
 }
 
@@ -61,6 +63,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 			cfg.ThesisRepoName, cfg.GitHubToken),
 		cryptoIndicators: cryptoindicators.New(st.DB), // Spec 9e Phase 1
 		signals:          signals.New(st.DB),          // Spec 9k Phase A
+		macroRegime:      macroregime.New(st.DB),      // Spec 9p
 		mux:              http.NewServeMux(),
 	}
 	s.cryptoWrite = cryptotheses.NewThesisWriteService(st.DB, s.cryptoAdapters, s.cryptoCascade)
@@ -143,6 +146,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/regime/cowen/manual", s.requireUser(s.handleSetCowenManual))
 	s.mux.HandleFunc("POST /api/regime/cowen/auto", s.requireUser(s.handleSetCowenAuto))
 	s.mux.HandleFunc("GET /api/regime/history", s.requireUser(s.handleListRegimeHistory))
+
+	// Spec 9p — Macro Regime & Sector Rotation.
+	s.mux.HandleFunc("GET /api/macro/regime", s.requireUserOrToken(s.handleMacroRegime))
+	s.mux.HandleFunc("POST /api/macro/refresh", s.requireUser(s.handleMacroRefresh))
+	s.mux.HandleFunc("POST /api/macro/ism", s.requireUser(s.handleMacroSetISM))
+	s.mux.HandleFunc("GET /api/macro/playbook", s.requireUser(s.handleMacroListPlaybook))
+	s.mux.HandleFunc("POST /api/macro/playbook", s.requireUser(s.handleMacroUpsertPlaybook))
+	s.mux.HandleFunc("DELETE /api/macro/playbook/{id}", s.requireUser(s.handleMacroDeletePlaybook))
 
 	// Spec 9b D9: screener — S&P sample with live overlay + filters.
 	s.mux.HandleFunc("GET /api/screener", s.requireUser(s.handleScreener))
