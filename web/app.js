@@ -11444,10 +11444,13 @@ function renderAdapterRepository(adapters, selected) {
     if (a.status === 'needs-review') return '🔄';
     return '⚠';
   };
-  const scorecardChip = (a) =>
-    a.scorecardType === 'monetary_12'
-      ? '<span class="ca-chip ca-chip-btc">/12 monetary</span>'
-      : '<span class="ca-chip ca-chip-alt">/18 alt</span>';
+  const scorecardChip = (a) => {
+    if (a.scorecardType === 'monetary_12')
+      return '<span class="ca-chip ca-chip-btc">/12 monetary</span>';
+    if (a.scorecardType === 'safety_10')
+      return '<span class="ca-chip ca-chip-safety">/10 safety</span>';
+    return '<span class="ca-chip ca-chip-alt">/18 alt</span>';
+  };
   const leftPane = adapters.map(a => {
     const cls = ['sc-row', 'ca-row'];
     if (a.slug === selected) cls.push('active');
@@ -11736,7 +11739,9 @@ async function loadCryptoAdapterRightPane(slug) {
     '<li class="dim">none authored yet (pending adapter MD)</li>';
   const scorecardLabel = a.scorecardType === 'monetary_12'
     ? '6-pillar Monetary-Asset Scorecard (/12)'
-    : '9-Q Crypto Operating Scorecard (/18)';
+    : a.scorecardType === 'safety_10'
+      ? '5-pillar Safety/Utility Screen (/10)'
+      : '9-Q Crypto Operating Scorecard (/18)';
   const lockedAt = a.lockedAt
     ? new Date(a.lockedAt * 1000).toISOString().slice(0, 10)
     : '<span class="dim">not locked</span>';

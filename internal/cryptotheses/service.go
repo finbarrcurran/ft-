@@ -319,8 +319,10 @@ func (s *Service) Create(ctx context.Context, a Adapter) (int64, error) {
 
 // ----- Seed --------------------------------------------------------------
 
-// SeedIfEmpty inserts placeholder draft rows for the 8 adapters defined in
-// Spec 9l §2 #5–#12. Each row gets a minimal stub markdown body — the real
+// SeedIfEmpty inserts placeholder draft rows for the 12 adapters defined in
+// Spec 9l §2 #5–#12 plus the Expansion v1 cover note (adapters 9–12:
+// stablecoin, privacy, cefi-exchange, ai-agent). Each row gets a minimal stub
+// markdown body — the real
 // adapter MDs arrive from Claude.ai authoring and replace these via
 // UpdateBody / SaveAsNewVersion. Idempotent: only inserts missing slugs.
 //
@@ -402,6 +404,41 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 			ScorecardType:    ScorecardAlt18,
 			DataSources:      []string{"coingecko"},
 		},
+		// Expansion v1 (cover note 2026-06-01): adapters 9–12. Uncalibrated
+		// draft templates — no thesis may be locked on these until first-use
+		// calibration. Each carries a category-specific mandatory gate.
+		{
+			Slug:             "stablecoin",
+			DisplayName:      "Stablecoin (Peg-Utility)",
+			ShortDescription: "/10 safety/utility screen (S1–S5), NOT the 9-Q conviction scorecard. PSRQ gate (peg stability + reserve quality). Screens which stablecoin is safe to park trade capital in.",
+			AdapterType:      AdapterStablecoin,
+			ScorecardType:    ScorecardSafety10,
+			DataSources:      []string{"coingecko", "defillama"},
+		},
+		{
+			Slug:             "privacy",
+			DisplayName:      "Privacy (Monetary)",
+			ShortDescription: "9-Q /18, monetary-weighted (BTC-scorecard DNA). RDR gate (regulatory/delisting risk) caps liquidity/accessibility. Privacy moat is upside; delisting is the ceiling.",
+			AdapterType:      AdapterPrivacy,
+			ScorecardType:    ScorecardAlt18,
+			DataSources:      []string{"coingecko"},
+		},
+		{
+			Slug:             "cefi-exchange",
+			DisplayName:      "CeFi / Exchange Token",
+			ShortDescription: "9-Q /18, equity-proxy on a centralized exchange business. CCR gate (counterparty/centralization risk) is the structural ceiling (FTT lesson). BNB → CeFi primary + L1 advisory.",
+			AdapterType:      AdapterCeFiExchange,
+			ScorecardType:    ScorecardAlt18,
+			DataSources:      []string{"coingecko", "defillama"},
+		},
+		{
+			Slug:             "ai-agent",
+			DisplayName:      "AI Agent / Autonomous Compute",
+			ShortDescription: "9-Q /18 (provisional). RAUR gate (real agent utility ratio) — a high bar; most 'AI agent' tokens fail it and stay Speculative ai-narrative. Strongest uncalibrated warning of the four.",
+			AdapterType:      AdapterAIAgent,
+			ScorecardType:    ScorecardAlt18,
+			DataSources:      []string{"coingecko", "defillama"},
+		},
 	}
 
 	for _, sd := range seeds {
@@ -434,8 +471,11 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 
 func placeholderBody(slug, displayName, shortDesc string, sc ScorecardType) string {
 	scorecard := "9-Q Crypto Operating Scorecard (/18)"
-	if sc == ScorecardMonetary12 {
+	switch sc {
+	case ScorecardMonetary12:
 		scorecard = "6-pillar Monetary-Asset Scorecard (/12)"
+	case ScorecardSafety10:
+		scorecard = "5-pillar Safety/Utility Screen (/10)"
 	}
 	return fmt.Sprintf(`# %s — Adapter Placeholder
 

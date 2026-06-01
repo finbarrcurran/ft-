@@ -29,44 +29,58 @@ import (
 
 // ----- Enums ------------------------------------------------------------
 
-// AdapterType is the 8-way functional taxonomy from Spec 9l Decision #2.
+// AdapterType is the 12-way functional taxonomy from Spec 9l Decision #2,
+// extended by the Crypto Adapter Expansion v1 cover note (2026-06-01) which
+// added stablecoin / privacy / cefi-exchange / ai-agent (adapters 9–12).
 type AdapterType string
 
 const (
-	AdapterBTC         AdapterType = "btc"
-	AdapterL1          AdapterType = "l1"
-	AdapterL2          AdapterType = "l2"
-	AdapterDeFi        AdapterType = "defi"
-	AdapterInfra       AdapterType = "infra"
-	AdapterDePIN       AdapterType = "depin"
-	AdapterRWA         AdapterType = "rwa"
-	AdapterSpeculative AdapterType = "speculative"
+	AdapterBTC          AdapterType = "btc"
+	AdapterL1           AdapterType = "l1"
+	AdapterL2           AdapterType = "l2"
+	AdapterDeFi         AdapterType = "defi"
+	AdapterInfra        AdapterType = "infra"
+	AdapterDePIN        AdapterType = "depin"
+	AdapterRWA          AdapterType = "rwa"
+	AdapterSpeculative  AdapterType = "speculative"
+	AdapterStablecoin   AdapterType = "stablecoin"    // /10 safety screen
+	AdapterPrivacy      AdapterType = "privacy"       // alt_18, RDR gate
+	AdapterCeFiExchange AdapterType = "cefi-exchange" // alt_18, CCR gate
+	AdapterAIAgent      AdapterType = "ai-agent"      // alt_18, RAUR gate (provisional)
 )
 
 var validAdapterTypes = map[AdapterType]bool{
 	AdapterBTC: true, AdapterL1: true, AdapterL2: true, AdapterDeFi: true,
 	AdapterInfra: true, AdapterDePIN: true, AdapterRWA: true, AdapterSpeculative: true,
+	AdapterStablecoin: true, AdapterPrivacy: true, AdapterCeFiExchange: true, AdapterAIAgent: true,
 }
 
 func (a AdapterType) Valid() bool { return validAdapterTypes[a] }
 
-// ScorecardType — Spec 9l Decision #1. Two distinct scorecards.
+// ScorecardType — Spec 9l Decision #1, extended by the Expansion v1 cover note
+// with safety_10 for the Stablecoin adapter (a /10 safety/utility screen, not
+// an upside-conviction scorecard).
 type ScorecardType string
 
 const (
-	ScorecardAlt18      ScorecardType = "alt_18"      // 9-Q /18 for non-BTC
+	ScorecardAlt18      ScorecardType = "alt_18"      // 9-Q /18 for non-BTC alts
 	ScorecardMonetary12 ScorecardType = "monetary_12" // 6-pillar /12 for BTC
+	ScorecardSafety10   ScorecardType = "safety_10"   // /10 safety screen for stablecoins
 )
 
 func (s ScorecardType) Valid() bool {
-	return s == ScorecardAlt18 || s == ScorecardMonetary12
+	return s == ScorecardAlt18 || s == ScorecardMonetary12 || s == ScorecardSafety10
 }
 
 func (s ScorecardType) MaxScore() int {
-	if s == ScorecardMonetary12 {
+	switch s {
+	case ScorecardMonetary12:
 		return 12
+	case ScorecardSafety10:
+		return 10
+	default:
+		return 18
 	}
-	return 18
 }
 
 // Band — Spec 9l Decision #7. Same 5-band structure for both scorecards,
@@ -436,12 +450,23 @@ func (a Adapter) Validate() error {
 	if !a.ScorecardType.Valid() {
 		return fmt.Errorf("scorecardType invalid: %q", a.ScorecardType)
 	}
-	// BTC adapter MUST use monetary_12; everything else MUST use alt_18.
-	if a.AdapterType == AdapterBTC && a.ScorecardType != ScorecardMonetary12 {
-		return errors.New("BTC adapter must use monetary_12 scorecard")
-	}
-	if a.AdapterType != AdapterBTC && a.ScorecardType != ScorecardAlt18 {
-		return fmt.Errorf("non-BTC adapter %s must use alt_18 scorecard", a.AdapterType)
+	// Scorecard is bound to adapter type:
+	//   - BTC          → monetary_12
+	//   - stablecoin   → safety_10 (a /10 safety screen, not an upside score)
+	//   - everything else → alt_18
+	switch a.AdapterType {
+	case AdapterBTC:
+		if a.ScorecardType != ScorecardMonetary12 {
+			return errors.New("BTC adapter must use monetary_12 scorecard")
+		}
+	case AdapterStablecoin:
+		if a.ScorecardType != ScorecardSafety10 {
+			return errors.New("stablecoin adapter must use safety_10 scorecard")
+		}
+	default:
+		if a.ScorecardType != ScorecardAlt18 {
+			return fmt.Errorf("adapter %s must use alt_18 scorecard", a.AdapterType)
+		}
 	}
 	if !a.Status.Valid() {
 		return fmt.Errorf("status invalid: %q", a.Status)
