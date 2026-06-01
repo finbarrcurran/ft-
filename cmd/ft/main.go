@@ -421,8 +421,10 @@ func runServe() {
 		mrSvc := macroregime.New(st.DB)
 		mrRefresher := macroregime.NewRefresher(mrSvc, cfg.FREDApiKey)
 
-		time.Sleep(45 * time.Second)
-		warmCtx, warmCancel := context.WithTimeout(bgCtx, 2*time.Minute)
+		// Staggered past the 9e Pal FRED warm-up (45s) so the two FRED
+		// sweeps don't collide and trip the shared rate limit.
+		time.Sleep(75 * time.Second)
+		warmCtx, warmCancel := context.WithTimeout(bgCtx, 3*time.Minute)
 		if err := mrRefresher.RefreshAll(warmCtx); err != nil {
 			slog.Warn("macro regime: initial refresh failed", "err", err)
 		}

@@ -4,8 +4,14 @@ import (
 	"context"
 	"ft/internal/cryptoindicators/providers"
 	"log/slog"
+	"strings"
 	"time"
 )
+
+// fredThrottle is the minimum gap between FRED requests. FRED rate-limits at
+// ~120 req/min; spacing each series (some do 2 historical calls) keeps the full
+// 13-series sweep — which can collide with the 9e Pal warm-up — under the cap.
+const fredThrottle = 600 * time.Millisecond
 
 // Refresher fetches every 9p series from FRED, frames each as a rate-of-change
 // reading, upserts the latest row, then re-classifies and persists the regime.
@@ -30,8 +36,18 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 	fred := providers.NewFREDClient(r.FREDApiKey)
 	today := time.Now().UTC().Format("2006-01-02")
 
-	for _, d := range Series {
+	for i, d := range Series {
+		if i > 0 && !sleepCtx(ctx, fredThrottle) {
+			return ctx.Err()
+		}
 		ind := r.fetchOne(ctx, fred, d, today)
+		// One backoff retry on a transient rate-limit (HTTP 429).
+		if strings.Contains(ind.FetchError, "429") {
+			if !sleepCtx(ctx, 3*time.Second) {
+				return ctx.Err()
+			}
+			ind = r.fetchOne(ctx, fred, d, today)
+		}
 		if err := r.Service.UpsertIndicator(ctx, ind); err != nil {
 			slog.Warn("macroregime: upsert failed", "series", d.ID, "err", err)
 		}
@@ -173,6 +189,18 @@ func valueNDaysBefore(pts []providers.FREDHistoricalPoint, n int) (float64, bool
 		return 0, false
 	}
 	return pts[best].Value, true
+}
+
+// sleepCtx waits d or until ctx is cancelled; returns false if cancelled.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 func dirFrom(roc *float64) string {

@@ -33,7 +33,7 @@ type SeriesDef struct {
 var Series = []SeriesDef{
 	// --- Growth axis ---
 	{ID: "empire", FREDID: "GACDISA066MSFRBNY", Name: "Empire State Mfg (NY Fed)", Axis: AxisGrowth, Group: "regional_fed", AroundZero: true},
-	{ID: "philly", FREDID: "GACDFSA066MSFRBPHIL", Name: "Philadelphia Fed Mfg", Axis: AxisGrowth, Group: "regional_fed", AroundZero: true},
+	{ID: "philly", FREDID: "GACDFSA066MSFRBPHI", Name: "Philadelphia Fed Mfg", Axis: AxisGrowth, Group: "regional_fed", AroundZero: true},
 	{ID: "dallas", FREDID: "BACTSAMFRBDAL", Name: "Dallas Fed Mfg (Gen. Activity)", Axis: AxisGrowth, Group: "regional_fed", AroundZero: true},
 	{ID: "indpro", FREDID: "INDPRO", Name: "Industrial Production", Axis: AxisGrowth, Group: "output"},
 	{ID: "unrate", FREDID: "UNRATE", Name: "Unemployment Rate", Axis: AxisGrowth, Group: "employment", AroundZero: true, Invert: true},
