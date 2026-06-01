@@ -1914,7 +1914,8 @@ async function renderSummary() {
   // retired (Fin doesn't use Add-Note). The panel is hidden; the code path
   // (updateStaleThesisBanner / /api/notes/stale) is intentionally kept.
 
-  content.innerHTML = staleBanner + toggle + kpiRow + donutRow + tagDonuts + footer;
+  const perfPanel = `<div id="etoro-perf-panel" class="etoro-perf"></div>`;
+  content.innerHTML = staleBanner + toggle + kpiRow + donutRow + tagDonuts + perfPanel + footer;
 
   // Wire toggle clicks
   for (const btn of document.querySelectorAll('.ct-btn')) {
@@ -1930,6 +1931,9 @@ async function renderSummary() {
 
   // SC-02 — thesis coverage + freshness nudge (defer to keep render snappy).
   updateStaleScoreBanner();
+
+  // SC-17 — eToro performance history panel (defer; independent fetch).
+  renderEtoroPerformance(currency);
 
   // Spec 12 D2 — cash KPI editable. Click + Enter/Space (a11y) both fire.
   const cashEl = document.querySelector('#kpi-cash');
@@ -2012,6 +2016,323 @@ function openCashBalanceModal(summaryPayload) {
       errEl.textContent = e.message;
     }
   });
+}
+
+// =============================================================================
+// SC-17 — eToro statement performance history (panel under Summary).
+// =============================================================================
+
+// View state for the disc/copy strategy toggle. Persisted to localStorage.
+let etoroStrategyView = (() => {
+  try {
+    const v = localStorage.getItem('ft.etoroStrategyView');
+    return v === 'discretionary' || v === 'copy' ? v : 'all';
+  } catch (_) { return 'all'; }
+})();
+
+const etoroImportState = { step: 'idle', preview: null, error: null };
+
+// money formats a signed amount in the active display currency.
+function etoroMoney(v, ccy) {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  const n = Number(v);
+  const sym = ccy === 'EUR' ? '€' : '$';
+  const sign = n < 0 ? '-' : '';
+  return `${sign}${sym}${Math.abs(n).toFixed(2)}`;
+}
+
+// Pick *_usd / *_eur off an object given the active currency.
+function ccyPick(obj, base, ccy) {
+  return Number(obj[`${base}${ccy === 'EUR' ? 'Eur' : 'Usd'}`] || 0);
+}
+
+async function renderEtoroPerformance(currency) {
+  const el = $('#etoro-perf-panel');
+  if (!el) return;
+  const ccy = currency === 'EUR' ? 'EUR' : 'USD';
+
+  let data;
+  try {
+    data = await api('/api/etoro/performance');
+  } catch (err) {
+    el.innerHTML = `<div class="etoro-perf-head"><h3>Performance history</h3></div>
+      <div class="dim" style="font-size:0.82rem">could not load: ${escapeHTML(err.message)}</div>`;
+    return;
+  }
+
+  const years = (data && data.years) || [];
+  const uploadBtn = `<button class="btn-secondary etoro-upload-btn" id="etoro-upload-btn">Upload statement</button>`;
+
+  if (years.length === 0) {
+    el.innerHTML = `
+      <div class="etoro-perf-head">
+        <h3>Performance history</h3>
+        ${uploadBtn}
+      </div>
+      <div class="etoro-perf-empty dim">
+        No eToro statements imported yet. Upload an account statement (.xlsx) to
+        track realised P&amp;L, dividends and fees by year — split discretionary vs copy.
+      </div>`;
+    wireEtoroUpload();
+    return;
+  }
+
+  // Strategy toggle (All / Discretionary / Copy).
+  const stratBtn = (key, label) =>
+    `<button class="etoro-strat-btn ${etoroStrategyView === key ? 'active' : ''}" data-strat="${key}">${label}</button>`;
+  const stratToggle = `
+    <div class="etoro-strat-toggle" role="tablist" aria-label="Strategy">
+      ${stratBtn('all', 'All')}
+      ${stratBtn('discretionary', 'Discretionary')}
+      ${stratBtn('copy', 'Copy')}
+    </div>`;
+
+  // realisedFor returns the asset realised P&L for the active strategy view.
+  const realisedFor = (a) => {
+    if (etoroStrategyView === 'discretionary') return ccyPick(a, 'realisedDisc', ccy);
+    if (etoroStrategyView === 'copy') return ccyPick(a, 'realisedCopy', ccy);
+    return ccyPick(a, 'realisedPnl', ccy);
+  };
+
+  // YTD card = the latest is_ytd year (if any).
+  const ytd = years.find((y) => y.isYtd);
+  let ytdCard = '';
+  if (ytd) {
+    const net = ccyPick(ytd, 'net', ccy);
+    const realised = ccyPick(ytd, 'realisedPnl', ccy);
+    ytdCard = `
+      <div class="etoro-ytd-card">
+        <div class="etoro-ytd-label">YTD ${ytd.year} <span class="dim">(${escapeHTML(ytd.rangeStart)} → ${escapeHTML(ytd.rangeEnd)})</span></div>
+        <div class="etoro-ytd-net num ${net > 0 ? 'gain' : net < 0 ? 'loss' : ''}">${etoroMoney(net, ccy)}</div>
+        <div class="etoro-ytd-sub num dim">
+          realised ${etoroMoney(realised, ccy)} ·
+          dividends ${etoroMoney(ccyPick(ytd, 'dividends', ccy), ccy)} ·
+          fees ${etoroMoney(ccyPick(ytd, 'fees', ccy), ccy)} ·
+          interest ${etoroMoney(ccyPick(ytd, 'interest', ccy), ccy)}
+        </div>
+      </div>`;
+  }
+
+  // Annual tables — one per year, asset rows + a year total.
+  const yearBlocks = years.map((y) => {
+    const rows = (y.assets || []).map((a) => {
+      const realised = realisedFor(a);
+      const div = ccyPick(a, 'dividends', ccy);
+      const fees = ccyPick(a, 'fees', ccy);
+      const net = realised + div + fees;
+      return `
+        <tr>
+          <td>${escapeHTML(a.assetType)}</td>
+          <td class="num ${realised > 0 ? 'gain' : realised < 0 ? 'loss' : ''}">${etoroMoney(realised, ccy)}</td>
+          <td class="num">${etoroMoney(div, ccy)}</td>
+          <td class="num">${etoroMoney(fees, ccy)}</td>
+          <td class="num ${net > 0 ? 'gain' : net < 0 ? 'loss' : ''}">${etoroMoney(net, ccy)}</td>
+          <td class="num dim">${a.tradeCount || 0}</td>
+        </tr>`;
+    }).join('');
+
+    // Year totals (across assets) for the active strategy view.
+    const tRealised = (y.assets || []).reduce((s, a) => s + realisedFor(a), 0);
+    const tDiv = ccyPick(y, 'dividends', ccy);
+    const tFees = ccyPick(y, 'fees', ccy);
+    const tInterest = ccyPick(y, 'interest', ccy);
+    // When the strategy view is "all", the year net mirrors the authoritative
+    // Financial Summary net; for disc/copy we sum the visible realised lines.
+    const tNet = etoroStrategyView === 'all'
+      ? ccyPick(y, 'net', ccy)
+      : tRealised + tDiv + tFees + tInterest;
+
+    const recon = ccyPick(y, 'reconDelta', ccy);
+    const reconNote = Math.abs(recon) > 1
+      ? `<span class="etoro-recon-flag" title="Financial Summary vs closed-positions delta">recon Δ ${etoroMoney(recon, ccy)}</span>`
+      : '';
+
+    return `
+      <div class="etoro-year-block">
+        <div class="etoro-year-title">
+          ${y.year}${y.isYtd ? ' <span class="etoro-ytd-pill">YTD</span>' : ''}
+          <span class="dim" style="font-weight:400">${escapeHTML(y.sourceFile || '')}</span>
+          ${reconNote}
+        </div>
+        <table class="etoro-table">
+          <thead>
+            <tr>
+              <th>Asset</th><th class="num">Realised</th><th class="num">Dividends</th>
+              <th class="num">Fees</th><th class="num">Net</th><th class="num">Trades</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="6" class="dim">no closed positions</td></tr>'}
+            <tr class="etoro-total-row">
+              <td>Total</td>
+              <td class="num ${tRealised > 0 ? 'gain' : tRealised < 0 ? 'loss' : ''}">${etoroMoney(tRealised, ccy)}</td>
+              <td class="num">${etoroMoney(tDiv, ccy)}</td>
+              <td class="num">${etoroMoney(tFees, ccy)}</td>
+              <td class="num ${tNet > 0 ? 'gain' : tNet < 0 ? 'loss' : ''}">${etoroMoney(tNet, ccy)}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="etoro-perf-head">
+      <h3>Performance history <span class="dim" style="font-size:0.8rem; font-weight:400">eToro · ${ccy}</span></h3>
+      <div class="etoro-perf-controls">${stratToggle}${uploadBtn}</div>
+    </div>
+    ${ytdCard}
+    ${yearBlocks}`;
+
+  // Wire strategy toggle.
+  for (const btn of el.querySelectorAll('.etoro-strat-btn')) {
+    btn.addEventListener('click', () => {
+      etoroStrategyView = btn.dataset.strat;
+      try { localStorage.setItem('ft.etoroStrategyView', etoroStrategyView); } catch (_) {}
+      renderEtoroPerformance(currency);
+    });
+  }
+  wireEtoroUpload();
+}
+
+function wireEtoroUpload() {
+  const btn = $('#etoro-upload-btn');
+  if (btn) btn.addEventListener('click', openEtoroImportModal);
+}
+
+// Lightweight import modal: pick file → preview → apply.
+function openEtoroImportModal() {
+  closeImportModal();
+  etoroImportState.step = 'idle';
+  etoroImportState.preview = null;
+  etoroImportState.error = null;
+
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Import eToro statement</div>
+            <div class="desc">Upload an account statement (.xlsx). Computes annual + YTD performance; never touches your holdings.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body" id="etoro-modal-body"></div>
+        <div class="modal-foot" id="etoro-modal-foot"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  renderEtoroModalBody();
+}
+
+function renderEtoroModalBody() {
+  const body = $('#etoro-modal-body');
+  const foot = $('#etoro-modal-foot');
+  if (!body || !foot) return;
+  const st = etoroImportState;
+
+  if (st.step === 'idle' || st.step === 'error') {
+    body.innerHTML = `
+      <div class="etoro-dropzone" id="etoro-dropzone">
+        <input type="file" id="etoro-file" accept=".xlsx" hidden />
+        <p>Drop an eToro <strong>.xlsx</strong> statement here, or <button class="link-btn" id="etoro-pick">choose a file</button>.</p>
+      </div>
+      ${st.error ? `<div class="error">${escapeHTML(st.error)}</div>` : ''}`;
+    foot.innerHTML = `<button class="btn-secondary" id="etoro-cancel">Cancel</button>`;
+    const input = $('#etoro-file');
+    $('#etoro-pick').addEventListener('click', () => input.click());
+    input.addEventListener('change', () => { if (input.files[0]) handleEtoroFile(input.files[0]); });
+    const dz = $('#etoro-dropzone');
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault(); dz.classList.remove('drag');
+      if (e.dataTransfer.files[0]) handleEtoroFile(e.dataTransfer.files[0]);
+    });
+    $('#etoro-cancel').addEventListener('click', closeImportModal);
+    return;
+  }
+
+  if (st.step === 'loading' || st.step === 'applying') {
+    body.innerHTML = `<div class="dim">${st.step === 'loading' ? 'Parsing statement…' : 'Applying…'}</div>`;
+    foot.innerHTML = '';
+    return;
+  }
+
+  if (st.step === 'applied') {
+    body.innerHTML = `<div class="gain">Imported ${st.applyResult.yearsApplied} year${st.applyResult.yearsApplied === 1 ? '' : 's'} from ${escapeHTML(st.applyResult.fileName)}.</div>`;
+    foot.innerHTML = `<button class="btn-primary" id="etoro-done">Done</button>`;
+    $('#etoro-done').addEventListener('click', () => {
+      closeImportModal();
+      state.summary = null;
+      renderSummary();
+    });
+    return;
+  }
+
+  // step === 'preview'
+  const ccy = (state.summary && state.summary.currency) === 'EUR' ? 'EUR' : 'USD';
+  const p = st.preview;
+  const warns = (p.warnings || []).map((w) => `<li>${escapeHTML(w)}</li>`).join('');
+  const yearSummaries = (p.years || []).map((y) => {
+    const net = ccyPick(y, 'net', ccy);
+    return `
+      <div class="etoro-preview-year">
+        <strong>${y.year}${y.isYtd ? ' (YTD)' : ''}</strong>
+        — net <span class="num ${net > 0 ? 'gain' : net < 0 ? 'loss' : ''}">${etoroMoney(net, ccy)}</span>,
+        realised ${etoroMoney(ccyPick(y, 'realisedPnl', ccy), ccy)},
+        dividends ${etoroMoney(ccyPick(y, 'dividends', ccy), ccy)},
+        fees ${etoroMoney(ccyPick(y, 'fees', ccy), ccy)}
+        <span class="dim">· ${(y.assets || []).length} asset types</span>
+      </div>`;
+  }).join('');
+  body.innerHTML = `
+    <p class="dim" style="font-size:0.82rem">${escapeHTML(p.fileName)} — applying supersedes any prior import for these years.</p>
+    ${yearSummaries}
+    ${warns ? `<ul class="etoro-warns">${warns}</ul>` : ''}`;
+  foot.innerHTML = `
+    <button class="btn-secondary" id="etoro-back">Back</button>
+    <button class="btn-primary" id="etoro-apply">Apply</button>`;
+  $('#etoro-back').addEventListener('click', () => { etoroImportState.step = 'idle'; renderEtoroModalBody(); });
+  $('#etoro-apply').addEventListener('click', applyEtoroImport);
+}
+
+async function handleEtoroFile(file) {
+  etoroImportState.step = 'loading';
+  etoroImportState.error = null;
+  renderEtoroModalBody();
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/etoro/import/preview', {
+      method: 'POST', credentials: 'same-origin', body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `status ${res.status}`);
+    etoroImportState.preview = data;
+    etoroImportState.step = 'preview';
+  } catch (err) {
+    etoroImportState.error = err.message;
+    etoroImportState.step = 'error';
+  }
+  renderEtoroModalBody();
+}
+
+async function applyEtoroImport() {
+  etoroImportState.step = 'applying';
+  renderEtoroModalBody();
+  try {
+    etoroImportState.applyResult = await api('/api/etoro/import/apply', { method: 'POST' });
+    etoroImportState.step = 'applied';
+  } catch (err) {
+    etoroImportState.error = err.message;
+    etoroImportState.step = 'error';
+  }
+  renderEtoroModalBody();
 }
 
 // Spec 11 D6 — surface holdings with no thesis notes in 90+ days.

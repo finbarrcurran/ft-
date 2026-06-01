@@ -184,6 +184,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/performance/cohort/{key}", s.requireUserOrToken(s.handlePerformanceCohortDrill))
 	s.mux.HandleFunc("GET /api/performance/export.csv", s.requireUserOrToken(s.handlePerformanceExport))
 
+	// SC-17 Phase 1: eToro statement importer → annual + YTD performance.
+	s.mux.HandleFunc("POST /api/etoro/import/preview", s.requireUser(s.handleEtoroImportPreview))
+	s.mux.HandleFunc("POST /api/etoro/import/apply", s.requireUser(s.handleEtoroImportApply))
+	s.mux.HandleFunc("GET /api/etoro/performance", s.requireUser(s.handleEtoroPerformance))
+
 	// Spec 10: Transactions + dividends + tax lots.
 	s.mux.HandleFunc("GET /api/transactions", s.requireUser(s.handleListTransactions))
 	s.mux.HandleFunc("POST /api/transactions", s.requireUser(s.handleCreateTransaction))
