@@ -170,6 +170,12 @@ type StockHolding struct {
 	SLMethod    *string  `json:"slMethod,omitempty"`
 	SLSafetyPct *float64 `json:"slSafetyPct,omitempty"`
 
+	// SC-17 P2 / migration 0039 — durable external identity for eToro
+	// reconciliation. Nullable; seeded from an eToro statement's ISIN when an
+	// approved match has one (so future uploads can match high-confidence on
+	// ISIN rather than ticker). Pure match metadata; no P&L math reads it.
+	ISIN *string `json:"isin,omitempty"`
+
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 

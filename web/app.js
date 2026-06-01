@@ -2062,6 +2062,7 @@ async function renderEtoroPerformance(currency) {
 
   const years = (data && data.years) || [];
   const uploadBtn = `<button class="btn-secondary etoro-upload-btn" id="etoro-upload-btn">Upload statement</button>`;
+  const reconcileBtn = `<button class="btn-secondary etoro-recon-btn" id="etoro-reconcile-btn" title="Reconstruct current open positions from a statement and reconcile against your live holdings">Reconcile holdings</button>`;
 
   if (years.length === 0) {
     el.innerHTML = `
@@ -2179,7 +2180,7 @@ async function renderEtoroPerformance(currency) {
   el.innerHTML = `
     <div class="etoro-perf-head">
       <h3>Performance history <span class="dim" style="font-size:0.8rem; font-weight:400">eToro · ${ccy}</span></h3>
-      <div class="etoro-perf-controls">${stratToggle}${uploadBtn}</div>
+      <div class="etoro-perf-controls">${stratToggle}${reconcileBtn}${uploadBtn}</div>
     </div>
     ${ytdCard}
     ${yearBlocks}`;
@@ -2198,6 +2199,8 @@ async function renderEtoroPerformance(currency) {
 function wireEtoroUpload() {
   const btn = $('#etoro-upload-btn');
   if (btn) btn.addEventListener('click', openEtoroImportModal);
+  const rbtn = $('#etoro-reconcile-btn');
+  if (rbtn) rbtn.addEventListener('click', openEtoroReconcileModal);
 }
 
 // Lightweight import modal: pick file → preview → apply.
@@ -2333,6 +2336,211 @@ async function applyEtoroImport() {
     etoroImportState.step = 'error';
   }
   renderEtoroModalBody();
+}
+
+// SC-17 Phase 2 — holdings reconciliation modal (propose-and-approve, D17.3).
+// Reconstructs current open positions from a statement, diffs them against live
+// FT holdings, and writes ONLY the rows Fin explicitly approves. High-confidence
+// (ISIN) rows are pre-checked; ticker-only and closures default unchecked (R3).
+const etoroReconState = { step: 'idle', preview: null, error: null, applyResult: null };
+
+function openEtoroReconcileModal() {
+  closeImportModal();
+  etoroReconState.step = 'idle';
+  etoroReconState.preview = null;
+  etoroReconState.error = null;
+  etoroReconState.applyResult = null;
+
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal modal-wide" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <div class="title">Reconcile holdings</div>
+            <div class="desc">Reconstruct current open positions from a statement and reconcile against your live holdings. Nothing is written until you approve each row.</div>
+          </div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body" id="recon-modal-body"></div>
+        <div class="modal-foot" id="recon-modal-foot"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  renderEtoroReconBody();
+}
+
+function reconUnits(n) {
+  if (n === undefined || n === null) return '0';
+  return (+n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+}
+
+function reconRowHTML(rw, ccy) {
+  const checkable = rw.action !== 'insync';
+  const checked = rw.confidence === 'high';
+  const badge = checkable
+    ? (rw.confidence === 'high'
+        ? '<span class="recon-badge high" title="Matched on ISIN — durable key">ISIN</span>'
+        : '<span class="recon-badge confirm" title="Ticker-only match — confirm before applying">confirm</span>')
+    : '';
+  const cfd = rw.wrapper === 'cfd' ? '<span class="recon-cfd" title="CFD wrapper — routed by underlying">CFD</span>' : '';
+  let detail = '';
+  if (rw.action === 'add') {
+    detail = `${reconUnits(rw.etoroUnits)} units · ${etoroMoney(rw.etoroInvestedUsd, ccy)} invested${rw.etoroLots > 1 ? ` · ${rw.etoroLots} lots` : ''}`;
+  } else if (rw.action === 'drift') {
+    detail = `eToro ${reconUnits(rw.etoroUnits)} vs FT ${reconUnits(rw.ftUnits)} units${rw.driftPct ? ` · Δ ${(+rw.driftPct).toFixed(1)}%` : ''}`;
+  } else if (rw.action === 'close') {
+    detail = `FT ${reconUnits(rw.ftUnits)} units · ${etoroMoney(rw.ftInvestedUsd, ccy)} invested`;
+  } else {
+    detail = `in sync · ${reconUnits(rw.etoroUnits)} units`;
+  }
+  const cb = checkable
+    ? `<input type="checkbox" class="recon-cb" data-ref="${escapeHTML(rw.ref)}" ${checked ? 'checked' : ''} />`
+    : '<span class="recon-cb-spacer"></span>';
+  return `<label class="recon-row ${checkable ? '' : 'insync'}">
+    ${cb}
+    <span class="recon-tk">${escapeHTML(rw.ticker || '')}</span>
+    <span class="recon-nm">${escapeHTML(rw.name || '')} ${cfd}</span>
+    <span class="recon-dt dim">${detail}</span>
+    ${badge}
+  </label>`;
+}
+
+function reconSectionHTML(title, hint, rows, ccy) {
+  if (!rows.length) return '';
+  return `
+    <div class="recon-section">
+      <div class="recon-section-head">${title} <span class="dim">${rows.length}</span>
+        <span class="recon-section-hint dim">${hint}</span></div>
+      ${rows.map((rw) => reconRowHTML(rw, ccy)).join('')}
+    </div>`;
+}
+
+function renderEtoroReconBody() {
+  const body = $('#recon-modal-body');
+  const foot = $('#recon-modal-foot');
+  if (!body || !foot) return;
+  const st = etoroReconState;
+
+  if (st.step === 'idle' || st.step === 'error') {
+    body.innerHTML = `
+      <div class="etoro-dropzone" id="recon-dropzone">
+        <input type="file" id="recon-file" accept=".xlsx" hidden />
+        <p>Drop an eToro <strong>.xlsx</strong> statement here, or <button class="link-btn" id="recon-pick">choose a file</button>.</p>
+      </div>
+      ${st.error ? `<div class="error">${escapeHTML(st.error)}</div>` : ''}`;
+    foot.innerHTML = `<button class="btn-secondary" id="recon-cancel">Cancel</button>`;
+    const input = $('#recon-file');
+    $('#recon-pick').addEventListener('click', () => input.click());
+    input.addEventListener('change', () => { if (input.files[0]) handleEtoroReconFile(input.files[0]); });
+    const dz = $('#recon-dropzone');
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault(); dz.classList.remove('drag');
+      if (e.dataTransfer.files[0]) handleEtoroReconFile(e.dataTransfer.files[0]);
+    });
+    $('#recon-cancel').addEventListener('click', closeImportModal);
+    return;
+  }
+
+  if (st.step === 'loading' || st.step === 'applying') {
+    body.innerHTML = `<div class="dim">${st.step === 'loading' ? 'Reconstructing open positions…' : 'Applying approved rows…'}</div>`;
+    foot.innerHTML = '';
+    return;
+  }
+
+  if (st.step === 'applied') {
+    const r = st.applyResult || {};
+    const prot = (r.protected || []).length
+      ? `<div class="recon-protected">Skipped ${r.protected.length} thesis-linked holding${r.protected.length === 1 ? '' : 's'} (${(r.protected).map(escapeHTML).join(', ')}) — close these manually.</div>`
+      : '';
+    const errs = (r.errors || []).length
+      ? `<ul class="etoro-warns">${r.errors.map((e) => `<li>${escapeHTML(e)}</li>`).join('')}</ul>`
+      : '';
+    body.innerHTML = `
+      <div class="gain">Applied — added ${r.added || 0}, updated ${r.updated || 0}, closed ${r.closed || 0}.</div>
+      ${prot}${errs}`;
+    foot.innerHTML = `<button class="btn-primary" id="recon-done">Done</button>`;
+    $('#recon-done').addEventListener('click', () => {
+      closeImportModal();
+      state.summary = null;
+      renderSummary();
+    });
+    return;
+  }
+
+  // step === 'preview'
+  const ccy = (state.summary && state.summary.currency) === 'EUR' ? 'EUR' : 'USD';
+  const p = st.preview;
+  const rows = p.rows || [];
+  const adds = rows.filter((r) => r.action === 'add');
+  const drifts = rows.filter((r) => r.action === 'drift');
+  const closes = rows.filter((r) => r.action === 'close');
+  const insyncs = rows.filter((r) => r.action === 'insync');
+  const warns = (p.warnings || []).map((w) => `<li>${escapeHTML(w)}</li>`).join('');
+
+  body.innerHTML = `
+    <p class="dim" style="font-size:0.82rem">${escapeHTML(p.fileName)} — ${rows.length} instruments reconstructed. ISIN-matched rows are pre-checked; confirm the rest. Closures are never auto-checked.</p>
+    ${reconSectionHTML('Add to FT', 'new open positions not in FT', adds, ccy)}
+    ${reconSectionHTML('Update (drift)', 'quantity/cost basis differs from eToro', drifts, ccy)}
+    ${reconSectionHTML('Possible closures', 'in FT but not open in eToro — tick to soft-delete', closes, ccy)}
+    ${reconSectionHTML('In sync', 'already matches — no action', insyncs, ccy)}
+    ${warns ? `<ul class="etoro-warns">${warns}</ul>` : ''}`;
+  foot.innerHTML = `
+    <button class="btn-secondary" id="recon-back">Back</button>
+    <button class="btn-primary" id="recon-apply">Apply approved</button>`;
+  $('#recon-back').addEventListener('click', () => { etoroReconState.step = 'idle'; renderEtoroReconBody(); });
+  $('#recon-apply').addEventListener('click', applyEtoroReconcile);
+}
+
+async function handleEtoroReconFile(file) {
+  etoroReconState.step = 'loading';
+  etoroReconState.error = null;
+  renderEtoroReconBody();
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/etoro/reconcile/preview', {
+      method: 'POST', credentials: 'same-origin', body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `status ${res.status}`);
+    etoroReconState.preview = data;
+    etoroReconState.step = 'preview';
+  } catch (err) {
+    etoroReconState.error = err.message;
+    etoroReconState.step = 'error';
+  }
+  renderEtoroReconBody();
+}
+
+async function applyEtoroReconcile() {
+  const decisions = [];
+  document.querySelectorAll('.recon-cb').forEach((cb) => {
+    decisions.push({ ref: cb.dataset.ref, approved: cb.checked });
+  });
+  if (!decisions.some((d) => d.approved)) {
+    etoroReconState.error = 'Nothing approved — tick at least one row, or Cancel.';
+    etoroReconState.step = 'error';
+    renderEtoroReconBody();
+    return;
+  }
+  etoroReconState.step = 'applying';
+  renderEtoroReconBody();
+  try {
+    etoroReconState.applyResult = await api('/api/etoro/reconcile/apply', {
+      method: 'POST', body: JSON.stringify({ decisions }),
+    });
+    etoroReconState.step = 'applied';
+  } catch (err) {
+    etoroReconState.error = err.message;
+    etoroReconState.step = 'error';
+  }
+  renderEtoroReconBody();
 }
 
 // Spec 11 D6 — surface holdings with no thesis notes in 90+ days.

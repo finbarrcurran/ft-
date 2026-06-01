@@ -188,6 +188,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/etoro/import/preview", s.requireUser(s.handleEtoroImportPreview))
 	s.mux.HandleFunc("POST /api/etoro/import/apply", s.requireUser(s.handleEtoroImportApply))
 	s.mux.HandleFunc("GET /api/etoro/performance", s.requireUser(s.handleEtoroPerformance))
+	s.mux.HandleFunc("POST /api/etoro/reconcile/preview", s.requireUser(s.handleEtoroReconcilePreview))
+	s.mux.HandleFunc("POST /api/etoro/reconcile/apply", s.requireUser(s.handleEtoroReconcileApply))
 
 	// Spec 10: Transactions + dividends + tax lots.
 	s.mux.HandleFunc("GET /api/transactions", s.requireUser(s.handleListTransactions))

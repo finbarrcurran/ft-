@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"ft/internal/domain"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         sector_universe_id,
         sector_adapter_subtype,
         sl_method, sl_safety_pct,
+        isin,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -205,6 +207,21 @@ func (s *Store) RestoreStockHolding(ctx context.Context, userID, id int64) error
 
 func (s *Store) DeleteAllStockHoldings(ctx context.Context, userID int64) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM stock_holdings WHERE user_id = ?`, userID)
+	return err
+}
+
+// SeedStockHoldingISIN sets the durable ISIN match key on a holding (SC-17 P2).
+// Used by the eToro reconciliation apply step when an approved match carries an
+// ISIN, so future statement uploads can match high-confidence. Idempotent;
+// empty isin is a no-op. Does not bump updated_at (pure match metadata).
+func (s *Store) SeedStockHoldingISIN(ctx context.Context, userID, id int64, isin string) error {
+	isin = strings.TrimSpace(isin)
+	if isin == "" {
+		return nil
+	}
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings SET isin = ? WHERE user_id = ? AND id = ?`,
+		isin, userID, id)
 	return err
 }
 
@@ -428,6 +445,8 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	var sectorAdapterSubtype sql.NullString
 	var slMethod sql.NullString
 	var slSafetyPct sql.NullFloat64
+	// SC-17 P2 — durable ISIN match key:
+	var isin sql.NullString
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -447,12 +466,14 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&sectorUniverseID,
 		&sectorAdapterSubtype,
 		&slMethod, &slSafetyPct,
+		&isin,
 		&updatedAt,
 	); err != nil {
 		return nil, err
 	}
 	h.SLMethod = nsToPtrNonEmpty(slMethod)
 	h.SLSafetyPct = nfToPtr(slSafetyPct)
+	h.ISIN = nsToPtrNonEmpty(isin)
 	h.Currency = nsToPtrNonEmpty(currency)
 	if sectorUniverseID.Valid {
 		v := sectorUniverseID.Int64

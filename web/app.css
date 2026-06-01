@@ -4945,3 +4945,54 @@ a.score-badge { display: inline-block; }
   font-size: 0.78rem;
   color: rgb(var(--color-loss));
 }
+
+/* SC-17 Phase 2 — holdings reconciliation modal. */
+.etoro-recon-btn { white-space: nowrap; }
+.recon-section { margin: 0.6rem 0 0.9rem; }
+.recon-section-head {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.2rem 0 0.35rem;
+  border-bottom: 1px solid rgb(var(--color-border));
+}
+.recon-section-hint { font-weight: 400; font-size: 0.74rem; margin-left: 0.4rem; }
+.recon-row {
+  display: grid;
+  grid-template-columns: 1.4rem 5.5rem 1fr auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.32rem 0;
+  font-size: 0.82rem;
+  border-bottom: 1px solid rgb(var(--color-border) / 0.4);
+  cursor: pointer;
+}
+.recon-row.insync { cursor: default; opacity: 0.65; }
+.recon-cb { width: 1rem; height: 1rem; }
+.recon-cb-spacer { display: inline-block; width: 1rem; }
+.recon-tk { font-weight: 600; font-variant-numeric: tabular-nums; }
+.recon-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recon-dt { font-size: 0.76rem; text-align: right; white-space: nowrap; }
+.recon-badge {
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.08rem 0.34rem;
+  border-radius: var(--radius1);
+  text-transform: uppercase;
+}
+.recon-badge.high { background: rgb(var(--color-gain) / 0.16); color: rgb(var(--color-gain)); }
+.recon-badge.confirm { background: rgb(var(--color-accent) / 0.14); color: rgb(var(--color-accent)); }
+.recon-cfd {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 0.04rem 0.28rem;
+  border-radius: var(--radius1);
+  background: rgb(var(--color-text-muted) / 0.16);
+  color: rgb(var(--color-text-muted));
+  margin-left: 0.3rem;
+}
+.recon-protected {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+  color: rgb(var(--color-accent));
+}
