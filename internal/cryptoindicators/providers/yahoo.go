@@ -52,7 +52,7 @@ func (c *YahooClient) FetchBTCDailyHistory(ctx context.Context) ([]BTCMarketChar
 		period1,
 		period2,
 	)
-	body, status, err := doWithRetry(ctx, c.HTTP, u)
+	body, status, err := doWithRetry(ctx, c.HTTP, u, "")
 	if err != nil {
 		return nil, fmt.Errorf("yahoo BTC history fetch (HTTP %d): %w", status, err)
 	}

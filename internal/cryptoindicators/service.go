@@ -420,6 +420,22 @@ func (s *Service) loadWeights(ctx context.Context) (Weights, error) {
 // providers are wired. Phase 1 callers: tests only.
 func (s *Service) UpsertIndicatorReading(ctx context.Context, id string, value, score, trend *float64, fetchErr string) error {
 	now := time.Now().UTC().Unix()
+	// SC-18 serve-stale: when a fetch fails (value nil + fetch_error set),
+	// keep the last-good value/score/trend rather than blanking the card.
+	// COALESCE(?, current_value) preserves the prior reading on a nil
+	// incoming value, so a transient 429 never wipes the headline — the
+	// card still shows the number, now flagged stale by the non-empty
+	// fetch_error. A successful fetch (non-nil value) overwrites cleanly
+	// and clears the error.
+	if value == nil && fetchErr != "" {
+		_, err := s.DB.ExecContext(ctx, `
+			UPDATE crypto_indicators
+			   SET trend_4w = COALESCE(?, trend_4w),
+			       updated_at = ?, fetch_error = ?
+			 WHERE id = ?`,
+			nullFloat(trend), now, nullStr(fetchErr), id)
+		return err
+	}
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE crypto_indicators
 		   SET current_value = ?, current_score = ?, trend_4w = ?,

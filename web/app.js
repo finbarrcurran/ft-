@@ -196,6 +196,124 @@ const FT_GLOSSARY = {
     term: 'Defensive',
     definition: 'Risk-off. New-entry (watchlist) alerts are silenced — the dashboard won’t nudge you into new positions. Proximity alerts tighten to 85%. Effective regime = the more defensive of Jordi and Cowen.',
   },
+
+  // SC-20 — Crypto Indicators explainer layer. Each entry = what · how · signal,
+  // verbatim from FT_SC20_Indicator_Explainers_2026-06-01.md. Keyed by indicator
+  // id (so explainerMark(i.id) Just Works) plus composite/bucket/chart keys.
+  'ci-composite': {
+    term: 'Composite Score',
+    definition: `A single −100 to +100 readout blending all 12 indicators into one "lean in / stand back" number for BTC.`,
+    calculation: `Each indicator scores −1 to +1; grouped into four buckets; buckets blended by fixed weight — Universal 35% · Cowen 25% · Pal 20% · Sentiment 20% — then scaled to −100…+100. If a bucket has no live data, its weight is shared out across the others.`,
+    signal: `≥ +60 Strong Accumulate · ≥ +20 Accumulate · −20 to +20 Neutral · ≤ −60 Caution → Distribute/Wait. Positive = conditions favour accumulating; negative = patience/trimming. A weather report, not a trade order.`,
+  },
+  'ci-trend': {
+    term: '90-day composite trend',
+    definition: `The composite plotted over the last 90 days — direction matters more than any single day's value.`,
+    calculation: `Daily snapshots of the composite stitched into a line.`,
+    signal: `Rising = conditions improving (tailwind building); falling = deteriorating. A composite crossing up through +20 or down through −20 is the moment to pay attention — the crossing, not the level.`,
+  },
+  'ci-bucket-cowen': {
+    term: 'Cowen bucket (25%)',
+    definition: `BTC's own cycle position (long-term MAs, log regression, risk indicator, dominance, ETH/BTC). Answers: where are we in the BTC cycle?`,
+    calculation: `Weighted 25% of the composite.`,
+    signal: `A bucket far from the others is the story — hover each indicator to see which way it's pulling.`,
+  },
+  'ci-bucket-pal': {
+    term: 'Pal bucket (20%)',
+    definition: `Macro liquidity (DXY, US 2Y yield, ISM). Answers: is the macro tide coming in or going out?`,
+    calculation: `Weighted 20% of the composite.`,
+    signal: `A bucket far from the others is the story — hover each indicator to see which way it's pulling.`,
+  },
+  'ci-bucket-universal': {
+    term: 'Universal bucket (35%)',
+    definition: `Hard demand/liquidity flows (ETF flows, stablecoin supply). Answers: is real money actually moving in? Weighted highest because post-2024 ETF flows are the single biggest driver.`,
+    calculation: `Weighted 35% — the heaviest bucket.`,
+    signal: `e.g. Universal strongly positive while Sentiment is fearful = real money buying while the crowd is scared (classically constructive).`,
+  },
+  'ci-bucket-sentiment': {
+    term: 'Sentiment bucket (20%)',
+    definition: `Crowd emotion (Fear & Greed), used contrarian.`,
+    calculation: `Weighted 20% of the composite.`,
+    signal: `A bucket far from the others is the story — hover each indicator to see which way it's pulling.`,
+  },
+  'ci-btc-chart': {
+    term: 'Cowen cycle-position chart',
+    definition: `BTC price on a log scale with Cowen's valuation bands shaded behind it — a "how stretched is BTC right now" picture.`,
+    calculation: `Log-scaled price + a 50-bar moving average; band shading marks historically cheap (lower) vs expensive (upper) zones across the cycle.`,
+    signal: `Price riding the lower band = historically a generational-discount/accumulation zone. Price pressing the upper band = late-cycle, time to think about scaling out. The dashed MA is the cycle's centre of gravity; watch for price leaving the mid-band toward an edge — that's the actionable transition.`,
+  },
+  'cowen_price_vs_200wma': {
+    term: 'Price vs 200-week MA',
+    definition: `BTC's price relative to its 200-week moving average — its long-term centre of gravity.`,
+    calculation: `Current price ÷ the 200-week MA. A ratio of 1.0 = sitting exactly on the long-term average.`,
+    signal: `< 1.0 = below the long-term average = generational discount / accumulation zone (bullish). > 2.0 = late-cycle caution. Between = uptrend intact. The 200WMA has historically marked cycle bottoms.`,
+  },
+  'cowen_log_band': {
+    term: 'Log regression band position',
+    definition: `Where BTC sits inside its ~12-year growth curve (cheap vs expensive historically).`,
+    calculation: `BTC's price located within a log-regression channel fit to its full history, expressed as a position in the band (lower third / middle / upper third).`,
+    signal: `Lower third = historically cheap = bullish. Upper third = historically expensive = bearish. This is about historical valuation, not next week's move.`,
+  },
+  'cowen_risk_indicator': {
+    term: 'Cowen Risk Indicator',
+    definition: `Cowen's composite 0–1 risk score — a single "how much risk is in the market" dial.`,
+    calculation: `Computed locally as a proxy from the other Cowen inputs; a manual entry (e.g. from Cowen's Sunday video) overrides the proxy when fresh, falling back to the proxy when the manual reading goes stale.`,
+    signal: `< 0.25 = low risk = lean in. > 0.75 = high risk = scale out. Middle = neutral. Think of it as a throttle, not a switch.`,
+  },
+  'cowen_btc_dominance': {
+    term: 'BTC Dominance',
+    definition: `BTC's share of total crypto market cap — risk appetite within crypto.`,
+    calculation: `BTC market cap ÷ total crypto market cap, as a %.`,
+    signal: `Rising dominance = capital concentrating in BTC = defensive within crypto. Falling = money rotating into alts = risk-on within crypto. Scored with level + 4-week trend (≥55% & rising leans one way; <45% & falling the other).`,
+  },
+  'cowen_eth_btc': {
+    term: 'ETH/BTC ratio',
+    definition: `Ethereum priced in Bitcoin — the classic risk-on/risk-off gauge inside crypto.`,
+    calculation: `ETH price ÷ BTC price (a ratio, not a %), tracked on its 4-week trend.`,
+    signal: `Falling / basing = BTC-favoured (good backdrop for BTC-only buys). Rising = late-cycle alt rotation (money moving out the risk curve). A strongly rising ratio scores negative for BTC-accumulation purposes.`,
+  },
+  'pal_cfnai': {
+    term: 'Business cycle (CFNAI)',
+    definition: `A broad US activity index — is the economy running hot or cold.`,
+    calculation: `The Chicago Fed National Activity Index (a composite of ~85 economic series); 0 ≈ trend growth.`,
+    signal: `Above 0 and rising = expansion (risk-supportive); deeply negative = contraction/recession risk. Direction over the 4-week read matters as much as the level.`,
+  },
+  'pal_dxy': {
+    term: 'DXY (Dollar Index)',
+    definition: `US dollar strength vs a basket of currencies — the global liquidity tide.`,
+    calculation: `Index level + 4-week trend.`,
+    signal: `Falling DXY, ideally < 100 = bullish for risk assets (liquidity loosening). Rising > 105 = bearish (strong dollar drains risk globally). A strong, rising dollar is one of the most reliable headwinds for crypto.`,
+  },
+  'pal_us2y': {
+    term: 'US 2-Year Yield',
+    definition: `The market's read on the Fed's policy path over the next ~2 years.`,
+    calculation: `The 2Y Treasury yield % + 4-week trend.`,
+    signal: `Falling 2Y (esp. < 3%) = rate-cut expectations = risk-on supportive. Rising fast (> 5%) = hike fear / hot inflation = bearish. The 2Y moves ahead of the Fed, so it's a leading tell.`,
+  },
+  'pal_ism': {
+    term: 'ISM Manufacturing PMI',
+    definition: `The business-cycle pulse — Pal's most underrated single indicator.`,
+    calculation: `The ISM Manufacturing PMI level + trend. 50 is the line between expansion and contraction.`,
+    signal: `> 50 and rising = expansion = bullish. < 50 and falling = contraction / recession risk = bearish. Below 47 falling is a strong negative. (Sourced via a regional-Fed nowcast + manual override.)`,
+  },
+  'universal_etf_flow_7d': {
+    term: 'Spot BTC ETF Net Flow (7d rolling)',
+    definition: `Institutional demand pulse — the single biggest variable since the Jan-2024 ETF launches.`,
+    calculation: `Net flows (in/out) of the US spot BTC ETFs, summed on a rolling 7-day basis, in USD millions.`,
+    signal: `7-day net > +$1B = strongly bullish (institutions buying). Sustained outflows = bearish. This is "real money," so the Universal bucket weights it heavily.`,
+  },
+  'universal_stablecoin_supply': {
+    term: 'Stablecoin Total Supply (4-wk ROC)',
+    definition: `Dry powder waiting inside crypto — capital parked ready to deploy.`,
+    calculation: `Total stablecoin supply, rate-of-change over 4 weeks.`,
+    signal: `Rising = mint cycle = liquidity arriving (fuel for higher prices). Contracting = redemptions = liquidity leaving. Expanding stablecoin supply often precedes risk-on moves.`,
+  },
+  'sentiment_fear_greed': {
+    term: 'Crypto Fear & Greed',
+    definition: `Crowd emotion — used as a contrarian indicator.`,
+    calculation: `The composite Fear & Greed index (volatility, momentum, social, dominance, etc.), 0–100.`,
+    signal: `< 25 (Extreme Fear) = contrarian BUY signal. > 75 (Extreme Greed) = contrarian CAUTION. When the crowd is most certain, it's usually most wrong — so this one inverts.`,
+  },
 };
 
 // explainerMark — a small ⓘ trigger for a glossary key. Returns '' for unknown
@@ -226,7 +344,8 @@ function showExplainer(target) {
   el.innerHTML = `
     <div class="fe-term">${escapeHTML(g.term)}</div>
     <div class="fe-def">${escapeHTML(g.definition)}</div>
-    ${g.calculation ? `<div class="fe-calc"><span class="fe-calc-label">Calc</span> ${escapeHTML(g.calculation)}</div>` : ''}
+    ${g.calculation ? `<div class="fe-calc"><span class="fe-calc-label">How</span> ${escapeHTML(g.calculation)}</div>` : ''}
+    ${g.signal ? `<div class="fe-signal"><span class="fe-signal-label">Signal</span> ${escapeHTML(g.signal)}</div>` : ''}
   `;
   el.classList.add('show');
   el.setAttribute('aria-hidden', 'false');
@@ -6238,7 +6357,7 @@ async function renderHoldingDetail({ kind, id }) {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading detail…</div>';
 
-  let holding, txns, taxlots, audit, divs, notes, thesisData;
+  let holding, txns, taxlots, audit, divs, notes, thesisData, allHoldings = [];
   try {
     const path = kind === 'stock' ? 'stocks' : 'crypto';
     const [hRes, txnRes, lotRes, auditRes, divRes, notesRes, thRes] = await Promise.all([
@@ -6252,7 +6371,8 @@ async function renderHoldingDetail({ kind, id }) {
       // Spec 14 — in-app thesis (returns {thesis: null} when none yet).
       api(`/api/holdings/${kind}/${id}/thesis`).catch(() => ({ thesis: null })),
     ]);
-    holding = (hRes.holdings || []).find((h) => h.id === id);
+    allHoldings = hRes.holdings || [];
+    holding = allHoldings.find((h) => h.id === id);
     txns = txnRes.transactions || [];
     taxlots = lotRes.position || { taxLots: [] };
     audit = (auditRes.audit || []).filter((a) => a.holdingKind === kind && a.holdingId === id).slice(0, 20);
@@ -6498,12 +6618,70 @@ async function renderHoldingDetail({ kind, id }) {
     </section>
   `;
 
-  content.innerHTML = header + positionRisk + scoreSection + txnSection + lotsSection + divSection + thesisSection + auditSection;
+  // SC-19 — "Other holdings in this sector" panel (stock detail only).
+  // Crypto detail pages are unchanged (their cascade graph is correct).
+  // Peers are same-`sector_universe_id` stock holdings (excl. self), each
+  // showing its score+band from the SC-10 overlay already on the holdings
+  // list — self-maintaining, no extra fetch. Unsectored holding → empty,
+  // never guesses (SC-16 enrich-and-flag gap). Capped at 8.
+  let sectorPeersSection = '';
+  if (kind === 'stock') {
+    const sid = holding.sectorUniverseId;
+    const sectorTagMap = await getSectorTagMap();
+    const sectorMeta = sid != null ? sectorTagMap.get(sid) : null;
+    const sectorName = sectorMeta ? sectorMeta.name : null;
+    const sectorSub = sectorName
+      ? `<span class="dim" style="font-size:0.78rem; font-weight:normal">${escapeHTML(sectorName)}</span>`
+      : '';
+    if (sid == null) {
+      sectorPeersSection = `
+        <section class="detail-section">
+          <h3 class="rh-side">Other holdings in this sector</h3>
+          <p class="dim">This holding isn’t tagged to a sector yet — no peers to show. Tag it via the sector taxonomy to populate this panel.</p>
+        </section>
+      `;
+    } else {
+      const peers = allHoldings
+        .filter((h) => h.id !== id && h.sectorUniverseId === sid)
+        .sort((a, b) => {
+          const sa = a.score ? a.score.totalScore : -1;
+          const sb = b.score ? b.score.totalScore : -1;
+          if (sb !== sa) return sb - sa;
+          return (a.ticker || '').localeCompare(b.ticker || '');
+        })
+        .slice(0, 8);
+      const peerRows = peers.map((p) => `
+        <tr class="sp-row" data-peer-id="${p.id}" tabindex="0" role="button">
+          <td><strong>${escapeHTML(p.ticker || '—')}</strong></td>
+          <td class="dim">${escapeHTML(p.name || '')}</td>
+          <td>${scoreCell(p.score, false, 'stock', p.id)}</td>
+        </tr>
+      `).join('') || `<tr><td colspan="3" class="dim" style="text-align:center">No other holdings in this sector.</td></tr>`;
+      sectorPeersSection = `
+        <section class="detail-section">
+          <h3 class="rh-side">Other holdings in this sector ${sectorSub}</h3>
+          <div class="tablewrap"><table class="holdings"><thead><tr>
+            <th>Ticker</th><th>Name</th><th>Score</th>
+          </tr></thead><tbody>${peerRows}</tbody></table></div>
+        </section>
+      `;
+    }
+  }
+
+  content.innerHTML = header + positionRisk + scoreSection + txnSection + lotsSection + divSection + thesisSection + sectorPeersSection + auditSection;
 
   // Wire interactions.
   $('#dh-back').addEventListener('click', () => {
     state.holdingDetail = null;
     loadActiveTab();
+  });
+  // SC-19 — sector peers: click/keyboard to navigate to a peer's detail.
+  document.querySelectorAll('.sp-row[data-peer-id]').forEach((row) => {
+    const go = () => openHoldingDetail('stock', parseInt(row.dataset.peerId, 10));
+    row.addEventListener('click', go);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+    });
   });
   $('#dh-add-txn').addEventListener('click', () => openAddTxnModal({ kind, id, ticker: tickerOrSym, currentPrice }));
   // Spec 14 — in-app thesis editor.
@@ -8033,12 +8211,12 @@ async function renderCryptoIndicators() {
     const histPoints = (compHistory || []).map((p) => ({ value: p[histKey] }));
     const spark = renderCISparkline(histPoints, 'value', { width: 60, height: 16 });
     if (v == null) {
-      return `<span class="ci-sub dim ci-sub-row"><span class="ci-sub-label">${label}</span> <span class="ci-sub-spark">${spark}</span> <span class="ci-sub-val">—</span></span>`;
+      return `<span class="ci-sub dim ci-sub-row"><span class="ci-sub-label">${label}${explainerMark('ci-bucket-' + label.toLowerCase())}</span> <span class="ci-sub-spark">${spark}</span> <span class="ci-sub-val">—</span></span>`;
     }
     const cls = v >= 0.1 ? 'gain' : v <= -0.1 ? 'loss' : 'dim';
     const sign = v >= 0 ? '+' : '';
     return `<span class="ci-sub ci-sub-row">
-      <span class="ci-sub-label dim">${label}</span>
+      <span class="ci-sub-label dim">${label}${explainerMark('ci-bucket-' + label.toLowerCase())}</span>
       <span class="ci-sub-spark">${spark}</span>
       <span class="ci-sub-val ${cls}">${sign}${Number(v).toFixed(2)}</span>
     </span>`;
@@ -8084,12 +8262,13 @@ async function renderCryptoIndicators() {
         <div class="ci-hero-num-row">
           <span class="ci-hero-num ${bandClass}">${dispScore}</span>
           <span class="ci-band ${bandClass}">${escapeHTML(bandLabel)}</span>
+          ${explainerMark('ci-composite')}
         </div>
         <div class="ci-hero-expand-hint dim">${heroExpanded ? '▼ collapse' : '▲ expand'}</div>
       </div>
       <div class="ci-hero-right">
         <div class="ci-hero-trend">
-          <span class="dim">${escapeHTML(rangeLabel)} composite trend</span>
+          <span class="dim">${escapeHTML(rangeLabel)} composite trend${explainerMark('ci-trend')}</span>
           <div class="ci-hero-spark">${compSpark}</div>
         </div>
         <div class="ci-hero-subs ci-hero-subs-v2">
@@ -8106,7 +8285,7 @@ async function renderCryptoIndicators() {
 
   // ----- BTC log-band chart (cowen bucket header) ---------------------
   const btcChartHTML = btcHistory.length >= 30
-    ? `<div class="ci-btc-chart">${renderCIBTCChart(btcHistory)}</div>`
+    ? `<div class="ci-btc-chart"><div class="ci-chart-cap dim">BTC cycle position${explainerMark('ci-btc-chart')}</div>${renderCIBTCChart(btcHistory)}</div>`
     : '';
 
   // ----- ETF flow bar chart (universal bucket header) -----------------
@@ -8127,11 +8306,14 @@ async function renderCryptoIndicators() {
       const trend = i.trend4w != null
         ? `<span class="${i.trend4w > 0.5 ? 'gain' : i.trend4w < -0.5 ? 'loss' : 'dim'}">${i.trend4w > 0.5 ? '▲' : i.trend4w < -0.5 ? '▼' : '▬'} ${Number(i.trend4w).toFixed(1)}%</span>`
         : '<span class="dim">—</span>';
-      const stale = !i.currentValue && !i.fetchError
-        ? '<span class="ci-pill stale">awaiting data</span>'
-        : i.fetchError
-          ? `<span class="ci-pill err" title="${escapeHTML(i.fetchError)}">⚠ error</span>`
-          : '';
+      // SC-18 serve-stale: a fetchError with a preserved value means the
+      // last good reading is still showing — flag it ⚠ STALE (not a blank
+      // "error"). Only a fetchError with NO value at all is a true error.
+      const stale = i.fetchError
+        ? (i.currentValue != null
+            ? `<span class="ci-pill stale" title="${escapeHTML(i.fetchError)}">⚠ stale</span>`
+            : `<span class="ci-pill err" title="${escapeHTML(i.fetchError)}">⚠ error</span>`)
+        : (!i.currentValue ? '<span class="ci-pill stale">awaiting data</span>' : '');
       const spark = renderCISparkline(i.history || [], 'value', { width: 100, height: 28 });
       // v1.16: stablecoin supply gets an inline bigger line chart in
       // place of the standard sparkline (more visual room for a single
@@ -8144,7 +8326,7 @@ async function renderCryptoIndicators() {
         <div class="ci-card ci-card-v2 ${isWideChart ? 'ci-card-wide' : ''} ci-card-clickable" data-indicator-id="${escapeHTML(i.id)}" tabindex="0" role="button" aria-label="Open ${escapeHTML(i.displayName)} details">
           <div class="ci-card-head">
             <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
-            <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
+            ${explainerMark(i.id) || `<span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>`}
           </div>
           <div class="ci-card-body">
             <div class="ci-card-val-row">
@@ -8173,7 +8355,7 @@ async function renderCryptoIndicators() {
     }
     return `
       <section class="ci-bucket">
-        <h3 class="ci-bucket-head">${escapeHTML(label)}</h3>
+        <h3 class="ci-bucket-head">${escapeHTML(label)}${explainerMark('ci-bucket-' + bucketKey)}</h3>
         ${chartHead}
         <div class="ci-card-row">${items}</div>
       </section>
@@ -8198,7 +8380,7 @@ async function renderCryptoIndicators() {
   // are added) still render as standard cards.
   const sentimentBucket = `
     <section class="ci-bucket">
-      <h3 class="ci-bucket-head">${escapeHTML(bucketLabels.sentiment || 'Sentiment')}</h3>
+      <h3 class="ci-bucket-head">${escapeHTML(bucketLabels.sentiment || 'Sentiment')}${explainerMark('ci-bucket-sentiment')}</h3>
       <div class="ci-card-row">${(byBucket.sentiment || []).map((i) => {
         const isFearGreed = i.id === 'sentiment_fear_greed';
         const val = i.currentValue != null ? Number(i.currentValue) : (fgValue != null ? Number(fgValue) : null);
@@ -8209,7 +8391,7 @@ async function renderCryptoIndicators() {
             <div class="ci-card ci-card-v2 ci-card-fg ci-card-clickable" data-indicator-id="${escapeHTML(i.id)}" tabindex="0" role="button" aria-label="Open ${escapeHTML(i.displayName)} details">
               <div class="ci-card-head">
                 <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
-                <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
+                ${explainerMark(i.id) || `<span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>`}
               </div>
               <div class="ci-card-body ci-card-fg-body">
                 ${renderCIFearGreedGauge(val, fgLabel)}
@@ -8225,7 +8407,7 @@ async function renderCryptoIndicators() {
           <div class="ci-card ci-card-v2 ci-card-clickable" data-indicator-id="${escapeHTML(i.id)}" tabindex="0" role="button" aria-label="Open ${escapeHTML(i.displayName)} details">
             <div class="ci-card-head">
               <span class="ci-card-title">${escapeHTML(i.displayName)}</span>
-              <span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>
+              ${explainerMark(i.id) || `<span class="ci-info" title="${escapeHTML(i.tooltip || '')}">ⓘ</span>`}
             </div>
             <div class="ci-card-body">
               <div class="ci-card-val-row">

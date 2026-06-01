@@ -37,7 +37,7 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	keys := []string{
 		"FT_FINNHUB_API_KEY", "FT_TWELVEDATA_API_KEY",
 		"NEWSAPI_API_KEY", "CRYPTOPANIC_API_KEY",
-		"FT_ANTHROPIC_API_KEY",
+		"FT_ANTHROPIC_API_KEY", "FT_COINGECKO_API_KEY",
 		"FT_TELEGRAM_BOT_TOKEN", "FT_TELEGRAM_CHAT_ID",
 	}
 	apiKeys := make([]map[string]any, 0, len(keys))

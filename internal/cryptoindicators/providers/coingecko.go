@@ -5,18 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"os"
 	"time"
 )
 
 // doWithRetry runs an HTTP GET with retry on 429 (rate-limited).
-// Exponential backoff: 2s, 4s, 8s. Other errors / non-2xx fall through
-// immediately. Total worst-case time: ~14s including the last attempt.
+// Exponential backoff with jitter: ~2s, 4s, 8s. Other errors / non-2xx
+// fall through immediately. Total worst-case time: ~14s including the
+// last attempt.
 //
-// CoinGecko's free tier (~50 calls/min) is easy to bump into when the
-// existing FT crypto-prices cron and our indicator refresh land close
-// together. Retry-with-backoff handles that without bouncing the user.
-func doWithRetry(ctx context.Context, client *http.Client, url string) ([]byte, int, error) {
+// SC-18: when a CoinGecko Demo API key is configured (FT_COINGECKO_API_KEY)
+// it's sent as the x-cg-demo-api-key header, which lifts the keyless
+// free-tier ceiling that was hard-walling /global + /simple/price with
+// persistent 429s. Jitter on the backoff spreads retries so a burst from
+// the parallel crypto-prices cron doesn't resonate into repeated 429s.
+func doWithRetry(ctx context.Context, client *http.Client, url, apiKey string) ([]byte, int, error) {
 	backoff := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	var lastBody []byte
 	var lastStatus int
@@ -30,6 +35,9 @@ func doWithRetry(ctx context.Context, client *http.Client, url string) ([]byte, 
 		// across all retries keeps the request consistent.
 		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; FT/1.0; +https://ft.curranhouse.dev)")
 		req.Header.Set("Accept", "text/html,application/json,*/*")
+		if apiKey != "" {
+			req.Header.Set("x-cg-demo-api-key", apiKey)
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, 0, err
@@ -49,10 +57,14 @@ func doWithRetry(ctx context.Context, client *http.Client, url string) ([]byte, 
 		if resp.StatusCode != 429 || attempt == len(backoff) {
 			break
 		}
+		// Jitter ±25% so concurrent callers don't retry in lockstep.
+		wait := backoff[attempt]
+		jitter := time.Duration(rand.Int63n(int64(wait) / 2))
+		wait = wait*3/4 + jitter
 		select {
 		case <-ctx.Done():
 			return nil, lastStatus, ctx.Err()
-		case <-time.After(backoff[attempt]):
+		case <-time.After(wait):
 		}
 	}
 	return lastBody, lastStatus, fmt.Errorf("HTTP %d after %d attempts", lastStatus, len(backoff)+1)
@@ -66,11 +78,15 @@ func doWithRetry(ctx context.Context, client *http.Client, url string) ([]byte, 
 //
 // Free-tier limits: ~50 calls/min. Our cron makes 2 calls/day. Fine.
 type CoinGeckoClient struct {
-	HTTP *http.Client
+	HTTP   *http.Client
+	APIKey string // CoinGecko Demo key (FT_COINGECKO_API_KEY); "" = keyless
 }
 
 func NewCoinGeckoClient() *CoinGeckoClient {
-	return &CoinGeckoClient{HTTP: &http.Client{Timeout: 20 * time.Second}}
+	return &CoinGeckoClient{
+		HTTP:   &http.Client{Timeout: 20 * time.Second},
+		APIKey: os.Getenv("FT_COINGECKO_API_KEY"),
+	}
 }
 
 type cgGlobalResp struct {
@@ -84,7 +100,7 @@ type cgGlobalResp struct {
 // refresher computes trend from local snapshot history once 28 days
 // have accumulated.
 func (c *CoinGeckoClient) FetchBTCDominance(ctx context.Context) Reading {
-	body, _, err := doWithRetry(ctx, c.HTTP, "https://api.coingecko.com/api/v3/global")
+	body, _, err := doWithRetry(ctx, c.HTTP, "https://api.coingecko.com/api/v3/global", c.APIKey)
 	if err != nil {
 		return Reading{Err: fmt.Sprintf("coingecko /global: %v", err)}
 	}
@@ -104,7 +120,7 @@ type cgSimplePriceResp map[string]map[string]float64
 // FetchETHBTCRatio returns ETH price / BTC price.
 func (c *CoinGeckoClient) FetchETHBTCRatio(ctx context.Context) Reading {
 	body, _, err := doWithRetry(ctx, c.HTTP,
-		"https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd")
+		"https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd", c.APIKey)
 	if err != nil {
 		return Reading{Err: fmt.Sprintf("coingecko /simple/price: %v", err)}
 	}
@@ -125,7 +141,7 @@ func (c *CoinGeckoClient) FetchETHBTCRatio(ctx context.Context) Reading {
 // daily snapshot to record BTC price alongside the composite.
 func (c *CoinGeckoClient) FetchBTCPriceUSD(ctx context.Context) (*float64, error) {
 	body, _, err := doWithRetry(ctx, c.HTTP,
-		"https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd")
+		"https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", c.APIKey)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +171,7 @@ func (c *CoinGeckoClient) FetchBTCDailyHistory(ctx context.Context) ([]BTCMarket
 	// Note: free-tier limit is 365 days back for /market_chart on most
 	// endpoints, BUT bitcoin is exempt and goes back to inception.
 	body, _, err := doWithRetry(ctx, c.HTTP,
-		"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=max&interval=daily")
+		"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=max&interval=daily", c.APIKey)
 	if err != nil {
 		return nil, err
 	}

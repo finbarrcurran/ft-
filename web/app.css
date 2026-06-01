@@ -3577,6 +3577,12 @@ input.autofilled, select.autofilled {
 .ci-chart { display: block; max-width: 100%; }
 .ci-chart-empty { padding: 1rem; text-align: center; }
 .ci-btc-chart { margin-bottom: 0.6rem; }
+.ci-chart-cap {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+}
 
 /* === v1.14 ETF flow bar chart === */
 .ci-etf-chart { margin-bottom: 0.6rem; }
@@ -4034,6 +4040,23 @@ input.autofilled, select.autofilled {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #6f7b8c;
+  margin-right: 0.3rem;
+}
+/* SC-20 — third explainer section: the breakpoint/signal read */
+.ft-explainer-pop { max-width: 360px; }
+.ft-explainer-pop .fe-signal {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  color: #cdd6e2;
+}
+.ft-explainer-pop .fe-signal-label {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #f59e0b;
   margin-right: 0.3rem;
 }
 /* SC-06 — keep regime choice buttons able to host the ⓘ inline */

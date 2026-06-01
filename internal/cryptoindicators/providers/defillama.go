@@ -40,7 +40,7 @@ func NewDefiLlamaClient() *DefiLlamaClient {
 // call.)
 func (c *DefiLlamaClient) FetchStablecoinSupply(ctx context.Context) Reading {
 	body, _, err := doWithRetry(ctx, c.HTTP,
-		"https://stablecoins.llama.fi/stablecoincharts/all")
+		"https://stablecoins.llama.fi/stablecoincharts/all", "")
 	if err != nil {
 		return Reading{Err: fmt.Sprintf("defillama: %v", err)}
 	}

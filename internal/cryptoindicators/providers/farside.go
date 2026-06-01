@@ -89,7 +89,7 @@ func (c *FarsideClient) FetchBTCETFFlow7d(ctx context.Context) Reading {
 		return r
 	}
 	url := "https://farside.co.uk/bitcoin-etf-flow-all-data/"
-	body, status, err := doWithRetry(ctx, c.HTTP, url)
+	body, status, err := doWithRetry(ctx, c.HTTP, url, "")
 	if err != nil {
 		return Reading{Err: fmt.Sprintf("farside fetch (HTTP %d): %v — and no fresh cache at %s", status, err, FarsideJSONPath)}
 	}
