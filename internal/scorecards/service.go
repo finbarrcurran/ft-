@@ -338,9 +338,13 @@ func (s *Service) holdingsBySectorCode(ctx context.Context) (map[string]int, err
 
 // ----- Seed --------------------------------------------------------------
 
-// SeedIfEmpty inserts the three doctrine documents (Philosophy v1.1,
-// Energy-Power v1, Hydrocarbons v1) when their rows are missing. Idempotent
-// — checks per-code before inserting.
+// SeedIfEmpty inserts the bundled scorecard documents when their rows are
+// missing — master-spec, the Philosophy doctrine, and the sector adapters
+// (Energy-Power, Hydrocarbons, Pharma, Defense, Mining-Metals,
+// Industrial-Electrical, AI-Infra-Semi, Cloud-Infra, plus the Stock Adapter
+// Expansion v1 set: Aerospace, Software/SaaS, Robotics & Embodiment, REIT,
+// Clinical-Stage Biotech). Idempotent — checks per-code before inserting, so
+// new entries land on the next boot without disturbing existing rows.
 //
 // Markdown is read from internal/scorecards/seed/*.md via go:embed.
 //
@@ -463,6 +467,63 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 			Status: "needs-review", // v1 draft, open decisions in §7
 			IsDoctrine: false,
 			AppliesTo: []string{"data_center_reits", "gics_it"},
+		},
+		// --- Stock Adapter Expansion v1 (adapters 12–16, 2026-06-01) ---------
+		// Claude.ai-authored v1 draft templates taking the stock side 11 → 16.
+		// All uncalibrated (status needs-review = drafted, pending first-use
+		// calibration per the cover note's §6 open decisions) — Aerospace alone
+		// has a live trigger (RR.L civil leg) but still calibrates at first
+		// scoring. No schema change: sector_scorecards is free-form markdown,
+		// so REIT's remapped R1–R8 pillars need no enum handling.
+		{
+			Code: "aerospace",
+			DisplayName: "Aerospace",
+			ShortDescription: "Civil aerospace & space — aircraft OEMs, aero-engines, aerostructures, launch. Aftermarket-annuity thesis; dual-segment rule resolves the RR.L civil leg (v1.4 NULL trigger).",
+			File: "seed/aerospace.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft template, open decisions in §6; live RR.L trigger
+			IsDoctrine: false,
+			AppliesTo: []string{"gics_industrials"},
+		},
+		{
+			Code: "software-saas",
+			DisplayName: "Software / SaaS",
+			ShortDescription: "Application & infrastructure SaaS — recurring-revenue compounding; NRR moat; Q5 visibility dominant; rate-sensitive. Distinct from Cloud-Infra (capacity) and AI-Infra (silicon).",
+			File: "seed/software-saas.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft template, open decisions in §6
+			IsDoctrine: false,
+			AppliesTo: []string{"gics_it"},
+		},
+		{
+			Code: "robotics-embodiment",
+			DisplayName: "Robotics & Embodiment",
+			ShortDescription: "Physical-AI / robotics — humanoid, industrial automation, autonomous systems. Reality-gate (Q1/Q5) keeps narrative out; Scarcity-Map stage 10 terminal.",
+			File: "seed/robotics-embodiment.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft template + forward-looking, open decisions in §6
+			IsDoctrine: false,
+			AppliesTo: []string{"embodiment", "gics_industrials"},
+		},
+		{
+			Code: "reit",
+			DisplayName: "REIT / Real Estate",
+			ShortDescription: "REITs & real estate — rent + asset value + cost of capital. Remapped pillars R1–R8 (balance-sheet/yield model); dominant rate-regime link (Pal/9p).",
+			File: "seed/reit.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft template (REIT-remapped /16), open decisions in §6
+			IsDoctrine: false,
+			AppliesTo: []string{"gics_real_estate", "data_center_reits"},
+		},
+		{
+			Code: "clinical-stage-biotech",
+			DisplayName: "Clinical-Stage Biotech",
+			ShortDescription: "Pre-commercial biotech — pipeline of unapproved candidates. Binary-payoff + runway gate + mandatory position caps. Pharma's <$50M run-rate carve-out.",
+			File: "seed/clinical-stage-biotech.md",
+			Version: "1",
+			Status: "needs-review", // v1 draft template, highest-risk + position-capped, open decisions in §6
+			IsDoctrine: false,
+			AppliesTo: []string{"gics_healthcare"},
 		},
 	}
 
