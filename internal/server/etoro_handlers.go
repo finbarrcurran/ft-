@@ -123,6 +123,13 @@ func (s *Server) handleEtoroImportApply(w http.ResponseWriter, r *http.Request) 
 // GET /api/etoro/performance — live annual + YTD history.
 func (s *Server) handleEtoroPerformance(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())
+	// SC-22 — the eToro performance history + YTD (SC-17) is sensitive net-worth
+	// data; in demo mode it is hidden entirely (returns no years), so even an
+	// accidental expand during a demo reveals nothing real (handover §2/§6).
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{"years": []any{}, "demo": true})
+		return
+	}
 	years, err := s.store.ListEtoroPerformance(r.Context(), userID)
 	if mapStoreError(w, err) {
 		return

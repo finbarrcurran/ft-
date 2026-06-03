@@ -21,12 +21,11 @@ import (
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())
 
-	stocks, err := s.store.ListStockHoldings(r.Context(), userID)
-	if err != nil {
-		mapStoreError(w, err)
-		return
-	}
-	cryptos, err := s.store.ListCryptoHoldings(r.Context(), userID)
+	// SC-22 — when demo mode is on the holdings come back masked (synthetic
+	// ~£30k book), so every KPI, donut and total below is computed from
+	// synthetic numbers and no real figure reaches the browser.
+	demoOn := s.demoModeOn(r.Context())
+	stocks, cryptos, err := s.loadHoldings(r.Context(), userID)
 	if err != nil {
 		mapStoreError(w, err)
 		return
@@ -225,6 +224,9 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		"asOf":           time.Now().UTC().Format(time.RFC3339),
 		"currency":       currency,
 		"fxEURUSD":       fx,
+		// SC-22 — drives the demo toggle state + on-screen "values masked"
+		// indicator. When true every number in this payload is synthetic.
+		"demo":           demoOn,
 		"kpis": map[string]any{
 			"totalValue":     totalValue,
 			"totalInvested":  totalInvestedCost,

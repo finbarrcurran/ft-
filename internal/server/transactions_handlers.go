@@ -27,6 +27,12 @@ import (
 // GET /api/transactions?holdingKind=&holdingId=&from=&to=&limit=
 func (s *Server) handleListTransactions(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())
+	// SC-22 — transaction history exposes real quantities + prices; hidden in
+	// demo mode.
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{"transactions": []any{}, "demo": true})
+		return
+	}
 	q := r.URL.Query()
 	kind := q.Get("holdingKind")
 	holdingIDStr := q.Get("holdingId")
@@ -179,6 +185,15 @@ func (s *Server) handleTaxLots(w http.ResponseWriter, r *http.Request, kind stri
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	// SC-22 — tax lots expose real cost basis + quantities; hidden in demo mode.
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"position":     nil,
+			"currentPrice": nil,
+			"demo":         true,
+		})
+		return
+	}
 	txns, err := s.store.ListTransactions(r.Context(), kind, id)
 	if mapStoreError(w, err) {
 		return
@@ -231,6 +246,11 @@ func (s *Server) handleCreateDividend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListDividends(w http.ResponseWriter, r *http.Request) {
+	// SC-22 — dividend rows expose real share counts + amounts; hidden in demo.
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{"dividends": []any{}, "demo": true})
+		return
+	}
 	q := r.URL.Query()
 	holdingID, err := strconv.ParseInt(q.Get("holdingId"), 10, 64)
 	if err != nil {

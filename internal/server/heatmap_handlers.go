@@ -44,6 +44,12 @@ func (s *Server) handleHeatmap(w http.ResponseWriter, r *http.Request) {
 	if mode != "my_holdings" && mode != "pnl" {
 		mode = "market_cap"
 	}
+	// SC-22 — my_holdings / pnl size tiles by real position size / P&L, which
+	// would leak holdings visually. Force market-cap sizing in demo mode (held
+	// tickers can still be highlighted — structure stays visible per §2).
+	if s.demoModeOn(r.Context()) {
+		mode = "market_cap"
+	}
 
 	holdings, _ := s.store.ListStockHoldings(r.Context(), userID)
 

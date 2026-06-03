@@ -83,11 +83,9 @@ type dashboardCheck struct {
 }
 
 func (s *Server) computeRiskCheck(ctx context.Context, userID int64) (*dashboardCheck, error) {
-	stocks, err := s.store.ListStockHoldings(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	cryptos, err := s.store.ListCryptoHoldings(ctx, userID)
+	// SC-22 — masked synthetic holdings when demo mode is on, so the position
+	// sizing / concentration readouts (SC-08) never expose real sizes.
+	stocks, cryptos, err := s.loadHoldings(ctx, userID)
 	if err != nil {
 		return nil, err
 	}

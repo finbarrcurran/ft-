@@ -121,6 +121,9 @@ func validPreferenceValue(key, value string) bool {
 	case "pnl_currency":
 		// Spec 12 D5g — toggle for stocks-table P&L display.
 		return value == "USD" || value == "EUR"
+	case "demo_mode":
+		// SC-22 — server-read demo/privacy toggle. Only on/off.
+		return value == "on" || value == "off"
 	case "jordi_current_sector_read":
 		// Spec 9f D7 — free-text macro strip note. Bounded to avoid abuse.
 		return len(value) > 0 && len(value) <= 500

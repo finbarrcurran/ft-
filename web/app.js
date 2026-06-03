@@ -619,9 +619,20 @@ const state = {
   crypto: null,         // array of crypto rows
   summary: null,        // cached summary response
   heatmapSector: '',    // '' = all sectors
+  demo: false,          // SC-22 — demo/privacy mode active (server-read)
   loading: false,
   error: null,
 };
+
+// SC-22 — sync the persistent on-screen "values masked" indicator + a body
+// class (lets CSS flag the whole app while demo mode is active). Called
+// whenever /api/summary reports the demo flag, and right after toggling.
+function updateDemoIndicator(on) {
+  state.demo = !!on;
+  const el = document.getElementById('demo-indicator');
+  if (el) el.hidden = !on;
+  document.body.classList.toggle('demo-active', !!on);
+}
 
 const SECTORS = [
   'Technology', 'Financials', 'Healthcare', 'Consumer Discretionary',
@@ -639,6 +650,7 @@ function renderDashboard(user) {
         <div class="markets-dropdown" id="markets-dropdown" aria-hidden="true"></div>
         <div class="regime-pills" id="regime-pills" title="Regime — Jordi / Cowen / Effective"></div>
         <div class="right">
+          <span class="demo-indicator" id="demo-indicator" title="Demo / Privacy mode is ON — all financial values are masked" hidden>🔒 Demo Mode — values masked</span>
           <span class="dim" id="refresh-status">—</span>
           <button class="btn-ghost" id="refresh">refresh</button>
           <button class="btn-ghost" id="import">import…</button>
@@ -1934,6 +1946,17 @@ async function renderSummary() {
     </div>
   `;
 
+  // SC-22 — Demo / Privacy mode toggle. Server-side: flipping it re-fetches
+  // every figure as synthetic, so real numbers never reach the browser.
+  const demoOn = !!s.demo;
+  const demoToggle = `
+    <button class="demo-toggle ${demoOn ? 'active' : ''}" id="demo-toggle"
+      role="switch" aria-checked="${demoOn}"
+      title="Show FT to others without exposing real position sizes, values or P&amp;L. All numbers become synthetic for a ~£30k demo book.">
+      ${demoOn ? '🔒 Demo Mode — values masked' : '🔓 Demo Mode'}
+    </button>`;
+  const controlsRow = `<div class="summary-controls">${toggle}${demoToggle}</div>`;
+
   // KPI cards — render even when valued=false (em-dashes), to keep layout stable.
   // flashId + flashVal attach a data-flash hook the flashOnRender helper reads
   // to apply .flash-up / .flash-down (Spec 2 D7) when the underlying number
@@ -2034,13 +2057,43 @@ async function renderSummary() {
   // (updateStaleThesisBanner / /api/notes/stale) is intentionally kept.
 
   const perfPanel = `<div id="etoro-perf-panel" class="etoro-perf"></div>`;
-  content.innerHTML = staleBanner + toggle + kpiRow + donutRow + tagDonuts + perfPanel + footer;
+  content.innerHTML = staleBanner + controlsRow + kpiRow + donutRow + tagDonuts + perfPanel + footer;
 
-  // Wire toggle clicks
+  // SC-22 — keep the persistent indicator in sync with the server flag.
+  updateDemoIndicator(demoOn);
+
+  // Wire currency toggle clicks
   for (const btn of document.querySelectorAll('.ct-btn')) {
     btn.addEventListener('click', () => {
       const ccy = btn.dataset.ccy;
       document.cookie = `display_currency=${ccy}; path=/; SameSite=Lax; max-age=2592000`;
+      renderSummary();
+    });
+  }
+
+  // SC-22 — wire the Demo mode toggle. Persists server-side (preference, not a
+  // URL param) so the masking is applied on every subsequent data request.
+  const demoBtn = document.getElementById('demo-toggle');
+  if (demoBtn) {
+    demoBtn.addEventListener('click', async () => {
+      const next = demoOn ? 'off' : 'on';
+      demoBtn.disabled = true;
+      try {
+        await api('/api/preferences/demo_mode', {
+          method: 'PUT',
+          body: JSON.stringify({ value: next }),
+        });
+      } catch (err) {
+        demoBtn.disabled = false;
+        alert('Could not toggle demo mode: ' + err.message);
+        return;
+      }
+      // Invalidate every cache that holds (now-stale) figures so the next
+      // render pulls masked/real data fresh from the server.
+      state.summary = null;
+      state.stocks = null;
+      state.crypto = null;
+      updateDemoIndicator(next === 'on');
       renderSummary();
     });
   }
@@ -2151,6 +2204,13 @@ let etoroStrategyView = (() => {
 
 const etoroImportState = { step: 'idle', preview: null, error: null };
 
+// SC-22 D22.7 — the performance history renders collapsed on every page load
+// and is NOT remembered between sessions, so it can never be unexpectedly open
+// when the screen is shown to someone. This flag is in-memory only (resets to
+// false on reload); it persists across strategy re-renders so toggling the
+// disc/copy filter while expanded doesn't snap it shut.
+let etoroPerfExpanded = false;
+
 // money formats a signed amount in the active display currency.
 function etoroMoney(v, ccy) {
   if (v == null || !Number.isFinite(Number(v))) return '—';
@@ -2163,6 +2223,30 @@ function etoroMoney(v, ccy) {
 // Pick *_usd / *_eur off an object given the active currency.
 function ccyPick(obj, base, ccy) {
   return Number(obj[`${base}${ccy === 'EUR' ? 'Eur' : 'Usd'}`] || 0);
+}
+
+// SC-22 D22.7 — wrap the performance history in a collapsed-by-default section
+// under a clickable heading. Used by both the empty and populated render paths.
+function perfCollapsibleShell(ccyLabel, bodyHTML) {
+  const expanded = etoroPerfExpanded;
+  return `
+    <div class="etoro-collapse ${expanded ? '' : 'collapsed'}" id="etoro-collapse">
+      <button class="etoro-collapse-head" id="etoro-collapse-toggle" aria-expanded="${expanded}">
+        <span class="etoro-caret">${expanded ? '▾' : '▸'}</span>
+        <span class="etoro-collapse-title">Performance history</span>
+        <span class="dim etoro-collapse-hint">${escapeHTML(ccyLabel)} · ${expanded ? 'click to collapse' : 'click to expand'}</span>
+      </button>
+      <div class="etoro-collapse-body"${expanded ? '' : ' hidden'}>${bodyHTML}</div>
+    </div>`;
+}
+
+function wirePerfCollapse(el, currency) {
+  const head = el.querySelector('#etoro-collapse-toggle');
+  if (!head) return;
+  head.addEventListener('click', () => {
+    etoroPerfExpanded = !etoroPerfExpanded; // in-memory only — not remembered
+    renderEtoroPerformance(currency);
+  });
 }
 
 async function renderEtoroPerformance(currency) {
@@ -2184,15 +2268,17 @@ async function renderEtoroPerformance(currency) {
   const reconcileBtn = `<button class="btn-secondary etoro-recon-btn" id="etoro-reconcile-btn" title="Reconstruct current open positions from a statement and reconcile against your live holdings">Reconcile holdings</button>`;
 
   if (years.length === 0) {
-    el.innerHTML = `
-      <div class="etoro-perf-head">
-        <h3>Performance history</h3>
-        ${uploadBtn}
-      </div>
-      <div class="etoro-perf-empty dim">
-        No eToro statements imported yet. Upload an account statement (.xlsx) to
-        track realised P&amp;L, dividends and fees by year — split discretionary vs copy.
-      </div>`;
+    // In demo mode the server returns no years (history hidden); show a neutral
+    // note rather than the import prompt so a demo never hints at real history.
+    const emptyBody = (data && data.demo)
+      ? `<div class="etoro-perf-empty dim">Hidden in demo mode.</div>`
+      : `<div class="etoro-perf-head"><div></div>${uploadBtn}</div>
+         <div class="etoro-perf-empty dim">
+           No eToro statements imported yet. Upload an account statement (.xlsx) to
+           track realised P&amp;L, dividends and fees by year — split discretionary vs copy.
+         </div>`;
+    el.innerHTML = perfCollapsibleShell('eToro', emptyBody);
+    wirePerfCollapse(el, currency);
     wireEtoroUpload();
     return;
   }
@@ -2296,13 +2382,14 @@ async function renderEtoroPerformance(currency) {
       </div>`;
   }).join('');
 
-  el.innerHTML = `
+  const perfBody = `
     <div class="etoro-perf-head">
-      <h3>Performance history <span class="dim" style="font-size:0.8rem; font-weight:400">eToro · ${ccy}</span></h3>
       <div class="etoro-perf-controls">${stratToggle}${reconcileBtn}${uploadBtn}</div>
     </div>
     ${ytdCard}
     ${yearBlocks}`;
+  el.innerHTML = perfCollapsibleShell(`eToro · ${ccy}`, perfBody);
+  wirePerfCollapse(el, currency);
 
   // Wire strategy toggle.
   for (const btn of el.querySelectorAll('.etoro-strat-btn')) {

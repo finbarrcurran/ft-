@@ -555,6 +555,11 @@ func (s *Server) handleListDeletedCrypto(w http.ResponseWriter, r *http.Request)
 // GET /api/audit?limit=N&offset=M
 func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())
+	// SC-22 — audit diffs embed real invested amounts / prices; hidden in demo.
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{"audit": []any{}, "demo": true})
+		return
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if limit <= 0 {

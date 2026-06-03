@@ -1167,6 +1167,114 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
 /* Clear the float so kpi-row sits below toggle cleanly */
 .kpi-row { clear: both; }
 
+/* ----- SC-22 Demo / Privacy mode ----------------------------------- */
+
+/* Controls row holds the currency toggle + demo toggle on one line,
+   right-aligned. Neutralise the legacy float/margin the .currency-toggle
+   carries so flex layout governs placement. */
+.summary-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+.summary-controls .currency-toggle {
+  float: none;
+  margin: 0;
+  margin-bottom: 0;
+}
+
+.demo-toggle {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  padding: 0.3rem 0.85rem;
+  background: rgb(var(--color-surface-sunken));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 9999px;
+  color: rgb(var(--color-text-muted));
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.demo-toggle:hover {
+  color: rgb(var(--color-text));
+  border-color: rgb(var(--color-text-muted));
+}
+.demo-toggle.active {
+  background: rgba(var(--color-accent), 0.16);
+  border-color: rgb(var(--color-accent));
+  color: rgb(var(--color-accent-strong));
+}
+
+/* Topbar pill shown whenever demo mode is ON. */
+.demo-indicator {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  padding: 0.22rem 0.7rem;
+  border-radius: 9999px;
+  background: rgba(var(--color-accent), 0.16);
+  border: 1px solid rgb(var(--color-accent));
+  color: rgb(var(--color-accent-strong));
+  white-space: nowrap;
+}
+.demo-indicator[hidden] { display: none; }
+
+/* Subtle topbar accent while demo mode is active. */
+body.demo-active .topbar {
+  box-shadow: inset 0 -2px 0 0 rgba(var(--color-accent), 0.55);
+}
+
+/* ----- SC-17 collapsible eToro performance history (always collapsed
+   on load; masked-if-expanded in demo mode) ------------------------- */
+
+.etoro-collapse {
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 10px;
+  background: rgb(var(--color-surface-raised));
+  margin-top: 1rem;
+  overflow: hidden;
+}
+.etoro-collapse-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: rgb(var(--color-text));
+  font-family: var(--font-sans);
+}
+.etoro-collapse-head:hover { background: rgba(var(--color-text-muted), 0.06); }
+.etoro-caret {
+  font-size: 0.75rem;
+  color: rgb(var(--color-text-muted));
+  width: 0.9rem;
+  flex: none;
+}
+.etoro-collapse-title {
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.etoro-collapse-hint {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+.etoro-collapse-body {
+  padding: 0 0.9rem 0.9rem;
+  border-top: 1px solid rgb(var(--color-border));
+}
+.etoro-collapse-body[hidden] { display: none; }
+
 /* ----- Spec 3: holdings table actions + modal form ------------------- */
 
 .table-toolbar {

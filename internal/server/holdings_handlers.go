@@ -69,7 +69,8 @@ type cryptoResp struct {
 // GET /api/holdings/stocks
 func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())
-	holdings, err := s.store.ListStockHoldings(r.Context(), userID)
+	// SC-22 — masked synthetic holdings when demo mode is on.
+	holdings, err := s.loadStockHoldings(r.Context(), userID)
 	if mapStoreError(w, err) {
 		return
 	}
@@ -151,7 +152,8 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 // GET /api/holdings/crypto
 func (s *Server) handleListCrypto(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())
-	holdings, err := s.store.ListCryptoHoldings(r.Context(), userID)
+	// SC-22 — masked synthetic holdings when demo mode is on.
+	holdings, err := s.loadCryptoHoldings(r.Context(), userID)
 	if mapStoreError(w, err) {
 		return
 	}

@@ -25,6 +25,21 @@ func (s *Server) handlePerformanceOverview(w http.ResponseWriter, r *http.Reques
 	if window == "" {
 		window = "all"
 	}
+	// SC-22 — the equity curve is real net worth over time and the metrics carry
+	// absolute realized P&L; hidden in demo mode (empty sample → frontend shows
+	// its empty state).
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"window":        window,
+			"metrics":       performance.ComputeMetrics(nil),
+			"histogram":     performance.HistogramOf(nil),
+			"equity":        []any{},
+			"underwaterPct": 0.0,
+			"sampleSize":    0,
+			"demo":          true,
+		})
+		return
+	}
 	cutoff := windowCutoff(window)
 
 	trades, err := s.store.ListClosedTrades(r.Context(), 100000)
@@ -101,6 +116,11 @@ func (s *Server) handlePerformanceCohorts(w http.ResponseWriter, r *http.Request
 	window := r.URL.Query().Get("window")
 	if window == "" {
 		window = "all"
+	}
+	// SC-22 — cohort TotalPnLUSD is real money; hidden in demo mode.
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{"window": window, "cohorts": []any{}, "demo": true})
+		return
 	}
 	rows, err := s.store.GetLatestPerformanceSnapshots(r.Context())
 	if mapStoreError(w, err) {
@@ -207,6 +227,15 @@ func (s *Server) handlePerformanceCohortDrill(w http.ResponseWriter, r *http.Req
 	if window == "" {
 		window = "all"
 	}
+	// SC-22 — drill lists real closed trades (entry price, position size USD,
+	// realized P&L); hidden in demo mode.
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"key": key, "label": performance.CohortDisplayLabel(key),
+			"window": window, "trades": []any{}, "demo": true,
+		})
+		return
+	}
 	cutoff := windowCutoff(window)
 	trades, err := s.store.ListClosedTrades(r.Context(), 100000)
 	if mapStoreError(w, err) {
@@ -234,9 +263,16 @@ func (s *Server) handlePerformanceCohortDrill(w http.ResponseWriter, r *http.Req
 
 // GET /api/performance/export.csv — Spec 9d D10.
 func (s *Server) handlePerformanceExport(w http.ResponseWriter, r *http.Request) {
-	trades, err := s.store.ListClosedTrades(r.Context(), 100000)
-	if mapStoreError(w, err) {
-		return
+	// SC-22 — the CSV is the full real trade ledger (position sizes, P&L);
+	// hidden in demo mode (header row only, no data).
+	demo := s.demoModeOn(r.Context())
+	var trades []*store.ClosedTradeRow
+	if !demo {
+		var err error
+		trades, err = s.store.ListClosedTrades(r.Context(), 100000)
+		if mapStoreError(w, err) {
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="ft-closed-trades-%s.csv"`, time.Now().UTC().Format("2006-01-02")))

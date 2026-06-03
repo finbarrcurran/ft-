@@ -179,6 +179,19 @@ func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request, kind strin
 		}
 	}
 
+	// SC-22 — SL/TP + S/R levels reveal real risk placement (handover §2), so
+	// they are hidden in demo mode. The (public) current price is kept.
+	if s.demoModeOn(r.Context()) {
+		resp.ATRWeekly = nil
+		resp.Support1, resp.Support2 = nil, nil
+		resp.Resistance1, resp.Resistance2 = nil, nil
+		resp.Suggestions = levelsSuggestions{
+			UsingTier:       resp.Suggestions.UsingTier,
+			UsingTierSource: resp.Suggestions.UsingTierSource,
+		}
+		resp.Candidates = levelsCandidates{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
