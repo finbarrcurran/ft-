@@ -952,7 +952,11 @@ function onRegimePillClick(side) {
 }
 
 // ----- Jordi quick-toggle modal (D5) -----
-function openManualRegimeModal(side) {
+// onSaved (optional, SC-25): extra callback fired after a successful save +
+// regime re-read, so any tab hosting this shared control (e.g. the Macro/Sector
+// Rotation tab) can re-render its own regime-dependent UI. The Summary pills
+// don't pass it because refreshRegime() already re-renders #regime-pills.
+function openManualRegimeModal(side, onSaved) {
   const cur = (regimeState && regimeState[side] && regimeState[side].regime) || 'unclassified';
   closeImportModal();
   const root = document.createElement('div');
@@ -1014,6 +1018,8 @@ function openManualRegimeModal(side) {
       await api(path, { method: 'POST', body: JSON.stringify({ regime: sel.value, note }) });
       closeImportModal();
       await refreshRegime();
+      // SC-25 — let the hosting tab re-render its regime-dependent UI.
+      if (typeof onSaved === 'function') { try { await onSaved(); } catch (_) { /* non-fatal */ } }
     } catch (e) {
       $('#rm-err').textContent = e.message;
     }
@@ -8693,18 +8699,22 @@ if (!state.signalsSort) {
     congress:        { col: 'date', dir: 'desc' },
     executive_order: { col: 'date', dir: 'desc' },
     oge_278t:        { col: 'date', dir: 'desc' },
+    thirteenf:       { col: 'date', dir: 'desc' },
   };
 }
 
 // SC-24 — mandatory 278-T caveat label (spec §C / AC4). Mirrors the server
 // constant signals.Caveat278T; the live value also arrives in API payloads.
 const CAVEAT_278T = 'Periodic (~quarterly) · ~45-day lag · OGE value bands (not exact) · does not state who directed the trade.';
+// SC-23 — mandatory 13F caveat label (spec §C / AC5). Mirrors signals.Caveat13F.
+const CAVEAT_13F = 'Quarterly · ~45-day lag · long-equity + listed-options only · not the full book (no shorts / swaps / cash).';
 
 const SIGNAL_TYPE_ICON = {
   insider: '📈',
   congress: '🏛',
   executive_order: '📜',
   oge_278t: '🏛️',
+  thirteenf: '🏦',
 };
 const SIGNAL_TIER_PILL = {
   info:  '<span class="tier-pill info">INFO</span>',
@@ -8740,6 +8750,13 @@ async function renderSignals() {
     tracked = tp.individuals || [];
   } catch (_) { /* panel simply won't render */ }
 
+  // SC-23 — 13F institutional fund watchlist (best-effort).
+  let funds = [];
+  try {
+    const fp = await api('/api/signals/tracked-funds');
+    funds = fp.funds || [];
+  } catch (_) { /* panel simply won't render */ }
+
   const REGIME_META = {
     executive_278t:    { label: 'OGE 278-T', cls: 'exec', hint: 'Files periodic transaction reports' },
     congressional_ptr: { label: 'STOCK Act PTR', cls: 'congress', hint: 'Files congressional PTRs' },
@@ -8764,6 +8781,53 @@ async function renderSignals() {
         }).join('')}
       </div>
       <div class="dim" style="font-size:0.72rem;margin-top:0.4rem">⚠️ ${escapeHTML(CAVEAT_278T)}</div>
+    </section>`;
+
+  // SC-23 — tracked 13F funds panel. Each card shows the latest-period diff
+  // summary; "view changes" expands the per-position diff (AC3). The §C caveat
+  // is non-negotiable on every view (AC5 / S-23a).
+  const fundCard = (fn) => {
+    const diffBits = [
+      fn.diffNew ? `<span class="f13-chip new">+${fn.diffNew} new</span>` : '',
+      fn.diffExit ? `<span class="f13-chip exit">−${fn.diffExit} exit</span>` : '',
+      fn.diffIncrease ? `<span class="f13-chip inc">▲${fn.diffIncrease}</span>` : '',
+      fn.diffDecrease ? `<span class="f13-chip dec">▼${fn.diffDecrease}</span>` : '',
+    ].filter(Boolean).join(' ');
+    const overlapBadge = fn.overlaps
+      ? `<span class="f13-overlap" title="Changes touching your holdings / watchlist / sector ETFs">${fn.overlaps} overlap${fn.overlaps === 1 ? '' : 's'}${fn.alarms ? ` · ${fn.alarms} 🔴` : ''}</span>`
+      : '';
+    const period = fn.lastPeriod
+      ? `<span class="dim">latest 13F: ${escapeHTML(fn.lastPeriod)} · ${fn.holdings} position${fn.holdings === 1 ? '' : 's'}</span>`
+      : `<span class="dim">no filing pulled yet — hit ⟳ 13F</span>`;
+    return `
+      <div class="fund-card${fn.alarms ? ' has-alarm' : ''}">
+        <div class="fund-head">
+          <strong>${escapeHTML(fn.name)}</strong>
+          <span class="fund-cik">CIK ${escapeHTML(fn.cik)}</span>
+          <button class="btn-ghost btn-mini fund-remove" data-fund-remove="${escapeHTML(fn.cik)}" title="Stop tracking (keeps history)">remove</button>
+        </div>
+        <div class="fund-meta">${period}</div>
+        ${diffBits || overlapBadge ? `<div class="fund-diffs">${diffBits} ${overlapBadge}</div>` : ''}
+        ${fn.notes ? `<div class="tracked-note dim">${escapeHTML(fn.notes)}</div>` : ''}
+        ${fn.lastPeriod ? `<button class="btn-ghost btn-mini fund-view" data-fund-view="${escapeHTML(fn.cik)}">view changes →</button>` : ''}
+        <div class="fund-diff-detail" id="fund-diff-${escapeHTML(fn.cik)}" hidden></div>
+      </div>`;
+  };
+  const fundsPanel = `
+    <section class="tracked-panel funds-panel">
+      <h3 class="signal-section-h">🏦 13F institutional funds <span class="dim" style="font-size:0.85rem;font-weight:normal">${funds.length}</span>
+        <button class="btn-ghost btn-mini" id="funds-refresh" title="Pull each fund's latest 13F from SEC EDGAR + recompute diffs">⟳ 13F</button>
+        <span class="dim" id="funds-refresh-status" style="font-size:0.74rem"></span>
+      </h3>
+      <div class="tracked-grid">
+        ${funds.map(fundCard).join('') || '<div class="dim">No funds tracked. Add a 13F filer CIK below.</div>'}
+      </div>
+      <div class="fund-add-row">
+        <input type="text" id="fund-add-cik" placeholder="fund CIK (e.g. 0002045724)" class="fund-add-input" />
+        <input type="text" id="fund-add-name" placeholder="name (optional)" class="fund-add-input" />
+        <button class="btn-ghost btn-mini" id="fund-add-btn">+ track fund</button>
+      </div>
+      <div class="dim" style="font-size:0.72rem;margin-top:0.4rem">⚠️ ${escapeHTML(CAVEAT_13F)}</div>
     </section>`;
 
   const tierChip = (key, label, count) => {
@@ -8791,6 +8855,7 @@ async function renderSignals() {
   // sort-state (state.signalsSort[type]).
   const sectionsConfig = [
     { type: 'oge_278t',        label: '🏛️ Exec PTR (OGE 278-T)', endpoint: null, caveat: CAVEAT_278T },
+    { type: 'thirteenf',       label: '🏦 13F Institutional',  endpoint: '/api/signals/refresh-13f', caveat: CAVEAT_13F },
     { type: 'insider',         label: '📈 Insider Form 4',     endpoint: '/api/signals/refresh-insiders' },
     { type: 'congress',        label: '🏛 Congress (PTRs)',    endpoint: '/api/signals/refresh-congress' },
     { type: 'executive_order', label: '📜 Executive Orders',   endpoint: '/api/signals/refresh-eo' },
@@ -8896,6 +8961,8 @@ async function renderSignals() {
       </div>
 
       ${trackedPanel}
+
+      ${fundsPanel}
 
       ${sectionsConfig.map(renderSection).join('')}
 
@@ -9061,6 +9128,100 @@ async function renderSignals() {
     if (status) status.textContent = 'done (no new rows)';
     await renderSignals();
   });
+
+  // ---- SC-23 13F funds panel wiring ----
+  // Refresh: background EDGAR pull for all funds, then re-render.
+  $('#funds-refresh')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const status = $('#funds-refresh-status');
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = '⟳ pulling…';
+    try {
+      await api('/api/signals/refresh-13f', { method: 'POST' });
+      for (let i = 0; i < 12; i++) {
+        await new Promise((r) => setTimeout(r, 10000));
+        if (status) status.textContent = `EDGAR pull running… (${(i + 1) * 10}s)`;
+        if (i >= 2) { await renderSignals(); return; }
+      }
+      await renderSignals();
+    } catch (err) {
+      btn.disabled = false; btn.textContent = orig;
+      if (status) status.textContent = `failed: ${err.message}`;
+    }
+  });
+  // Add a fund CIK.
+  $('#fund-add-btn')?.addEventListener('click', async () => {
+    const cik = ($('#fund-add-cik')?.value || '').trim();
+    const name = ($('#fund-add-name')?.value || '').trim();
+    if (!cik) { $('#fund-add-cik')?.focus(); return; }
+    try {
+      await api('/api/signals/tracked-funds', { method: 'POST', body: JSON.stringify({ cik, name }) });
+      await renderSignals();
+    } catch (err) { alert('Add fund failed: ' + err.message); }
+  });
+  // Remove a fund.
+  for (const btn of document.querySelectorAll('[data-fund-remove]')) {
+    btn.addEventListener('click', async () => {
+      const cik = btn.dataset.fundRemove;
+      if (!confirm(`Stop tracking CIK ${cik}? (history is kept)`)) return;
+      try {
+        await api('/api/signals/tracked-funds/remove', { method: 'POST', body: JSON.stringify({ cik }) });
+        await renderSignals();
+      } catch (err) { alert('Remove failed: ' + err.message); }
+    });
+  }
+  // View per-position diff detail (AC3).
+  for (const btn of document.querySelectorAll('[data-fund-view]')) {
+    btn.addEventListener('click', async () => {
+      const cik = btn.dataset.fundView;
+      const box = document.getElementById('fund-diff-' + cik);
+      if (!box) return;
+      if (!box.hidden) { box.hidden = true; btn.textContent = 'view changes →'; return; }
+      btn.textContent = 'loading…';
+      try {
+        const data = await api('/api/signals/fund-13f-diffs?cik=' + encodeURIComponent(cik));
+        const diffs = data.diffs || [];
+        if (diffs.length === 0) {
+          box.innerHTML = '<div class="dim" style="font-size:0.78rem">No quarter-over-quarter changes (need two filed periods).</div>';
+        } else {
+          const ctLabel = { new: '+ NEW', exit: '− EXIT', increase: '▲ INC', decrease: '▼ DEC' };
+          box.innerHTML = `<table class="holdings f13-diff-table"><thead><tr>
+              <th>Change</th><th>Ticker / Issuer</th><th>Type</th><th class="num">Value</th><th>Flags</th>
+            </tr></thead><tbody>${diffs.map(d => {
+              const tierCls = d.tier === 'alarm' ? 'alarm' : d.tier === 'flag' ? 'flag' : 'info';
+              const tkr = d.ticker
+                ? `<strong>${escapeHTML(d.ticker)}</strong>`
+                : `<span class="dim" title="CUSIP not mapped — flagged, not guessed">${escapeHTML(d.cusip)} ⚑</span>`;
+              const iss = d.issuerName ? `<br><span class="dim" style="font-size:0.72rem">${escapeHTML(d.issuerName)}</span>` : '';
+              const pc = d.putCall ? `<span class="f13-chip ${d.putCall === 'put' ? 'exit' : 'inc'}">${d.putCall.toUpperCase()}</span>` : '';
+              const val = d.newValue != null ? '$' + fmtUSDShort(d.newValue) : (d.priorValue != null ? '(was $' + fmtUSDShort(d.priorValue) + ')' : '—');
+              const flags = (d.reasons || []).map(rsn => `<span class="f13-reason">${escapeHTML(rsn)}</span>`).join(' ');
+              return `<tr class="tier-row ${tierCls}">
+                <td>${SIGNAL_TIER_PILL[d.tier] || ''} ${ctLabel[d.changeType] || d.changeType}</td>
+                <td>${tkr}${iss}</td><td>${pc || '<span class="dim">equity</span>'}</td>
+                <td class="num">${val}</td><td>${flags}</td>
+              </tr>`;
+            }).join('')}</tbody></table>
+            <div class="dim" style="font-size:0.7rem;margin-top:0.3rem">⚠️ ${escapeHTML(CAVEAT_13F)}</div>`;
+        }
+        box.hidden = false;
+        btn.textContent = 'hide changes';
+      } catch (err) {
+        btn.textContent = 'view changes →';
+        alert('Load diffs failed: ' + err.message);
+      }
+    });
+  }
+}
+
+// Compact USD formatter for the 13F panel (mirrors Go formatUSDShort).
+function fmtUSDShort(v) {
+  if (v == null) return '—';
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+  return String(Math.round(v));
 }
 
 async function renderPerformance() {
@@ -9937,10 +10098,15 @@ async function renderSectorRotation() {
   const effective = regime?.effective || 'unclassified';
   const regimeTone = effective === 'stable' ? 'gain' : effective === 'shifting' ? 'amber-text' : effective === 'defensive' ? 'loss' : 'dim';
   const jordiRead = await loadJordiSectorRead();
+  // SC-25 — the Jordi regime is an interactive, shared control here (same modal
+  // the Summary tab uses), not a display-only mirror. Effective stays read-only.
+  const jordiData = (regime && regime.jordi) ? regime.jordi : { regime: 'unclassified', stale: false };
   const macroStrip = `
     <div class="sector-macro-strip">
       <div class="sm-regime">
-        <span class="dim">Regime:</span>
+        <span class="dim">Jordi regime:</span>
+        ${regimePillHTML({ side: 'jordi', label: 'Jordi', data: jordiData })}
+        <span class="dim" title="Effective = Jordi blended with Cowen">Effective:</span>
         <span class="${regimeTone}"><strong>${escapeHTML(effective.toUpperCase())}</strong></span>
       </div>
       <div class="sm-jordi">
@@ -10062,6 +10228,17 @@ async function renderSectorRotation() {
 
   // Spec 9p — wire the macro band (refresh / ISM override / apply-Jordi / collapse).
   wireMacroBand(content, macro);
+
+  // SC-25 — Macro-tab Jordi pill opens the SAME modal as the Summary tab and
+  // re-renders this tab on save (instant pill update + effective-regime UI),
+  // while refreshRegime() inside the modal keeps the Summary pills in sync.
+  for (const node of content.querySelectorAll('.sm-regime .regime-pill[data-side="jordi"]')) {
+    const open = () => openManualRegimeModal('jordi', renderSectorRotation);
+    node.addEventListener('click', open);
+    node.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
+    });
+  }
 
   // Spec 9f D9 — filter toggle.
   for (const btn of content.querySelectorAll('.srf-btn[data-srf]')) {

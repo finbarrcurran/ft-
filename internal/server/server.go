@@ -262,6 +262,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/signals/refresh-278t-eo-link", s.requireUser(s.handleRefresh278TEOLink))
 	s.mux.HandleFunc("GET /api/signals/tracked-individuals", s.requireUser(s.handleListTrackedIndividuals))
 	s.mux.HandleFunc("POST /api/signals/tracked-individuals", s.requireUser(s.handleAddTrackedIndividual))
+	// SC-23 — 13F institutional tracker: fund-CIK watchlist + quarterly EDGAR pull.
+	s.mux.HandleFunc("GET /api/signals/tracked-funds", s.requireUser(s.handleListTrackedFunds))
+	s.mux.HandleFunc("POST /api/signals/tracked-funds", s.requireUser(s.handleAddTrackedFund))
+	s.mux.HandleFunc("POST /api/signals/tracked-funds/remove", s.requireUser(s.handleRemoveTrackedFund))
+	s.mux.HandleFunc("GET /api/signals/fund-13f-diffs", s.requireUser(s.handleListFund13FDiffs))
+	s.mux.HandleFunc("POST /api/signals/refresh-13f", s.requireUser(s.handleRefresh13F))
 	s.mux.HandleFunc("GET /api/crypto-indicators/ism", s.requireUser(s.handleReadISM))
 	s.mux.HandleFunc("POST /api/crypto-indicators/ism", s.requireUser(s.handleUploadISM))
 

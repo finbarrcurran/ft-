@@ -227,6 +227,112 @@ func (s *Server) handleAddTrackedIndividual(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// ---- SC-23 13F Institutional Tracker -------------------------------------
+
+// GET /api/signals/tracked-funds — the fund watchlist + per-fund diff summary
+// + the mandatory 13F caveat label.
+func (s *Server) handleListTrackedFunds(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"funds": []any{}, "caveat": signals.Caveat13F})
+		return
+	}
+	funds, err := s.signals.ListTrackedFunds(r.Context())
+	if err != nil {
+		mapStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"funds":  funds,
+		"caveat": signals.Caveat13F,
+	})
+}
+
+// POST /api/signals/tracked-funds — add/reactivate a fund CIK.
+func (s *Server) handleAddTrackedFund(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	var body struct {
+		CIK   string `json:"cik"`
+		Name  string `json:"name"`
+		Notes string `json:"notes"`
+	}
+	if !decodeJSON(r, w, &body) {
+		return
+	}
+	cik, err := s.signals.AddTrackedFund(r.Context(), body.CIK, body.Name, body.Notes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cik": cik})
+}
+
+// POST /api/signals/tracked-funds/remove — soft-deactivate a fund.
+func (s *Server) handleRemoveTrackedFund(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	var body struct {
+		CIK string `json:"cik"`
+	}
+	if !decodeJSON(r, w, &body) {
+		return
+	}
+	if err := s.signals.RemoveTrackedFund(r.Context(), body.CIK); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// GET /api/signals/fund-13f-diffs?cik=... — the latest-period diff detail for
+// one fund (AC3 visibility) + the caveat.
+func (s *Server) handleListFund13FDiffs(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	cik := r.URL.Query().Get("cik")
+	if cik == "" {
+		writeError(w, http.StatusBadRequest, "cik query param required")
+		return
+	}
+	diffs, period, err := s.signals.ListFund13FDiffs(r.Context(), cik)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"diffs":  diffs,
+		"period": period,
+		"caveat": signals.Caveat13F,
+	})
+}
+
+// POST /api/signals/refresh-13f — background quarterly EDGAR pull for all
+// tracked funds (submissions → latest 13F-HR → info-table XML → diff). Returns
+// 202; refresh the panel in ~30-60s.
+func (s *Server) handleRefresh13F(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, _, err := s.signals.RefreshAllFunds(ctx); err != nil {
+			_ = err // RefreshAllFunds already logs per-fund
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"started": true,
+		"message": "13F EDGAR pull started in background — refresh in 30-60s",
+	})
+}
+
 // POST /api/signals/refresh-congress — background ingest, returns 202.
 func (s *Server) handleRefreshCongress(w http.ResponseWriter, r *http.Request) {
 	if s.signals == nil {

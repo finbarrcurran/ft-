@@ -3658,7 +3658,7 @@ input.autofilled, select.autofilled {
   gap: 0.4rem;
   flex-wrap: wrap;
 }
-.regime-pill {
+.tracked-panel .regime-pill {
   font-size: 0.62rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -3667,9 +3667,9 @@ input.autofilled, select.autofilled {
   border-radius: 4px;
   font-family: var(--font-mono);
 }
-.regime-pill.exec { background: rgb(var(--color-accent) / 0.18); color: rgb(var(--color-accent)); }
-.regime-pill.congress { background: rgb(255 191 0 / 0.18); color: rgb(255 191 0); }
-.regime-pill.none { background: rgb(var(--color-dim) / 0.18); color: rgb(var(--color-dim)); }
+.tracked-panel .regime-pill.exec { background: rgb(var(--color-accent) / 0.18); color: rgb(var(--color-accent)); }
+.tracked-panel .regime-pill.congress { background: rgb(255 191 0 / 0.18); color: rgb(255 191 0); }
+.tracked-panel .regime-pill.none { background: rgb(var(--color-dim) / 0.18); color: rgb(var(--color-dim)); }
 .tracked-sub {
   margin-top: 0.3rem;
   font-size: 0.75rem;
@@ -3683,6 +3683,49 @@ input.autofilled, select.autofilled {
   font-size: 0.7rem;
   line-height: 1.35;
 }
+
+/* === SC-23 13F institutional funds panel === */
+.funds-panel .signal-section-h { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.fund-card {
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  background: rgb(var(--color-surface) / 0.5);
+}
+.fund-card.has-alarm { border-color: rgb(var(--color-loss) / 0.5); }
+.fund-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.fund-cik { font-family: var(--font-mono); font-size: 0.68rem; color: rgb(var(--color-text-muted)); }
+.fund-remove { margin-left: auto; font-size: 0.68rem; color: rgb(var(--color-text-muted)); }
+.fund-meta { margin-top: 0.25rem; font-size: 0.74rem; }
+.fund-diffs { margin-top: 0.4rem; display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; }
+.f13-chip {
+  font-size: 0.66rem; font-weight: 600; padding: 0.05rem 0.35rem; border-radius: 4px;
+  font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.02em;
+}
+.f13-chip.new { background: rgb(var(--color-gain) / 0.16); color: rgb(var(--color-gain)); }
+.f13-chip.exit { background: rgb(var(--color-loss) / 0.16); color: rgb(var(--color-loss)); }
+.f13-chip.inc { background: rgb(var(--color-gain) / 0.12); color: rgb(var(--color-gain)); }
+.f13-chip.dec { background: rgb(var(--color-amber) / 0.16); color: rgb(var(--color-amber)); }
+.f13-overlap {
+  font-size: 0.7rem; font-weight: 600; color: rgb(var(--color-accent));
+  padding: 0.05rem 0.4rem; border: 1px solid rgb(var(--color-accent) / 0.4); border-radius: 4px;
+}
+.fund-add-row { display: flex; gap: 0.4rem; margin-top: 0.6rem; flex-wrap: wrap; }
+.fund-add-input {
+  background: rgb(var(--color-bg)); border: 1px solid rgb(var(--color-border));
+  border-radius: 5px; padding: 0.25rem 0.5rem; color: rgb(var(--color-text));
+  font-size: 0.78rem; font-family: var(--font-mono);
+}
+.fund-view { margin-top: 0.45rem; font-size: 0.72rem; }
+.fund-diff-detail { margin-top: 0.5rem; }
+.f13-diff-table { width: 100%; font-size: 0.74rem; }
+.f13-diff-table th { text-align: left; color: rgb(var(--color-text-muted)); font-weight: 600; }
+.f13-reason {
+  font-family: var(--font-mono); font-size: 0.62rem; color: rgb(var(--color-text-muted));
+  background: rgb(var(--color-surface) / 0.6); padding: 0.02rem 0.3rem; border-radius: 3px;
+}
+.f13-diff-table tr.tier-row.alarm td:first-child { border-left: 3px solid rgb(var(--color-loss)); }
+.f13-diff-table tr.tier-row.flag td:first-child { border-left: 3px solid rgb(var(--color-amber)); }
 
 /* === v1.12 Crypto Indicators visual upgrade === */
 .ci-hero-v2 {
