@@ -8692,13 +8692,19 @@ if (!state.signalsSort) {
     insider:         { col: 'date', dir: 'desc' },
     congress:        { col: 'date', dir: 'desc' },
     executive_order: { col: 'date', dir: 'desc' },
+    oge_278t:        { col: 'date', dir: 'desc' },
   };
 }
+
+// SC-24 — mandatory 278-T caveat label (spec §C / AC4). Mirrors the server
+// constant signals.Caveat278T; the live value also arrives in API payloads.
+const CAVEAT_278T = 'Periodic (~quarterly) · ~45-day lag · OGE value bands (not exact) · does not state who directed the trade.';
 
 const SIGNAL_TYPE_ICON = {
   insider: '📈',
   congress: '🏛',
   executive_order: '📜',
+  oge_278t: '🏛️',
 };
 const SIGNAL_TIER_PILL = {
   info:  '<span class="tier-pill info">INFO</span>',
@@ -8727,6 +8733,39 @@ async function renderSignals() {
   const counts = payload.counts || { info: 0, flag: 0, alarm: 0 };
   state.signalsAlarmCount = counts.alarm || 0;
 
+  // SC-24 — named-individual watchlist (best-effort; panel hidden on error).
+  let tracked = [];
+  try {
+    const tp = await api('/api/signals/tracked-individuals');
+    tracked = tp.individuals || [];
+  } catch (_) { /* panel simply won't render */ }
+
+  const REGIME_META = {
+    executive_278t:    { label: 'OGE 278-T', cls: 'exec', hint: 'Files periodic transaction reports' },
+    congressional_ptr: { label: 'STOCK Act PTR', cls: 'congress', hint: 'Files congressional PTRs' },
+    none:              { label: 'No filings', cls: 'none', hint: 'No federal disclosure duty' },
+  };
+  const trackedPanel = tracked.length === 0 ? '' : `
+    <section class="tracked-panel">
+      <h3 class="signal-section-h">👤 Tracked individuals <span class="dim" style="font-size:0.85rem;font-weight:normal">${tracked.length}</span></h3>
+      <div class="tracked-grid">
+        ${tracked.map(t => {
+          const m = REGIME_META[t.disclosureRegime] || REGIME_META.none;
+          const sub = t.disclosureRegime === 'none'
+            ? `<span class="tracked-nofile">no trade filings — tracked via linked tickers + news only</span>`
+            : `<span class="dim">${t.signalCount} signal${t.signalCount === 1 ? '' : 's'} matched</span>`;
+          return `
+            <div class="tracked-card ${m.cls}">
+              <div class="tracked-name">${escapeHTML(t.name)}<span class="regime-pill ${m.cls}" title="${escapeHTML(m.hint)}">${m.label}</span></div>
+              ${t.role ? `<div class="dim" style="font-size:0.75rem">${escapeHTML(t.role)}</div>` : ''}
+              <div class="tracked-sub">${sub}</div>
+              ${t.notes ? `<div class="tracked-note dim">${escapeHTML(t.notes)}</div>` : ''}
+            </div>`;
+        }).join('')}
+      </div>
+      <div class="dim" style="font-size:0.72rem;margin-top:0.4rem">⚠️ ${escapeHTML(CAVEAT_278T)}</div>
+    </section>`;
+
   const tierChip = (key, label, count) => {
     const active = f.tier === key;
     return `<button class="ci-chip ${active ? 'active' : ''}" data-signal-tier="${key}">${label}${count != null ? ` <span class="dim">${count}</span>` : ''}</button>`;
@@ -8751,6 +8790,7 @@ async function renderSignals() {
   // Split rows by signal type. Then sort each section by its own
   // sort-state (state.signalsSort[type]).
   const sectionsConfig = [
+    { type: 'oge_278t',        label: '🏛️ Exec PTR (OGE 278-T)', endpoint: null, caveat: CAVEAT_278T },
     { type: 'insider',         label: '📈 Insider Form 4',     endpoint: '/api/signals/refresh-insiders' },
     { type: 'congress',        label: '🏛 Congress (PTRs)',    endpoint: '/api/signals/refresh-congress' },
     { type: 'executive_order', label: '📜 Executive Orders',   endpoint: '/api/signals/refresh-eo' },
@@ -8784,11 +8824,15 @@ async function renderSignals() {
     const body = sectionRows.length === 0
       ? `<tr><td colspan="9"><div class="empty"><div class="dim">No ${cfg.type.replace('_', ' ')} signals in window. Try widening Range or hit ⟳ Refresh all.</div></div></td></tr>`
       : sectionRows.map(buildRowHTML).join('');
+    const caveatBanner = cfg.caveat
+      ? `<div class="caveat-278t" title="Mandatory disclosure caveat">⚠️ ${escapeHTML(cfg.caveat)}</div>`
+      : '';
     return `
       <section class="signal-section">
         <h3 class="signal-section-h">
           ${cfg.label} <span class="dim" style="font-size:0.85rem;font-weight:normal">${count} row${count === 1 ? '' : 's'}</span>
         </h3>
+        ${caveatBanner}
         <div class="tablewrap">
           <table class="holdings signals-table">
             <thead>
@@ -8851,10 +8895,12 @@ async function renderSignals() {
         ${univChip('unowned', '🌐 Unowned')}
       </div>
 
+      ${trackedPanel}
+
       ${sectionsConfig.map(renderSection).join('')}
 
       <div class="ci-footer dim">
-        Spec 9k Phase A + B — insider + congressional + EO. Telegram routing ships in v1.12.0.
+        Spec 9k Phase A + B — insider + congressional + EO. SC-24 named-figure tracker (OGE 278-T + linked tickers + EO cross-link). Telegram routing ships in v1.12.0.
       </div>
     </div>
   `;
@@ -8890,7 +8936,7 @@ async function renderSignals() {
         <td>${tickerLink}</td>
         <td>${actor}</td>
         <td>${action}</td>
-        <td class="num">${r.amountUsd == null ? '—' : '$' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(r.amountUsd)}</td>
+        <td class="num">${r.amountUsd == null ? (r.amountBucket ? `<span class="band-cell" title="OGE value band — not an exact figure">${escapeHTML(r.amountBucket)}</span>` : '—') : '$' + new Intl.NumberFormat('en-US', {maximumFractionDigits: 0}).format(r.amountUsd)}</td>
         <td>${reasonChips}</td>
         <td>${r.sourceUrl ? `<a href="${escapeHTML(r.sourceUrl)}" target="_blank" rel="noopener" class="dim" title="Open source">↗</a>` : ''}</td>
         <td>${r.acknowledged ? '<span class="dim">✓</span>' : `<button class="row-mini" data-signal-ack="${r.id}" title="Acknowledge">ack</button>`}</td>

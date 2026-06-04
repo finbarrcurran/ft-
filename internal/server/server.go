@@ -256,6 +256,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/signals/refresh-eo", s.requireUser(s.handleRefreshEO))
 	s.mux.HandleFunc("POST /api/signals/refresh-committees", s.requireUser(s.handleRefreshCommittees))
 	s.mux.HandleFunc("GET /api/signals/universe", s.requireUser(s.handleSignalsUniverse))
+	// SC-24 — Named Political-Figure Tracker: OGE Form 278-T periodic
+	// transaction upload + named watchlist + EO-coincidence cross-link.
+	s.mux.HandleFunc("POST /api/signals/upload-278t", s.requireUser(s.handleUpload278T))
+	s.mux.HandleFunc("POST /api/signals/refresh-278t-eo-link", s.requireUser(s.handleRefresh278TEOLink))
+	s.mux.HandleFunc("GET /api/signals/tracked-individuals", s.requireUser(s.handleListTrackedIndividuals))
+	s.mux.HandleFunc("POST /api/signals/tracked-individuals", s.requireUser(s.handleAddTrackedIndividual))
 	s.mux.HandleFunc("GET /api/crypto-indicators/ism", s.requireUser(s.handleReadISM))
 	s.mux.HandleFunc("POST /api/crypto-indicators/ism", s.requireUser(s.handleUploadISM))
 

@@ -138,6 +138,95 @@ func (s *Server) handleUploadOGE(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /api/signals/upload-278t — JSON upload of an OGE Form 278-T periodic
+// transaction report (SC-24). Body shape: signals.OGE278TPayload. Each
+// transaction becomes one signal_type='oge_278t' row (value band stored as a
+// band, never a point value). After ingest we run the EO-coincidence
+// cross-link so any trade landing in the same window as an EO touching its
+// sector is promoted to ALARM. Idempotent on re-upload.
+func (s *Server) handleUpload278T(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	var p signals.OGE278TPayload
+	if !decodeJSON(r, w, &p) {
+		return
+	}
+	inserted, flagged, err := s.signals.Ingest278T(r.Context(), &p)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	promoted, _ := s.signals.PromoteEOCoincident(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"inserted":        inserted,
+		"flaggedUnparsed": flagged,
+		"eoCoincidentAlarms": promoted,
+		"transactions":    len(p.Transactions),
+		"filer":           p.Filer,
+		"filingDate":      p.FilingDate,
+		"caveat":          signals.Caveat278T,
+	})
+}
+
+// POST /api/signals/refresh-278t-eo-link — re-run the EO-coincidence join
+// over existing 278-T + EO rows (e.g. after a fresh EO ingest). Returns the
+// count of newly-promoted ALARMs.
+func (s *Server) handleRefresh278TEOLink(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	promoted, err := s.signals.PromoteEOCoincident(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "promoted": promoted})
+}
+
+// GET /api/signals/tracked-individuals — the SC-24 named watchlist + the
+// mandatory 278-T caveat label.
+func (s *Server) handleListTrackedIndividuals(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"individuals": []any{}, "caveat": signals.Caveat278T})
+		return
+	}
+	people, err := s.signals.ListTrackedIndividuals(r.Context())
+	if err != nil {
+		mapStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"individuals": people,
+		"caveat":      signals.Caveat278T,
+	})
+}
+
+// POST /api/signals/tracked-individuals — add/update a tracked name.
+func (s *Server) handleAddTrackedIndividual(w http.ResponseWriter, r *http.Request) {
+	if s.signals == nil {
+		writeError(w, http.StatusNotFound, "signals not initialised")
+		return
+	}
+	var body struct {
+		Name             string `json:"name"`
+		Role             string `json:"role"`
+		DisclosureRegime string `json:"disclosureRegime"`
+		Notes            string `json:"notes"`
+	}
+	if !decodeJSON(r, w, &body) {
+		return
+	}
+	if err := s.signals.AddTrackedIndividual(r.Context(), body.Name, body.Role, body.DisclosureRegime, body.Notes); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // POST /api/signals/refresh-congress — background ingest, returns 202.
 func (s *Server) handleRefreshCongress(w http.ResponseWriter, r *http.Request) {
 	if s.signals == nil {

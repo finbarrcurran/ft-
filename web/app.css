@@ -3616,6 +3616,74 @@ input.autofilled, select.autofilled {
   color: rgb(var(--color-loss));
 }
 
+/* === SC-24 Named Political-Figure Tracker === */
+.caveat-278t {
+  font-size: 0.74rem;
+  line-height: 1.4;
+  padding: 0.4rem 0.6rem;
+  margin: 0 0 0.5rem 0;
+  border-radius: 6px;
+  background: rgb(255 191 0 / 0.12);
+  border: 1px solid rgb(255 191 0 / 0.3);
+  color: rgb(255 191 0);
+}
+.band-cell {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: rgb(var(--color-text) / 0.85);
+}
+.tracked-panel {
+  margin-top: 1.2rem;
+}
+.tracked-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.6rem;
+}
+.tracked-card {
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  background: rgb(var(--color-dim) / 0.08);
+  border: 1px solid rgb(var(--color-dim) / 0.2);
+  border-left: 3px solid rgb(var(--color-dim) / 0.5);
+}
+.tracked-card.exec { border-left-color: rgb(var(--color-accent)); }
+.tracked-card.congress { border-left-color: rgb(255 191 0); }
+.tracked-card.none { border-left-color: rgb(var(--color-dim) / 0.5); }
+.tracked-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.regime-pill {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 0.08rem 0.4rem;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+.regime-pill.exec { background: rgb(var(--color-accent) / 0.18); color: rgb(var(--color-accent)); }
+.regime-pill.congress { background: rgb(255 191 0 / 0.18); color: rgb(255 191 0); }
+.regime-pill.none { background: rgb(var(--color-dim) / 0.18); color: rgb(var(--color-dim)); }
+.tracked-sub {
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+}
+.tracked-nofile {
+  font-style: italic;
+  color: rgb(var(--color-dim));
+}
+.tracked-note {
+  margin-top: 0.3rem;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
 /* === v1.12 Crypto Indicators visual upgrade === */
 .ci-hero-v2 {
   display: grid;
