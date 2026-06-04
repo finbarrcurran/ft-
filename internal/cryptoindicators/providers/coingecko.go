@@ -155,6 +155,43 @@ func (c *CoinGeckoClient) FetchBTCPriceUSD(ctx context.Context) (*float64, error
 	return nil, fmt.Errorf("bitcoin price not in response")
 }
 
+// CGMarket is one row of CoinGecko's /coins/markets top-N response. SC-21:
+// feeds the crypto market screener. Percentage fields are pointers because
+// CoinGecko returns null for coins missing a given window.
+type CGMarket struct {
+	ID            string   `json:"id"`     // gecko id (e.g. "ethereum")
+	Symbol        string   `json:"symbol"` // lowercase ticker (e.g. "eth")
+	Name          string   `json:"name"`
+	CurrentPrice  float64  `json:"current_price"`
+	MarketCap     float64  `json:"market_cap"`
+	MarketCapRank int      `json:"market_cap_rank"`
+	TotalVolume   float64  `json:"total_volume"`
+	Change24h     *float64 `json:"price_change_percentage_24h_in_currency"`
+	Change7d      *float64 `json:"price_change_percentage_7d_in_currency"`
+	Change30d     *float64 `json:"price_change_percentage_30d_in_currency"`
+}
+
+// FetchMarkets pulls the top-`perPage` coins by market cap (one page) with
+// 24h/7d/30d change windows. SC-21 uses perPage=250 (CoinGecko's max). One
+// call; the Demo key (SC-18) gives the rate headroom.
+func (c *CoinGeckoClient) FetchMarkets(ctx context.Context, perPage int) ([]CGMarket, error) {
+	if perPage <= 0 || perPage > 250 {
+		perPage = 250
+	}
+	url := fmt.Sprintf(
+		"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=%d&page=1&sparkline=false&price_change_percentage=24h%%2C7d%%2C30d&locale=en",
+		perPage)
+	body, _, err := doWithRetry(ctx, c.HTTP, url, c.APIKey)
+	if err != nil {
+		return nil, fmt.Errorf("coingecko /coins/markets: %w", err)
+	}
+	var rows []CGMarket
+	if err := json.Unmarshal(body, &rows); err != nil {
+		return nil, fmt.Errorf("coingecko /coins/markets decode: %w", err)
+	}
+	return rows, nil
+}
+
 // BTCMarketChartDay is one daily close for the historical BTC time series.
 type BTCMarketChartDay struct {
 	Date  time.Time

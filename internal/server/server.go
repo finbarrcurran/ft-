@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"ft/internal/config"
 	"ft/internal/cryptoindicators"
+	"ft/internal/cryptoscreener"
 	"ft/internal/cryptotheses"
 	"ft/internal/domain"
 	"ft/internal/llm"
@@ -44,6 +45,7 @@ type Server struct {
 	cryptoIndicators *cryptoindicators.Service // Spec 9e Phase 1
 	signals          *signals.Service          // Spec 9k Phase A
 	macroRegime      *macroregime.Service      // Spec 9p
+	cryptoScreener   *cryptoscreener.Service   // SC-21 crypto market screener
 	mux              *http.ServeMux
 }
 
@@ -64,6 +66,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		cryptoIndicators: cryptoindicators.New(st.DB), // Spec 9e Phase 1
 		signals:          signals.New(st.DB),          // Spec 9k Phase A
 		macroRegime:      macroregime.New(st.DB),      // Spec 9p
+		cryptoScreener:   cryptoscreener.New(),        // SC-21 crypto market screener
 		mux:              http.NewServeMux(),
 	}
 	s.cryptoWrite = cryptotheses.NewThesisWriteService(st.DB, s.cryptoAdapters, s.cryptoCascade)
@@ -157,6 +160,8 @@ func (s *Server) routes() {
 
 	// Spec 9b D9: screener — S&P sample with live overlay + filters.
 	s.mux.HandleFunc("GET /api/screener", s.requireUser(s.handleScreener))
+	// SC-21: crypto market screener — CoinGecko top-250 + DefiLlama TVL.
+	s.mux.HandleFunc("GET /api/crypto-screener", s.requireUser(s.handleCryptoScreener))
 
 	// Spec 9c: per-holding levels (S/R candidates + suggested SL/TP/R-mult).
 	// Token-or-cookie so the bot's /levels command works.

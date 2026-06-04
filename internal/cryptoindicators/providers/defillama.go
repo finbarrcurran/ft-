@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -78,4 +79,72 @@ func (c *DefiLlamaClient) FetchStablecoinSupply(ctx context.Context) Reading {
 		}
 	}
 	return out
+}
+
+// ChainTVL maps a CoinGecko gecko-id to that chain's current total TVL (USD).
+// SC-21: the primary TVL source for L1/L2 coins (ETH, SOL, …). Keyed by
+// gecko_id so the match to a /coins/markets row is exact (no symbol guessing).
+type ChainTVL struct {
+	GeckoID string  `json:"gecko_id"`
+	Name    string  `json:"name"`
+	TVL     float64 `json:"tvl"`
+}
+
+// FetchChainTVL returns gecko_id → TVL (USD) for every chain DefiLlama tracks.
+// Endpoint: https://api.llama.fi/v2/chains (free, no key). Chains with a null
+// gecko_id are skipped (can't be matched to a market row).
+func (c *DefiLlamaClient) FetchChainTVL(ctx context.Context) (map[string]float64, error) {
+	body, _, err := doWithRetry(ctx, c.HTTP, "https://api.llama.fi/v2/chains", "")
+	if err != nil {
+		return nil, fmt.Errorf("defillama /v2/chains: %w", err)
+	}
+	var chains []ChainTVL
+	if err := json.Unmarshal(body, &chains); err != nil {
+		return nil, fmt.Errorf("defillama /v2/chains decode: %w", err)
+	}
+	out := make(map[string]float64, len(chains))
+	for _, ch := range chains {
+		if ch.GeckoID == "" || ch.TVL <= 0 {
+			continue
+		}
+		out[ch.GeckoID] = ch.TVL
+	}
+	return out, nil
+}
+
+// ProtocolTVL is the per-symbol DeFi-protocol TVL + DefiLlama category.
+type ProtocolTVL struct {
+	TVL      float64
+	Category string
+}
+
+// FetchProtocolTVL returns upper-cased token symbol → {TVL, category} for
+// DeFi protocols (Dexes, Lending, Liquid Staking, …). Endpoint:
+// https://api.llama.fi/protocols (free, no key). When several protocols share
+// a symbol, the largest-TVL one wins (the dominant protocol for that token).
+func (c *DefiLlamaClient) FetchProtocolTVL(ctx context.Context) (map[string]ProtocolTVL, error) {
+	body, _, err := doWithRetry(ctx, c.HTTP, "https://api.llama.fi/protocols", "")
+	if err != nil {
+		return nil, fmt.Errorf("defillama /protocols: %w", err)
+	}
+	var protocols []struct {
+		Symbol   string  `json:"symbol"`
+		Category string  `json:"category"`
+		TVL      float64 `json:"tvl"`
+	}
+	if err := json.Unmarshal(body, &protocols); err != nil {
+		return nil, fmt.Errorf("defillama /protocols decode: %w", err)
+	}
+	out := make(map[string]ProtocolTVL, len(protocols))
+	for _, p := range protocols {
+		sym := strings.ToUpper(strings.TrimSpace(p.Symbol))
+		if sym == "" || sym == "-" || p.TVL <= 0 {
+			continue
+		}
+		if existing, ok := out[sym]; ok && existing.TVL >= p.TVL {
+			continue // keep the dominant protocol for this symbol
+		}
+		out[sym] = ProtocolTVL{TVL: p.TVL, Category: p.Category}
+	}
+	return out, nil
 }

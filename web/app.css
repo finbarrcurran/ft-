@@ -1040,6 +1040,34 @@ table.holdings tbody tr:last-child td { border-bottom: 0; }
 .screener-tag.held { background: rgb(var(--color-amber) / 0.15); color: rgb(var(--color-amber)); }
 .screener-tag.wl   { background: rgb(var(--color-gain) / 0.15);  color: rgb(var(--color-gain-strong)); }
 
+/* SC-21 — Screener asset-class toggle (Equities | Crypto). */
+.screener-asset-toggle {
+  display: inline-flex;
+  gap: 0;
+  margin-bottom: 0.9rem;
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.screener-asset-toggle .sat-btn {
+  padding: 0.35rem 1.1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: transparent;
+  color: rgb(var(--color-text-muted));
+  border: none;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.screener-asset-toggle .sat-btn:hover { color: rgb(var(--color-text)); }
+.screener-asset-toggle .sat-btn.active {
+  background: rgb(var(--color-accent) / 0.18);
+  color: rgb(var(--color-accent));
+}
+/* SC-21 — crypto screener table runs wide; keep it readable. */
+.crypto-screener { font-size: 0.82rem; }
+.crypto-screener td, .crypto-screener th { white-space: nowrap; }
+
 /* Spec 9b D7/D8: donut placeholder when tag coverage < 50%. */
 .donut-card.placeholder .donut-placeholder {
   padding: 1.5rem 0.8rem;

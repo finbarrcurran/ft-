@@ -5518,7 +5518,44 @@ if (!state.screenerFilters) {
   state.screenerRows = null;
 }
 
+// SC-21 — asset-class toggle (Equities | Crypto). The Screener tab now serves
+// two views; default to equities to preserve prior behaviour.
+if (state.screenerAsset == null) state.screenerAsset = 'equities';
+const CRYPTO_SCREENER_DEFAULT_SORT = { col: 'marketCap', dir: 'desc' };
+if (!state.cryptoScreenerFilters) {
+  state.cryptoScreenerFilters = { category: '', tag: '', topN: 100 };
+  state.cryptoScreenerSort = { ...CRYPTO_SCREENER_DEFAULT_SORT };
+  state.cryptoScreenerRows = null;
+  state.cryptoScreenerMeta = null;
+}
+
+// Asset-class toggle markup + wiring, shared by both screener views.
+function screenerAssetToggle() {
+  const a = state.screenerAsset || 'equities';
+  return `
+    <div class="screener-asset-toggle" role="tablist" aria-label="Asset class">
+      <button class="sat-btn ${a === 'equities' ? 'active' : ''}" data-asset="equities" role="tab" aria-selected="${a === 'equities'}">Equities</button>
+      <button class="sat-btn ${a === 'crypto' ? 'active' : ''}" data-asset="crypto" role="tab" aria-selected="${a === 'crypto'}">Crypto</button>
+    </div>`;
+}
+function wireScreenerAssetToggle() {
+  document.querySelectorAll('.screener-asset-toggle .sat-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const a = btn.dataset.asset;
+      if (a === state.screenerAsset) return;
+      state.screenerAsset = a;
+      renderScreener();
+    });
+  });
+}
+
+// Dispatcher — routes the Screener tab to the equities or crypto view.
 async function renderScreener() {
+  if ((state.screenerAsset || 'equities') === 'crypto') return renderCryptoScreener();
+  return renderEquitiesScreener();
+}
+
+async function renderEquitiesScreener() {
   // Refetch when filters change; cache in state.screenerRows.
   const f = state.screenerFilters;
   const params = new URLSearchParams();
@@ -5582,6 +5619,7 @@ async function renderScreener() {
     ? (state.screenerSort.dir === 'asc' ? ' ↑' : ' ↓') : '';
 
   $('#content').innerHTML = `
+    ${screenerAssetToggle()}
     <div class="screener-filters">
       <div class="screener-filter-row">
         <strong>Sectors</strong>
@@ -5616,9 +5654,11 @@ async function renderScreener() {
     </div>
   `;
 
+  wireScreenerAssetToggle();
+
   // Wire filter inputs (debounced on number fields).
   let debounce;
-  const reload = () => { clearTimeout(debounce); debounce = setTimeout(renderScreener, 220); };
+  const reload = () => { clearTimeout(debounce); debounce = setTimeout(renderEquitiesScreener, 220); };
   document.querySelectorAll('.screener-sector-chip input').forEach(inp => {
     inp.addEventListener('change', () => {
       const sec = inp.dataset.sector;
@@ -5640,12 +5680,12 @@ async function renderScreener() {
   });
   $('#sc-held').addEventListener('change', (ev) => {
     state.screenerFilters.held = ev.target.value;
-    renderScreener();
+    renderEquitiesScreener();
   });
   $('#sc-reset').addEventListener('click', () => {
     state.screenerFilters = { sectors: [], mcapMin: '', mcapMax: '', changeMin: '', changeMax: '', held: '' };
     state.screenerSort = { ...SCREENER_DEFAULT_SORT };
-    renderScreener();
+    renderEquitiesScreener();
   });
 
   // Header click → sort.
@@ -5658,7 +5698,7 @@ async function renderScreener() {
         state.screenerSort.col = c;
         state.screenerSort.dir = c === 'changePct' ? 'desc' : 'asc';
       }
-      renderScreener();
+      renderEquitiesScreener();
     });
   });
 
@@ -5673,6 +5713,210 @@ async function renderScreener() {
         mode: 'add',
         entry: undefined,
         prefill: { ticker: row.ticker, companyName: row.name, sector: row.sector, currentPrice: row.price },
+      });
+    });
+  });
+}
+
+// ---------- Crypto screener (SC-21) -------------------------------------
+//
+// Market-structure screener over CoinGecko's top-250 universe, enriched with
+// DefiLlama TVL (enrich-and-flag — blank, never zero/guessed, when unmatched).
+// Market data ONLY — no framework scores / cascade state (SC-21 §scope, S-B1).
+// One cached /api/crypto-screener pull serves every sort/filter; sorting and
+// filtering happen entirely client-side over that single 250-row payload.
+
+// Compact USD in billions (raw-USD input → "$X.XXB"); blank-not-zero on null.
+function fmtUsdB(v) {
+  if (v == null) return '<span class="dim">—</span>';
+  const b = v / 1e9;
+  if (b >= 1) return '$' + fmtNum2.format(b) + 'B';
+  const m = v / 1e6;
+  if (m >= 1) return '$' + fmtNum2.format(m) + 'M';
+  return '$' + fmtNum0.format(v);
+}
+// Crypto spot price — more precision for sub-dollar coins.
+function fmtCryptoPrice(p) {
+  if (p == null) return '<span class="dim">—</span>';
+  if (p >= 1) return '$' + fmtNum2.format(p);
+  if (p >= 0.01) return '$' + fmtNum4.format(p);
+  return '$' + p.toPrecision(2);
+}
+// Signed percent cell with gain/loss colour; blank-not-zero on null.
+function pctCell(v) {
+  if (v == null) return '<td class="num"><span class="dim">—</span></td>';
+  const cls = v > 0 ? 'gain' : v < 0 ? 'loss' : '';
+  return `<td class="num ${cls}">${v >= 0 ? '+' : ''}${fmtNum2.format(v)}%</td>`;
+}
+
+async function renderCryptoScreener() {
+  // Fetch once and cache; sorting/filtering is all client-side. Re-fetch only
+  // when the cache is empty or the user hits Refresh.
+  if (state.cryptoScreenerRows == null) {
+    $('#content').innerHTML = `${screenerAssetToggle()}<div class="empty"><div class="dim">Loading crypto market data…</div></div>`;
+    wireScreenerAssetToggle();
+    try {
+      const data = await api('/api/crypto-screener');
+      state.cryptoScreenerRows = data.rows || [];
+      state.cryptoScreenerMeta = {
+        categories: data.categories || [],
+        count: data.count || 0,
+        fetchedAt: data.fetchedAt || '',
+        stale: !!data.stale,
+      };
+    } catch (e) {
+      $('#content').innerHTML = `${screenerAssetToggle()}<div class="empty"><div class="loss">crypto screener failed: ${escapeHTML(e.message)}</div></div>`;
+      wireScreenerAssetToggle();
+      return;
+    }
+  }
+
+  const f = state.cryptoScreenerFilters;
+  const meta = state.cryptoScreenerMeta || { categories: [], count: 0, fetchedAt: '', stale: false };
+
+  // Filter: category, held/watchlist/untagged tag, top-N by market-cap rank.
+  let rows = state.cryptoScreenerRows.filter(r => {
+    if (f.category && r.category !== f.category) return false;
+    if (f.tag === 'held' && !r.held) return false;
+    if (f.tag === 'watchlist' && !r.onWatchlist) return false;
+    if (f.tag === 'untagged' && (r.held || r.onWatchlist)) return false;
+    if (f.topN && r.rank > f.topN) return false;
+    return true;
+  });
+
+  // Sort client-side; nulls always sort last regardless of direction.
+  const { col, dir } = state.cryptoScreenerSort;
+  rows = rows.slice().sort((a, b) => {
+    const av = a[col]; const bv = b[col];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'string') return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    return dir === 'asc' ? av - bv : bv - av;
+  });
+
+  const catOpts = ['<option value="">All categories</option>']
+    .concat(meta.categories.map(c => `<option value="${escapeHTML(c)}" ${f.category === c ? 'selected' : ''}>${escapeHTML(c)}</option>`))
+    .join('');
+  const tagOpts = [['', 'All coins'], ['held', 'Held'], ['watchlist', 'Watchlist'], ['untagged', 'Untagged']]
+    .map(([v, l]) => `<option value="${v}" ${f.tag === v ? 'selected' : ''}>${l}</option>`).join('');
+  const topNOpts = [25, 50, 100, 250]
+    .map(n => `<option value="${n}" ${f.topN === n ? 'selected' : ''}>Top ${n}</option>`).join('');
+
+  const sortIcon = (c) => state.cryptoScreenerSort.col === c
+    ? (state.cryptoScreenerSort.dir === 'asc' ? ' ↑' : ' ↓') : '';
+
+  const bodyRows = rows.map(r => {
+    const tagPills = [
+      r.held ? '<span class="screener-tag held">HELD</span>' : '',
+      r.onWatchlist ? '<span class="screener-tag wl">✓ WL</span>' : '',
+    ].join('');
+    return `
+      <tr data-symbol="${escapeHTML(r.symbol)}">
+        <td class="num dim">${r.rank}</td>
+        <td><strong>${escapeHTML(r.symbol)}</strong> <span class="dim">${escapeHTML(r.name)}</span> ${tagPills}</td>
+        <td class="dim">${escapeHTML(r.category)}</td>
+        <td class="num">${fmtCryptoPrice(r.priceUsd)}</td>
+        <td class="num">${fmtUsdB(r.marketCap)}</td>
+        ${pctCell(r.change24h)}
+        ${pctCell(r.change7d)}
+        ${pctCell(r.change30d)}
+        <td class="num">${fmtUsdB(r.volume24h)}</td>
+        <td class="num">${r.volToMcap != null ? fmtNum2.format(r.volToMcap) : '<span class="dim">—</span>'}</td>
+        <td class="num">${r.tvl != null ? fmtUsdB(r.tvl) : '<span class="dim">—</span>'}</td>
+        <td class="num">${r.mcapToTvl != null ? fmtNum2.format(r.mcapToTvl) + '×' : '<span class="dim">—</span>'}</td>
+        <td>${r.onWatchlist
+          ? '<span class="dim">on watchlist</span>'
+          : '<button class="btn-ghost" data-cadd="' + escapeHTML(r.symbol) + '">+ watchlist</button>'}</td>
+      </tr>`;
+  }).join('') || `<tr><td colspan="13" class="dim" style="text-align:center; padding:1rem">No matches.</td></tr>`;
+
+  const fetchedLabel = meta.fetchedAt
+    ? new Date(meta.fetchedAt).toLocaleString('en-IE', { dateStyle: 'medium', timeStyle: 'short' })
+    : '—';
+  const staleBadge = meta.stale
+    ? ' <span class="screener-tag" style="background:#7a5b1e;color:#ffd479">STALE</span>' : '';
+
+  $('#content').innerHTML = `
+    ${screenerAssetToggle()}
+    <div class="screener-filters">
+      <div class="screener-filter-row">
+        <strong>Category</strong>
+        <select id="cs-cat">${catOpts}</select>
+        <strong>Tag</strong>
+        <select id="cs-tag">${tagOpts}</select>
+        <strong>Universe</strong>
+        <select id="cs-topn">${topNOpts}</select>
+        <button class="btn-ghost" id="cs-reset">Reset</button>
+        <button class="btn-ghost" id="cs-refresh">↻ Refresh</button>
+      </div>
+      <div class="screener-summary dim">
+        ${rows.length} of top ${meta.count} coins · market data only · updated ${escapeHTML(fetchedLabel)}${staleBadge}
+      </div>
+    </div>
+    <div class="tablewrap">
+      <table class="holdings screener crypto-screener">
+        <thead><tr>
+          <th class="num" data-sort="rank">#${sortIcon('rank')}</th>
+          <th data-sort="name">Coin${sortIcon('name')}</th>
+          <th data-sort="category">Category${sortIcon('category')}</th>
+          <th class="num" data-sort="priceUsd">Price${sortIcon('priceUsd')}</th>
+          <th class="num" data-sort="marketCap">Mkt Cap${sortIcon('marketCap')}</th>
+          <th class="num" data-sort="change24h">24h${sortIcon('change24h')}</th>
+          <th class="num" data-sort="change7d">7d${sortIcon('change7d')}</th>
+          <th class="num" data-sort="change30d">30d${sortIcon('change30d')}</th>
+          <th class="num" data-sort="volume24h">Vol 24h${sortIcon('volume24h')}</th>
+          <th class="num" data-sort="volToMcap">Vol/Mcap${sortIcon('volToMcap')}</th>
+          <th class="num" data-sort="tvl">TVL${sortIcon('tvl')}</th>
+          <th class="num" data-sort="mcapToTvl">Mcap/TVL${sortIcon('mcapToTvl')}</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+  `;
+
+  wireScreenerAssetToggle();
+
+  $('#cs-cat').addEventListener('change', (ev) => { state.cryptoScreenerFilters.category = ev.target.value; renderCryptoScreener(); });
+  $('#cs-tag').addEventListener('change', (ev) => { state.cryptoScreenerFilters.tag = ev.target.value; renderCryptoScreener(); });
+  $('#cs-topn').addEventListener('change', (ev) => { state.cryptoScreenerFilters.topN = Number(ev.target.value); renderCryptoScreener(); });
+  $('#cs-reset').addEventListener('click', () => {
+    state.cryptoScreenerFilters = { category: '', tag: '', topN: 100 };
+    state.cryptoScreenerSort = { ...CRYPTO_SCREENER_DEFAULT_SORT };
+    renderCryptoScreener();
+  });
+  $('#cs-refresh').addEventListener('click', () => {
+    state.cryptoScreenerRows = null;
+    state.cryptoScreenerMeta = null;
+    renderCryptoScreener();
+  });
+
+  // Header click → sort (default desc for the numeric/% columns, asc for text).
+  document.querySelectorAll('.crypto-screener th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+      const c = th.dataset.sort;
+      if (state.cryptoScreenerSort.col === c) {
+        state.cryptoScreenerSort.dir = state.cryptoScreenerSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.cryptoScreenerSort.col = c;
+        state.cryptoScreenerSort.dir = (c === 'name' || c === 'category' || c === 'rank') ? 'asc' : 'desc';
+      }
+      renderCryptoScreener();
+    });
+  });
+
+  // "+ watchlist" → open prefilled crypto add modal.
+  document.querySelectorAll('button[data-cadd]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sym = btn.dataset.cadd;
+      const row = state.cryptoScreenerRows.find(r => r.symbol === sym);
+      if (!row) return;
+      openWatchlistModal({
+        kind: 'crypto',
+        mode: 'add',
+        entry: undefined,
+        prefill: { ticker: row.symbol, companyName: row.name, currentPrice: row.priceUsd },
       });
     });
   });
