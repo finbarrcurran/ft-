@@ -51,6 +51,15 @@ type stockMutationReq struct {
 	SLSafetyPct *float64 `json:"slSafetyPct,omitempty"`
 	Reason      *string  `json:"reason,omitempty"`     // for update audit row
 	ReasonCode  *string  `json:"reasonCode,omitempty"` // Spec 12 D9 typed reason
+	// SC-31 — manual forecast override. ForecastManual true = hand-entered
+	// Bear/Base/Bull (+optional median) that the daily Yahoo job must NOT
+	// overwrite; false = revert to auto (next daily run repopulates). nil
+	// leaves the stored forecast untouched.
+	ForecastManual *bool    `json:"forecastManual,omitempty"`
+	ForecastLow    *float64 `json:"forecastLow,omitempty"`
+	ForecastMean   *float64 `json:"forecastMean,omitempty"`
+	ForecastHigh   *float64 `json:"forecastHigh,omitempty"`
+	ForecastMedian *float64 `json:"forecastMedian,omitempty"`
 }
 
 type cryptoMutationReq struct {
@@ -222,10 +231,15 @@ func (s *Server) handleUpdateStock(w http.ResponseWriter, r *http.Request) {
 	}
 	// Spec 12 D5e — volatility_12m_pct owned by daily cron.
 	h.Volatility12mPct = old.Volatility12mPct
-	// Spec 12 D4a — forecast columns owned by daily cron.
+	// Spec 12 D4a / SC-31 — forecast columns owned by daily cron (or the
+	// manual-override setter below); preserve here so UpdateStockHolding's
+	// diff doesn't see spurious changes.
 	h.ForecastLow = old.ForecastLow
 	h.ForecastMean = old.ForecastMean
 	h.ForecastHigh = old.ForecastHigh
+	h.ForecastMedian = old.ForecastMedian
+	h.ForecastAnalystCount = old.ForecastAnalystCount
+	h.ForecastSource = old.ForecastSource
 	h.ForecastFetchedAt = old.ForecastFetchedAt
 	// Spec 12 D7 — currency, preserve on nil; allow user clear with "".
 	if req.Currency == nil {
@@ -239,6 +253,19 @@ func (s *Server) handleUpdateStock(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.UpdateStockHolding(r.Context(), h); err != nil {
 		mapStoreError(w, err)
 		return
+	}
+
+	// SC-31 — manual forecast override (stock holdings have analyst targets).
+	// true: write hand-entered Bear/Base/Bull(+median) and flip
+	// forecast_source='manual' so the daily 04:00 job skips this row (AC-3).
+	// false: revert to 'yahoo' so the next daily run repopulates.
+	if req.ForecastManual != nil {
+		if *req.ForecastManual {
+			_ = s.store.SetStockForecastManual(r.Context(), userID, id,
+				req.ForecastLow, req.ForecastMean, req.ForecastHigh, req.ForecastMedian)
+		} else {
+			_ = s.store.RevertStockForecastAuto(r.Context(), userID, id)
+		}
 	}
 
 	changes := stockDiff(old, h)

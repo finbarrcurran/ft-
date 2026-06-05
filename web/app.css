@@ -1944,6 +1944,37 @@ input.autofilled, select.autofilled {
 }
 .forecast-label.gain { color: rgb(var(--color-gain)); }
 .forecast-label.loss { color: rgb(var(--color-loss)); }
+/* SC-31 — small badge on the Base row marking a manual (hand-entered)
+   forecast override that the daily Yahoo job skips. */
+.forecast-manual-badge {
+  font-size: 0.62rem;
+  color: rgb(var(--color-accent, 90 140 230));
+  cursor: help;
+  margin-left: 0.15rem;
+}
+/* SC-31 — manual-override fieldset inside the edit modals. */
+.forecast-manual-section {
+  border: 1px solid rgb(var(--color-border) / 0.6);
+  border-radius: var(--radius2);
+  padding: 0.5rem 0.7rem 0.7rem;
+  margin-top: 0.4rem;
+}
+.forecast-manual-section legend {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgb(var(--color-text-muted));
+  padding: 0 0.3rem;
+}
+.forecast-manual-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.forecast-manual-fields[hidden] { display: none; }
+.forecast-manual-fields { margin-top: 0.5rem; }
 
 /* Spec 12 D6a — crypto current-location pill. */
 .loc-pill {
@@ -2587,6 +2618,12 @@ input.autofilled, select.autofilled {
   background: rgb(var(--color-amber, 230 160 30) / 0.14);
   color: rgb(var(--color-amber, 230 160 30));
   border: 1px solid rgb(var(--color-amber, 230 160 30) / 0.32);
+}
+/* SC-31 — "needs targets": stock rows lacking covered analyst forecasts. */
+.wl-gap-chip.needs-targets {
+  background: rgb(var(--color-accent, 90 140 230) / 0.14);
+  color: rgb(var(--color-accent, 90 140 230));
+  border: 1px solid rgb(var(--color-accent, 90 140 230) / 0.32);
 }
 
 /* SC-15 — Watchlist flat ↔ by-sector view toggle (segmented control). */

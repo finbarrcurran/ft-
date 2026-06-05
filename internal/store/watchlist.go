@@ -15,7 +15,8 @@ const watchlistCols = `id, user_id, ticker, kind, company_name, sector,
         thesis_link, note, added_at, promoted_holding_id, deleted_at,
         support_1, support_2, resistance_1, resistance_2,
         atr_weekly, vol_tier_auto, setup_type,
-        forecast_low, forecast_mean, forecast_high, forecast_fetched_at,
+        forecast_low, forecast_mean, forecast_high,
+        forecast_median, forecast_analyst_count, forecast_source, forecast_fetched_at,
         sector_universe_id,
         updated_at`
 
@@ -203,6 +204,10 @@ func scanWatchlist(r scanner) (*domain.WatchlistEntry, error) {
 		// Spec 12 D4a
 		fLow, fMean, fHigh sql.NullFloat64
 		fFetched           sql.NullInt64
+		// SC-31
+		fMedian       sql.NullFloat64
+		fAnalystCount sql.NullInt64
+		fSource       sql.NullString
 		// Spec 9f D1
 		sectorUniverseID sql.NullInt64
 	)
@@ -211,7 +216,8 @@ func scanWatchlist(r scanner) (*domain.WatchlistEntry, error) {
 		&e.CurrentPrice, &e.TargetEntryLow, &e.TargetEntryHigh,
 		&e.ThesisLink, &e.Note, &addedAt, &promotedID, &deletedAt,
 		&s1, &s2, &r1, &r2, &atrW, &volAuto, &setup,
-		&fLow, &fMean, &fHigh, &fFetched,
+		&fLow, &fMean, &fHigh,
+		&fMedian, &fAnalystCount, &fSource, &fFetched,
 		&sectorUniverseID,
 		&updatedAt,
 	)
@@ -269,6 +275,19 @@ func scanWatchlist(r scanner) (*domain.WatchlistEntry, error) {
 	if fHigh.Valid {
 		v := fHigh.Float64
 		e.ForecastHigh = &v
+	}
+	if fMedian.Valid {
+		v := fMedian.Float64
+		e.ForecastMedian = &v
+	}
+	if fAnalystCount.Valid {
+		n := int(fAnalystCount.Int64)
+		e.ForecastAnalystCount = &n
+	}
+	if fSource.Valid && fSource.String != "" {
+		e.ForecastSource = fSource.String
+	} else {
+		e.ForecastSource = "yahoo"
 	}
 	if fFetched.Valid {
 		t := time.Unix(fFetched.Int64, 0).UTC()

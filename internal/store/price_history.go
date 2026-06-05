@@ -172,30 +172,97 @@ func (s *Store) SetCryptoVolatility12m(ctx context.Context, userID int64, symbol
 // SetStockForecast writes Yahoo's Bear/Base/Bull consensus targets onto
 // stock_holdings by ticker. Spec 12 D4a. nil values are skipped — pass
 // the helper-friendly fp() wrapper if a target is unknown.
-func (s *Store) SetStockForecast(ctx context.Context, userID int64, ticker string, low, mean, high *float64) error {
+//
+// SC-31 — also writes median + analyst count, and is the AUTO (yahoo) path:
+// it SKIPS any row whose forecast_source = 'manual' (manual-override-wins,
+// mirroring migration 0036). This is the single most important behaviour —
+// a hand-entered target survives the nightly 04:00 run (AC-3 / S-31a).
+func (s *Store) SetStockForecast(ctx context.Context, userID int64, ticker string, low, mean, high, median *float64, analystCount *int) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE stock_holdings SET
 		   forecast_low = ?, forecast_mean = ?, forecast_high = ?,
+		   forecast_median = ?, forecast_analyst_count = ?,
+		   forecast_source = 'yahoo',
 		   forecast_fetched_at = strftime('%s','now')
-		 WHERE user_id = ? AND ticker = ? AND deleted_at IS NULL`,
-		fpVal(low), fpVal(mean), fpVal(high), userID, ticker)
+		 WHERE user_id = ? AND ticker = ? AND deleted_at IS NULL
+		   AND COALESCE(forecast_source,'yahoo') <> 'manual'`,
+		fpVal(low), fpVal(mean), fpVal(high), fpVal(median), ipVal(analystCount),
+		userID, ticker)
 	return err
 }
 
-// SetWatchlistForecast — same shape for watchlist entries.
-func (s *Store) SetWatchlistForecast(ctx context.Context, userID int64, ticker string, low, mean, high *float64) error {
+// SetWatchlistForecast — same shape for watchlist entries (auto path; skips
+// manual-override rows).
+func (s *Store) SetWatchlistForecast(ctx context.Context, userID int64, ticker string, low, mean, high, median *float64, analystCount *int) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE watchlist SET
 		   forecast_low = ?, forecast_mean = ?, forecast_high = ?,
+		   forecast_median = ?, forecast_analyst_count = ?,
+		   forecast_source = 'yahoo',
 		   forecast_fetched_at = strftime('%s','now')
-		 WHERE user_id = ? AND ticker = ? AND deleted_at IS NULL`,
-		fpVal(low), fpVal(mean), fpVal(high), userID, ticker)
+		 WHERE user_id = ? AND ticker = ? AND deleted_at IS NULL
+		   AND COALESCE(forecast_source,'yahoo') <> 'manual'`,
+		fpVal(low), fpVal(mean), fpVal(high), fpVal(median), ipVal(analystCount),
+		userID, ticker)
+	return err
+}
+
+// SetWatchlistForecastManual writes a hand-entered Bear/Base/Bull (+ optional
+// median) by row id and flips forecast_source to 'manual' so the daily cron
+// leaves it alone. SC-31 D31.4.
+func (s *Store) SetWatchlistForecastManual(ctx context.Context, userID, id int64, low, mean, high, median *float64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE watchlist SET
+		   forecast_low = ?, forecast_mean = ?, forecast_high = ?,
+		   forecast_median = ?,
+		   forecast_source = 'manual',
+		   forecast_fetched_at = strftime('%s','now')
+		 WHERE user_id = ? AND id = ?`,
+		fpVal(low), fpVal(mean), fpVal(high), fpVal(median), userID, id)
+	return err
+}
+
+// SetStockForecastManual — same for a stock holding by row id.
+func (s *Store) SetStockForecastManual(ctx context.Context, userID, id int64, low, mean, high, median *float64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings SET
+		   forecast_low = ?, forecast_mean = ?, forecast_high = ?,
+		   forecast_median = ?,
+		   forecast_source = 'manual',
+		   forecast_fetched_at = strftime('%s','now')
+		 WHERE user_id = ? AND id = ?`,
+		fpVal(low), fpVal(mean), fpVal(high), fpVal(median), userID, id)
+	return err
+}
+
+// RevertWatchlistForecastAuto clears the manual override (forecast_source back
+// to 'yahoo'); the next daily run repopulates from Yahoo. SC-31 D31.4.
+func (s *Store) RevertWatchlistForecastAuto(ctx context.Context, userID, id int64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE watchlist SET forecast_source = 'yahoo'
+		 WHERE user_id = ? AND id = ?`, userID, id)
+	return err
+}
+
+// RevertStockForecastAuto — same for a stock holding by row id.
+func (s *Store) RevertStockForecastAuto(ctx context.Context, userID, id int64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings SET forecast_source = 'yahoo'
+		 WHERE user_id = ? AND id = ?`, userID, id)
 	return err
 }
 
 // fpVal is a small NULL-friendly *float64 → any converter used by the
 // forecast setters above.
 func fpVal(p *float64) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+// ipVal is the *int equivalent of fpVal (SC-31 analyst count).
+func ipVal(p *int) any {
 	if p == nil {
 		return nil
 	}

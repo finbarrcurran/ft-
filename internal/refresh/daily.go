@@ -173,7 +173,7 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 			//    financialData. Best-effort; non-US tickers often return
 			//    null and we just leave the previous value alone.
 			if t, err := market.FetchYahooAnalystTargets(ctx, ticker); err == nil {
-				_ = s.Store.SetStockForecast(ctx, userID, ticker, t.Low, t.Mean, t.High)
+				_ = s.Store.SetStockForecast(ctx, userID, ticker, t.Low, t.Mean, t.High, t.Median, t.AnalystCount)
 			}
 		}()
 	}
@@ -230,7 +230,7 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 				continue
 			}
 			if t, err := market.FetchYahooAnalystTargets(ctx, e.Ticker); err == nil {
-				_ = s.Store.SetWatchlistForecast(ctx, userID, e.Ticker, t.Low, t.Mean, t.High)
+				_ = s.Store.SetWatchlistForecast(ctx, userID, e.Ticker, t.Low, t.Mean, t.High, t.Median, t.AnalystCount)
 			}
 		}
 	}

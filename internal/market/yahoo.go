@@ -469,10 +469,17 @@ func FetchYahooBeta(ctx context.Context, ticker string) (*float64, error) {
 // ----- Spec 12 D4a / D7 — analyst targets + profile lookup ---------------
 
 // AnalystTargets carries Yahoo's price-target consensus.
+//
+// SC-31: Median + AnalystCount come from the same financialData module
+// (targetMedianPrice / numberOfAnalystOpinions). AnalystCount gates
+// "target present" — a lone/stale target with 0 analysts is not treated as
+// covered (snag S-31c).
 type AnalystTargets struct {
-	Low  *float64 `json:"low,omitempty"`
-	Mean *float64 `json:"mean,omitempty"`
-	High *float64 `json:"high,omitempty"`
+	Low          *float64 `json:"low,omitempty"`
+	Mean         *float64 `json:"mean,omitempty"`
+	High         *float64 `json:"high,omitempty"`
+	Median       *float64 `json:"median,omitempty"`
+	AnalystCount *int     `json:"analystCount,omitempty"`
 }
 
 // TickerProfile is the shape returned by /api/lookup/ticker for stocks.
@@ -502,9 +509,11 @@ func FetchYahooAnalystTargets(ctx context.Context, ticker string) (out AnalystTa
 		QuoteSummary struct {
 			Result []struct {
 				FinancialData struct {
-					TargetLowPrice  struct{ Raw float64 `json:"raw"` } `json:"targetLowPrice"`
-					TargetMeanPrice struct{ Raw float64 `json:"raw"` } `json:"targetMeanPrice"`
-					TargetHighPrice struct{ Raw float64 `json:"raw"` } `json:"targetHighPrice"`
+					TargetLowPrice          struct{ Raw float64 `json:"raw"` } `json:"targetLowPrice"`
+					TargetMeanPrice         struct{ Raw float64 `json:"raw"` } `json:"targetMeanPrice"`
+					TargetHighPrice         struct{ Raw float64 `json:"raw"` } `json:"targetHighPrice"`
+					TargetMedianPrice       struct{ Raw float64 `json:"raw"` } `json:"targetMedianPrice"`
+					NumberOfAnalystOpinions struct{ Raw int     `json:"raw"` } `json:"numberOfAnalystOpinions"`
 				} `json:"financialData"`
 			} `json:"result"`
 		} `json:"quoteSummary"`
@@ -527,6 +536,14 @@ func FetchYahooAnalystTargets(ctx context.Context, ticker string) (out AnalystTa
 	if fd.TargetHighPrice.Raw > 0 {
 		v := fd.TargetHighPrice.Raw
 		out.High = &v
+	}
+	if fd.TargetMedianPrice.Raw > 0 {
+		v := fd.TargetMedianPrice.Raw
+		out.Median = &v
+	}
+	if fd.NumberOfAnalystOpinions.Raw > 0 {
+		v := fd.NumberOfAnalystOpinions.Raw
+		out.AnalystCount = &v
 	}
 	if out.Low == nil && out.Mean == nil && out.High == nil {
 		return out, fmt.Errorf("no targets for %s", ticker)

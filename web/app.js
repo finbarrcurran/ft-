@@ -4273,6 +4273,38 @@ function openHoldingModal({ kind, mode, holding }) {
     </div>
   ` : '';
 
+  // SC-31 — manual analyst-target override (stock edit only). Mirror of the
+  // watchlist modal section: a checkbox flips the row to a hand-entered
+  // forecast that the daily 04:00 Yahoo job leaves alone (forecast_source =
+  // 'manual'); unchecked reverts to auto.
+  const fcVal = (k) => (isEdit && holding && holding[k] != null) ? String(holding[k]) : '';
+  const forecastManualSection = (isEdit && kind === 'stock') ? `
+    <fieldset class="forecast-manual-section">
+      <legend>Analyst targets</legend>
+      <label class="forecast-manual-toggle">
+        <input type="checkbox" id="hm-fc-manual" name="forecastManual" ${holding && holding.forecastSource === 'manual' ? 'checked' : ''} />
+        Override manually (daily auto-refresh will skip this row)
+      </label>
+      <div id="hm-fc-fields" class="forecast-manual-fields" ${holding && holding.forecastSource === 'manual' ? '' : 'hidden'}>
+        <div class="form-row">
+          <label for="hm-fc-low">Bear (low)</label>
+          <input id="hm-fc-low" name="forecastLow" type="number" step="0.01" value="${escapeHTML(fcVal('forecastLow'))}" />
+        </div>
+        <div class="form-row">
+          <label for="hm-fc-mean">Base (mean)</label>
+          <input id="hm-fc-mean" name="forecastMean" type="number" step="0.01" value="${escapeHTML(fcVal('forecastMean'))}" />
+        </div>
+        <div class="form-row">
+          <label for="hm-fc-high">Bull (high)</label>
+          <input id="hm-fc-high" name="forecastHigh" type="number" step="0.01" value="${escapeHTML(fcVal('forecastHigh'))}" />
+        </div>
+        <div class="form-row">
+          <label for="hm-fc-median">Median <span class="dim">(optional)</span></label>
+          <input id="hm-fc-median" name="forecastMedian" type="number" step="0.01" value="${escapeHTML(fcVal('forecastMedian'))}" />
+        </div>
+      </div>
+    </fieldset>` : '';
+
   const errBox = `<div class="error" id="hm-err"></div>`;
 
   // Modal mount
@@ -4292,6 +4324,7 @@ function openHoldingModal({ kind, mode, holding }) {
         <div class="modal-body">
           <form id="hm-form" class="holding-form">
             ${fieldRows}
+            ${forecastManualSection}
             ${reasonField}
             ${errBox}
           </form>
@@ -4310,6 +4343,15 @@ function openHoldingModal({ kind, mode, holding }) {
   $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
   $('#hm-save').addEventListener('click', () => submitHoldingForm({ kind, mode, holding }));
   if (isEdit) $('#hm-delete').addEventListener('click', () => deleteHoldingFromModal({ kind, holding }));
+
+  // SC-31 — manual-override toggle reveals/hides the Bear/Base/Bull inputs.
+  const hmFcToggle = $('#hm-fc-manual');
+  if (hmFcToggle) {
+    hmFcToggle.addEventListener('change', () => {
+      const f = $('#hm-fc-fields');
+      if (f) f.hidden = !hmFcToggle.checked;
+    });
+  }
 
   // Spec 9c — wire the Levels & Suggestions panel (edit mode only).
   if (isEdit && holding) {
@@ -4585,6 +4627,28 @@ async function submitHoldingForm({ kind, mode, holding }) {
       // Enforce "manual_other → text required" rule before submit.
       if (codeEl.value === 'manual_other' && !body.reason) {
         err.textContent = 'reason text required when code = Other';
+        return;
+      }
+    }
+  }
+
+  // SC-31 — manual analyst-target override (stock edit only). The forecast
+  // inputs live outside the stockFields loop, so collect them explicitly.
+  const fcToggle = form.querySelector('[name="forecastManual"]');
+  if (fcToggle) {
+    body.forecastManual = fcToggle.checked;
+    if (fcToggle.checked) {
+      const fcNum = (n) => {
+        const el = form.querySelector(`[name="${n}"]`);
+        const v = el ? el.value.trim() : '';
+        return v === '' ? null : parseFloat(v);
+      };
+      body.forecastLow = fcNum('forecastLow');
+      body.forecastMean = fcNum('forecastMean');
+      body.forecastHigh = fcNum('forecastHigh');
+      body.forecastMedian = fcNum('forecastMedian');
+      if (body.forecastLow != null && body.forecastHigh != null && body.forecastLow > body.forecastHigh) {
+        err.textContent = 'Bear (low) must be ≤ Bull (high)';
         return;
       }
     }
@@ -6132,14 +6196,24 @@ async function renderWatchlist() {
       ? `<span class="note-cell"><span class="note-bubble" data-note="${escapeHTML(e.note)}" tabindex="0" aria-label="Show note" title="Hover for full note">💬</span></span>`
       : '<span class="dim">—</span>';
     // Spec 12 D4a — analyst Bear/Base/Bull. Crypto rows always show "—".
+    // SC-31 — surface median + analyst-count + source as a tooltip; a small
+    // "✎" badge marks a manual (hand-entered) override so it's obvious the
+    // daily Yahoo job is leaving this row alone.
     const fc = (v) => v != null ? `$${fmtNum2.format(v)}` : '<span class="dim">—</span>';
+    const fcManual = e.forecastSource === 'manual';
+    const fcTipParts = [];
+    if (e.forecastMedian != null) fcTipParts.push(`Median $${fmtNum2.format(e.forecastMedian)}`);
+    if (e.forecastAnalystCount != null) fcTipParts.push(`${e.forecastAnalystCount} analyst${e.forecastAnalystCount === 1 ? '' : 's'}`);
+    fcTipParts.push(fcManual ? 'Manual override' : 'Yahoo (auto)');
+    const fcTip = fcTipParts.join(' · ');
+    const fcBadge = fcManual ? ` <span class="forecast-manual-badge" title="Manual override — daily job skips this row">✎</span>` : '';
     const forecastCell = `
-      <td class="num forecast-stack">
+      <td class="num forecast-stack" title="${escapeHTML(fcTip)}">
         <div class="forecast-row">
           <span class="forecast-label loss">Bear</span><span class="forecast-val">${fc(e.forecastLow)}</span>
         </div>
         <div class="forecast-row">
-          <span class="forecast-label">Base</span><span class="forecast-val">${fc(e.forecastMean)}</span>
+          <span class="forecast-label">Base</span><span class="forecast-val">${fc(e.forecastMean)}${fcBadge}</span>
         </div>
         <div class="forecast-row">
           <span class="forecast-label gain">Bull</span><span class="forecast-val">${fc(e.forecastHigh)}</span>
@@ -6328,6 +6402,17 @@ function watchlistGapChips(e) {
   if (e.sectorUniverseId == null) {
     chips.push('<span class="wl-gap-chip needs-sector" title="Not yet assigned to the sector taxonomy — edit to set a sector">needs sector</span>');
   }
+  // SC-31 — "needs targets": stock rows with no covered analyst forecast.
+  // S-31c — a target backed by 0 analysts is NOT coverage, so we require a
+  // base (mean) AND analyst_count >= 1 before considering it covered. Crypto
+  // has no analyst targets, so never nag it. Manual overrides count as covered.
+  if (e.kind === 'stock' && e.forecastSource !== 'manual') {
+    const covered = e.forecastMean != null &&
+      e.forecastAnalystCount != null && e.forecastAnalystCount >= 1;
+    if (!covered) {
+      chips.push('<span class="wl-gap-chip needs-targets" title="No analyst price targets yet — edit to hand-enter Bear/Base/Bull, or wait for the daily refresh">needs targets</span>');
+    }
+  }
   return chips.length ? ` ${chips.join(' ')}` : '';
 }
 
@@ -6455,6 +6540,32 @@ function openWatchlistModal({ kind, mode, entry, prefill }) {
               <label for="wl-note">Note</label>
               <textarea id="wl-note" name="note" rows="2">${escapeHTML(String(t('note')))}</textarea>
             </div>
+            ${(isEdit && kind === 'stock') ? `
+            <fieldset class="forecast-manual-section">
+              <legend>Analyst targets</legend>
+              <label class="forecast-manual-toggle">
+                <input type="checkbox" id="wl-fc-manual" name="forecastManual" ${entry.forecastSource === 'manual' ? 'checked' : ''} />
+                Override manually (daily auto-refresh will skip this row)
+              </label>
+              <div id="wl-fc-fields" class="forecast-manual-fields" ${entry.forecastSource === 'manual' ? '' : 'hidden'}>
+                <div class="form-row">
+                  <label for="wl-fc-low">Bear (low)</label>
+                  <input id="wl-fc-low" name="forecastLow" type="number" step="0.01" value="${escapeHTML(String(t('forecastLow')))}" />
+                </div>
+                <div class="form-row">
+                  <label for="wl-fc-mean">Base (mean)</label>
+                  <input id="wl-fc-mean" name="forecastMean" type="number" step="0.01" value="${escapeHTML(String(t('forecastMean')))}" />
+                </div>
+                <div class="form-row">
+                  <label for="wl-fc-high">Bull (high)</label>
+                  <input id="wl-fc-high" name="forecastHigh" type="number" step="0.01" value="${escapeHTML(String(t('forecastHigh')))}" />
+                </div>
+                <div class="form-row">
+                  <label for="wl-fc-median">Median <span class="dim">(optional)</span></label>
+                  <input id="wl-fc-median" name="forecastMedian" type="number" step="0.01" value="${escapeHTML(String(t('forecastMedian')))}" />
+                </div>
+              </div>
+            </fieldset>` : ''}
             <div class="error" id="wl-err"></div>
           </form>
         </div>
@@ -6483,6 +6594,14 @@ function openWatchlistModal({ kind, mode, entry, prefill }) {
     hidden.value = String(prefill.sectorUniverseId);
     form.appendChild(hidden);
   }
+  // SC-31 — manual-override toggle reveals/hides the Bear/Base/Bull inputs.
+  const fcToggle = $('#wl-fc-manual');
+  if (fcToggle) {
+    fcToggle.addEventListener('change', () => {
+      const fields = $('#wl-fc-fields');
+      if (fields) fields.hidden = !fcToggle.checked;
+    });
+  }
   $('#wl-save').addEventListener('click', () => submitWatchlistForm({ kind, mode, entry }));
 }
 
@@ -6510,6 +6629,23 @@ async function submitWatchlistForm({ kind, mode, entry }) {
   if (body.targetEntryLow != null && body.targetEntryHigh != null && body.targetEntryLow > body.targetEntryHigh) {
     err.textContent = 'target low must be ≤ target high';
     return;
+  }
+  // SC-31 — manual analyst-target override (stock edit only). The checkbox
+  // drives forecastManual: true sends hand-entered values that the daily job
+  // skips; false reverts the row to auto (yahoo). Field absent when not stock.
+  const fcToggle = form.querySelector('[name=forecastManual]');
+  if (fcToggle) {
+    body.forecastManual = fcToggle.checked;
+    if (fcToggle.checked) {
+      body.forecastLow = num('forecastLow');
+      body.forecastMean = num('forecastMean');
+      body.forecastHigh = num('forecastHigh');
+      body.forecastMedian = num('forecastMedian');
+      if (body.forecastLow != null && body.forecastHigh != null && body.forecastLow > body.forecastHigh) {
+        err.textContent = 'Bear (low) must be ≤ Bull (high)';
+        return;
+      }
+    }
   }
   let url = '/api/watchlist';
   let method = 'POST';

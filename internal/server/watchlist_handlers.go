@@ -50,6 +50,15 @@ type watchlistReq struct {
 	// Spec 9f D9 — Whitespace "+ watchlist" affordance preselects the
 	// sector_universe row when adding from the rotation tab.
 	SectorUniverseID *int64 `json:"sectorUniverseId,omitempty"`
+	// SC-31 — manual analyst-target override (stock only). ForecastManual
+	// true = set the supplied Bear/Base/Bull(+median) and flip the row to
+	// source='manual' (daily cron then skips it); false = revert to auto
+	// (source='yahoo', next run repopulates); nil = leave forecast untouched.
+	ForecastManual *bool    `json:"forecastManual,omitempty"`
+	ForecastLow    *float64 `json:"forecastLow,omitempty"`
+	ForecastMean   *float64 `json:"forecastMean,omitempty"`
+	ForecastHigh   *float64 `json:"forecastHigh,omitempty"`
+	ForecastMedian *float64 `json:"forecastMedian,omitempty"`
 }
 
 type watchlistRow struct {
@@ -295,6 +304,17 @@ func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.UpdateWatchlistEntry(r.Context(), existing); err != nil {
 		mapStoreError(w, err)
 		return
+	}
+	// SC-31 — manual analyst-target override (stock only). The forecast
+	// columns are otherwise owned by the daily cron, so they're set through
+	// dedicated calls that flip forecast_source rather than the generic update.
+	if existing.Kind == "stock" && req.ForecastManual != nil {
+		if *req.ForecastManual {
+			_ = s.store.SetWatchlistForecastManual(r.Context(), userID, id,
+				req.ForecastLow, req.ForecastMean, req.ForecastHigh, req.ForecastMedian)
+		} else {
+			_ = s.store.RevertWatchlistForecastAuto(r.Context(), userID, id)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

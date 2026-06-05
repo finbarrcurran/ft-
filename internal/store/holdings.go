@@ -28,7 +28,8 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         atr_weekly, vol_tier_auto, setup_type, stage,
         tp1_hit_at, tp2_hit_at, time_stop_review_at,
         thesis_link, realized_pnl_usd, volatility_12m_pct,
-        forecast_low, forecast_mean, forecast_high, forecast_fetched_at,
+        forecast_low, forecast_mean, forecast_high,
+        forecast_median, forecast_analyst_count, forecast_source, forecast_fetched_at,
         currency,
         sector_universe_id,
         sector_adapter_subtype,
@@ -437,6 +438,10 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	// Spec 12 D4a columns:
 	var fLow, fMean, fHigh sql.NullFloat64
 	var fFetched sql.NullInt64
+	// SC-31 — median + analyst count + source:
+	var fMedian sql.NullFloat64
+	var fAnalystCount sql.NullInt64
+	var fSource sql.NullString
 	// Spec 12 D7 AC #15:
 	var currency sql.NullString
 	// Spec 9f D1:
@@ -461,7 +466,8 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&atrWeekly, &volTierAuto, &setupType, &stage,
 		&tp1HitAt, &tp2HitAt, &timeStopReviewAt,
 		&thesisLink, &realizedPnL, &vol12m,
-		&fLow, &fMean, &fHigh, &fFetched,
+		&fLow, &fMean, &fHigh,
+		&fMedian, &fAnalystCount, &fSource, &fFetched,
 		&currency,
 		&sectorUniverseID,
 		&sectorAdapterSubtype,
@@ -486,6 +492,16 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	h.ForecastLow = nfToPtr(fLow)
 	h.ForecastMean = nfToPtr(fMean)
 	h.ForecastHigh = nfToPtr(fHigh)
+	h.ForecastMedian = nfToPtr(fMedian)
+	if fAnalystCount.Valid {
+		n := int(fAnalystCount.Int64)
+		h.ForecastAnalystCount = &n
+	}
+	if fSource.Valid && fSource.String != "" {
+		h.ForecastSource = fSource.String
+	} else {
+		h.ForecastSource = "yahoo"
+	}
 	if fFetched.Valid {
 		t := time.Unix(fFetched.Int64, 0).UTC()
 		h.ForecastFetchedAt = &t
