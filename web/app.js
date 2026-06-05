@@ -2262,6 +2262,126 @@ function wirePerfCollapse(el, currency) {
   });
 }
 
+// SC-30 — "Copy vs Systematic" realised-comparison panel.
+//
+// A fabrication-free retrospective: it partitions REALISED eToro outcomes by
+// strategy_bucket — Systematic = `discretionary` (your own framework-driven
+// picks), Copy = `copy_cfd` (copy book + CFDs) — and never infers a framework
+// score for a historical trade (S-30a). It reads the same live
+// /api/etoro/performance payload SC-26 already fetched, so demo masking (the
+// server returns no years) and the live-read mandate both come for free.
+//
+// Framing is copy-vs-systematic, NOT a pre/post date split (D30.3): the
+// pre-era was copy-dominated, so a date split would misattribute copy losses
+// to "pre-methodology you." Tier-1 only (realised P&L per bucket + cumulative
+// over time + verdict); Tier-2 (win rate / avg winner-loser / per-bucket trade
+// count) is OMITTED because SC-17 persists only aggregated annual rows, not
+// row-level closed positions — we never estimate a half-answer (D30.4/S-30c).
+function renderCopyVsSystematicPanel(years, ccy) {
+  if (!years || years.length === 0) return '';
+
+  // Per-year bucket realised P&L (summed across asset types).
+  const perYear = years.map((y) => {
+    const assets = y.assets || [];
+    const disc = assets.reduce((s, a) => s + ccyPick(a, 'realisedDisc', ccy), 0);
+    const copy = assets.reduce((s, a) => s + ccyPick(a, 'realisedCopy', ccy), 0);
+    return { year: y.year, isYtd: !!y.isYtd, disc, copy };
+  }).sort((a, b) => a.year - b.year);
+
+  const totalDisc = perYear.reduce((s, r) => s + r.disc, 0);
+  const totalCopy = perYear.reduce((s, r) => s + r.copy, 0);
+
+  // Active span — the year range present in performance_history.
+  const yrLabels = perYear.map((r) => `${r.year}${r.isYtd ? ' YTD' : ''}`);
+  const span = yrLabels.length === 1 ? yrLabels[0] : `${yrLabels[0]} – ${yrLabels[yrLabels.length - 1]}`;
+
+  const toneCls = (v) => (v > 0 ? 'gain' : v < 0 ? 'loss' : '');
+
+  // Cumulative series (two lines) so the divergence over time is visible.
+  let cumDisc = 0, cumCopy = 0;
+  const cum = perYear.map((r) => {
+    cumDisc += r.disc; cumCopy += r.copy;
+    return { year: r.year, isYtd: r.isYtd, disc: cumDisc, copy: cumCopy };
+  });
+
+  // Optional "went systematic" annotation (D30.5/AC7): a year supplied via
+  // localStorage. Absent by default — its absence must not break the view.
+  let adoptionYear = null;
+  try {
+    const v = parseInt(localStorage.getItem('ft.systematicAdoptionYear') || '', 10);
+    if (Number.isFinite(v)) adoptionYear = v;
+  } catch (_) {}
+
+  // Chart geometry — include a 0 baseline so sign is readable.
+  const allVals = cum.flatMap((c) => [c.disc, c.copy]).concat([0]);
+  const minV = Math.min(...allVals);
+  const maxV = Math.max(...allVals);
+  const rng = Math.max(1, maxV - minV);
+  const W = 760, H = 170, P = 24;
+  const xFor = (i) => cum.length === 1 ? W / 2 : P + (i / (cum.length - 1)) * (W - 2 * P);
+  const yFor = (v) => H - P - ((v - minV) / rng) * (H - 2 * P);
+  const lineFor = (key) => cum.map((c, i) => `${xFor(i).toFixed(1)},${yFor(c[key]).toFixed(1)}`).join(' ');
+  const zeroY = yFor(0).toFixed(1);
+
+  const dotFor = (key, cls) => cum.map((c, i) =>
+    `<circle cx="${xFor(i).toFixed(1)}" cy="${yFor(c[key]).toFixed(1)}" r="2.6" class="cvs-dot ${cls}"/>`).join('');
+
+  const xLabels = cum.map((c, i) =>
+    `<text x="${xFor(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="cvs-xlabel">${c.year}${c.isYtd ? '*' : ''}</text>`).join('');
+
+  // Adoption marker (only if supplied + within span).
+  let adoptionMarker = '';
+  const adoptIdx = adoptionYear == null ? -1 : cum.findIndex((c) => c.year === adoptionYear);
+  if (adoptIdx >= 0) {
+    const ax = xFor(adoptIdx).toFixed(1);
+    adoptionMarker = `<line x1="${ax}" y1="${P - 8}" x2="${ax}" y2="${H - P}" class="cvs-adopt"/>
+      <text x="${ax}" y="${P - 10}" text-anchor="middle" class="cvs-adopt-label">went systematic</text>`;
+  }
+
+  const chart = cum.length >= 1 ? `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="cvs-chart" role="img"
+         aria-label="Cumulative realised P&L — systematic vs copy">
+      <line x1="${P}" y1="${zeroY}" x2="${W - P}" y2="${zeroY}" class="cvs-zero"/>
+      ${adoptionMarker}
+      ${cum.length >= 2 ? `<polyline fill="none" points="${lineFor('disc')}" class="cvs-line cvs-sys"/>
+      <polyline fill="none" points="${lineFor('copy')}" class="cvs-line cvs-copy"/>` : ''}
+      ${dotFor('disc', 'cvs-sys')}
+      ${dotFor('copy', 'cvs-copy')}
+      ${xLabels}
+    </svg>
+    <div class="cvs-legend">
+      <span class="cvs-key cvs-sys">● Systematic (own picks)</span>
+      <span class="cvs-key cvs-copy">● Copy / CFD</span>
+      ${cum.some((c) => c.isYtd) ? '<span class="dim cvs-key">* current year is partial (YTD)</span>' : ''}
+    </div>` : '';
+
+  // One-line, data-derived verdict (no hard-coded numbers).
+  const verdict = `Over ${escapeHTML(span)}, systematic <strong class="num ${toneCls(totalDisc)}">${etoroMoney(totalDisc, ccy)}</strong> net realised vs copy <strong class="num ${toneCls(totalCopy)}">${etoroMoney(totalCopy, ccy)}</strong> net realised.`;
+
+  return `
+    <div class="cvs-panel">
+      <div class="cvs-head">
+        <h4 class="cvs-title">Copy vs Systematic <span class="dim">· realised split</span></h4>
+        <p class="dim cvs-sub">Did going systematic help? Realised P&amp;L partitioned by strategy — your own framework-driven picks vs the copy/CFD book. Same live history as the table above, never blended.</p>
+      </div>
+      <div class="cvs-cards">
+        <div class="cvs-card cvs-card-sys">
+          <div class="cvs-card-label">SYSTEMATIC <span class="dim">· own picks (discretionary)</span></div>
+          <div class="cvs-card-val num ${toneCls(totalDisc)}">${etoroMoney(totalDisc, ccy)}</div>
+          <div class="cvs-card-sub dim">net realised · ${escapeHTML(span)}</div>
+        </div>
+        <div class="cvs-card cvs-card-copy">
+          <div class="cvs-card-label">COPY <span class="dim">· copy book + CFDs (baseline)</span></div>
+          <div class="cvs-card-val num ${toneCls(totalCopy)}">${etoroMoney(totalCopy, ccy)}</div>
+          <div class="cvs-card-sub dim">net realised · ${escapeHTML(span)}</div>
+        </div>
+      </div>
+      ${chart}
+      <div class="cvs-verdict">${verdict}</div>
+      <div class="cvs-tier2-note dim">Win rate, trade count and avg winner/loser need per-trade closed-position data, which isn't persisted — omitted rather than estimated.</div>
+    </div>`;
+}
+
 async function renderEtoroPerformance(currency) {
   const el = $('#etoro-perf-panel');
   if (!el) return;
@@ -2410,11 +2530,17 @@ async function renderEtoroPerformance(currency) {
       </div>`;
   }).join('');
 
+  // SC-30 — Copy vs Systematic retrospective (the comparative/narrative view,
+  // not a second copy of the annual table — S-30b). Lives in the realised-
+  // history (top) section, above the per-year tables.
+  const copyVsSystematic = renderCopyVsSystematicPanel(years, ccy);
+
   const perfBody = `
     <div class="etoro-perf-head">
       <div class="etoro-perf-controls">${stratToggle}${reconcileBtn}${uploadBtn}</div>
     </div>
     ${ytdCard}
+    ${copyVsSystematic}
     ${yearBlocks}`;
   el.innerHTML = perfCollapsibleShell(`eToro · ${ccy}`, perfBody);
   wirePerfCollapse(el, currency);
@@ -3721,6 +3847,7 @@ async function renderCrypto() {
     <div class="table-toolbar">
       <button class="btn-ghost" id="add-crypto">+ Add crypto</button>
       <a class="btn-ghost" href="/api/export.csv?tab=crypto" download title="Download current rows as CSV">⬇ Download CSV</a>
+      <a class="btn-ghost" href="/api/crypto/export.xlsx" download title="Download all crypto data (holdings + theses) as a multi-sheet Excel workbook">⬇ Download XLSX</a>
     </div>
   `;
 

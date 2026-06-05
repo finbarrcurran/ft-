@@ -5164,6 +5164,66 @@ a.score-badge { display: inline-block; }
   margin-left: 0.5rem;
 }
 
+/* SC-30 — Copy vs Systematic realised-comparison panel. */
+.cvs-panel {
+  background: rgb(var(--color-surface));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius2);
+  padding: 0.85rem 1rem 1rem;
+  margin-bottom: 1.25rem;
+}
+.cvs-head { margin-bottom: 0.6rem; }
+.cvs-title { font-size: 0.98rem; font-weight: 600; margin: 0 0 0.2rem; }
+.cvs-sub { font-size: 0.8rem; margin: 0; max-width: 70ch; }
+.cvs-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+.cvs-card {
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  border-left-width: 3px;
+}
+.cvs-card-sys { border-left-color: rgb(var(--color-accent)); }
+.cvs-card-copy { border-left-color: rgb(var(--color-text-muted)); }
+.cvs-card-label { font-size: 0.74rem; font-weight: 700; letter-spacing: 0.03em; }
+.cvs-card-val { font-size: 1.35rem; font-weight: 700; margin: 0.15rem 0; }
+.cvs-card-sub { font-size: 0.76rem; }
+.cvs-chart {
+  width: 100%;
+  height: 170px;
+  background: rgb(var(--color-surface-sunken));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius);
+}
+.cvs-zero { stroke: rgb(var(--color-border)); stroke-width: 1; stroke-dasharray: 3 3; }
+.cvs-line { stroke-width: 1.8; }
+.cvs-line.cvs-sys, .cvs-dot.cvs-sys { stroke: rgb(var(--color-accent)); }
+.cvs-dot.cvs-sys { fill: rgb(var(--color-accent)); }
+.cvs-line.cvs-copy, .cvs-dot.cvs-copy { stroke: rgb(var(--color-text-muted)); }
+.cvs-dot.cvs-copy { fill: rgb(var(--color-text-muted)); }
+.cvs-xlabel { font-size: 10px; fill: rgb(var(--color-text-dim)); }
+.cvs-adopt { stroke: rgb(var(--color-warn, 200 140 0)); stroke-width: 1; stroke-dasharray: 2 2; }
+.cvs-adopt-label { font-size: 9px; fill: rgb(var(--color-text-dim)); }
+.cvs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  font-size: 0.76rem;
+  margin: 0.45rem 0 0.2rem;
+}
+.cvs-key.cvs-sys { color: rgb(var(--color-accent)); }
+.cvs-key.cvs-copy { color: rgb(var(--color-text-muted)); }
+.cvs-verdict { font-size: 0.88rem; margin-top: 0.7rem; }
+.cvs-tier2-note { font-size: 0.74rem; font-style: italic; margin-top: 0.35rem; }
+
+@media (max-width: 640px) {
+  .cvs-cards { grid-template-columns: 1fr; }
+}
+
 /* SC-26 — Forward-looking (FT-native) section relabel block. */
 .perf-forward { margin-top: 1.75rem; }
 .perf-forward-head {

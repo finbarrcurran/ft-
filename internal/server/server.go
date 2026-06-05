@@ -301,6 +301,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/crypto/adapters/{slug}/versions/{ver}", s.requireUserOrToken(s.handleCryptoAdapterVersionGet))
 	s.mux.HandleFunc("PUT /api/crypto/adapters/{slug}/status", s.requireUser(s.handleCryptoAdapterStatus))
 	// Spec 9l — Crypto Theses cross-table + detail (D26/D27)
+	s.mux.HandleFunc("GET /api/crypto/export.xlsx", s.requireUser(s.handleCryptoExportXLSX)) // SC-29
 	s.mux.HandleFunc("GET /api/crypto/theses", s.requireUserOrToken(s.handleCryptoThesesList))
 	s.mux.HandleFunc("GET /api/crypto/theses/drafts", s.requireUser(s.handleCryptoDraftsList))
 	s.mux.HandleFunc("POST /api/crypto/theses", s.requireUser(s.handleCryptoThesisCreate))
