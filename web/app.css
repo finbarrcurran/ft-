@@ -5139,6 +5139,41 @@ a.score-badge { display: inline-block; }
 .etoro-ytd-net { font-size: 1.5rem; font-weight: 700; margin: 0.15rem 0; }
 .etoro-ytd-sub { font-size: 0.8rem; }
 
+/* SC-26 — YTD card discretionary-vs-copy split lines. Discretionary is the
+   hero (the .etoro-ytd-net above); these break out copy/CFD + the recon line
+   so the two are visibly separate and never blended into the headline. */
+.etoro-ytd-split {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.84rem;
+  margin: 0.35rem 0 0.4rem;
+}
+.etoro-ytd-splitline {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid rgb(var(--color-border) / 0.6);
+  padding-top: 0.2rem;
+}
+.etoro-ytd-splitline:first-child { border-top: none; padding-top: 0; }
+.etoro-recon-ok {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: rgb(var(--color-gain));
+  margin-left: 0.5rem;
+}
+
+/* SC-26 — Forward-looking (FT-native) section relabel block. */
+.perf-forward { margin-top: 1.75rem; }
+.perf-forward-head {
+  border-top: 1px solid rgb(var(--color-border));
+  padding-top: 1rem;
+  margin-bottom: 0.75rem;
+}
+.perf-section-title { font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem; }
+.perf-forward-note { font-size: 0.8rem; margin: 0; max-width: 60ch; }
+
 /* Per-year annual tables. */
 .etoro-year-block { margin-bottom: 1.25rem; }
 .etoro-year-title {

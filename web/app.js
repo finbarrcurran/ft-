@@ -2062,8 +2062,11 @@ async function renderSummary() {
   // retired (Fin doesn't use Add-Note). The panel is hidden; the code path
   // (updateStaleThesisBanner / /api/notes/stale) is intentionally kept.
 
-  const perfPanel = `<div id="etoro-perf-panel" class="etoro-perf"></div>`;
-  content.innerHTML = staleBanner + controlsRow + kpiRow + donutRow + tagDonuts + perfPanel + footer;
+  // SC-26 — the eToro performance history panel moved to the Performance tab
+  // (its new home as the primary surface). Removed from Summary to leave exactly
+  // one Performance surface (AC9 / S-26e). renderEtoroPerformance now mounts on
+  // the Performance tab instead.
+  content.innerHTML = staleBanner + controlsRow + kpiRow + donutRow + tagDonuts + footer;
 
   // SC-22 — keep the persistent indicator in sync with the server flag.
   updateDemoIndicator(demoOn);
@@ -2110,8 +2113,8 @@ async function renderSummary() {
   // SC-02 — thesis coverage + freshness nudge (defer to keep render snappy).
   updateStaleScoreBanner();
 
-  // SC-17 — eToro performance history panel (defer; independent fetch).
-  renderEtoroPerformance(currency);
+  // SC-26 — eToro performance history now lives on the Performance tab (its home).
+  // No longer rendered here (see renderPerformance).
 
   // Spec 12 D2 — cash KPI editable. Click + Enter/Space (a11y) both fire.
   const cashEl = document.querySelector('#kpi-cash');
@@ -2215,7 +2218,11 @@ const etoroImportState = { step: 'idle', preview: null, error: null };
 // when the screen is shown to someone. This flag is in-memory only (resets to
 // false on reload); it persists across strategy re-renders so toggling the
 // disc/copy filter while expanded doesn't snap it shut.
-let etoroPerfExpanded = false;
+// SC-26 — the eToro realised-history is now the Performance tab's primary
+// content (its real performance record), so it loads expanded. In demo mode
+// the server returns no years (hidden), so an expanded shell still reveals
+// nothing real (D22.7 preserved server-side). The user can still collapse it.
+let etoroPerfExpanded = true;
 
 // money formats a signed amount in the active display currency.
 function etoroMoney(v, ccy) {
@@ -2307,20 +2314,35 @@ async function renderEtoroPerformance(currency) {
   };
 
   // YTD card = the latest is_ytd year (if any).
+  // SC-26 D26.4: discretionary (the user's own stock-picking) is the HERO metric;
+  // copy/CFD is shown alongside but NEVER blended into the headline. The two
+  // realised lines + total reconcile to the Account Summary closed-P/L (D26.7).
   const ytd = years.find((y) => y.isYtd);
   let ytdCard = '';
   if (ytd) {
-    const net = ccyPick(ytd, 'net', ccy);
-    const realised = ccyPick(ytd, 'realisedPnl', ccy);
+    const assets = ytd.assets || [];
+    const discY = assets.reduce((s, a) => s + ccyPick(a, 'realisedDisc', ccy), 0);
+    const copyY = assets.reduce((s, a) => s + ccyPick(a, 'realisedCopy', ccy), 0);
+    const realisedTotal = ccyPick(ytd, 'realisedPnl', ccy);
+    // Reconciliation: discretionary + copy/CFD must equal the closed-P/L total.
+    const reconDelta = realisedTotal - (discY + copyY);
+    const reconNote = Math.abs(reconDelta) > 1
+      ? `<span class="etoro-recon-flag" title="discretionary + copy/CFD vs closed-P/L total">recon Δ ${etoroMoney(reconDelta, ccy)}</span>`
+      : `<span class="etoro-recon-ok" title="discretionary + copy/CFD reconciles to closed-P/L total">✓ reconciles</span>`;
     ytdCard = `
       <div class="etoro-ytd-card">
-        <div class="etoro-ytd-label">YTD ${ytd.year} <span class="dim">(${escapeHTML(ytd.rangeStart)} → ${escapeHTML(ytd.rangeEnd)})</span></div>
-        <div class="etoro-ytd-net num ${net > 0 ? 'gain' : net < 0 ? 'loss' : ''}">${etoroMoney(net, ccy)}</div>
+        <div class="etoro-ytd-label">YTD ${ytd.year} · discretionary realised <span class="dim">(${escapeHTML(ytd.rangeStart)} → ${escapeHTML(ytd.rangeEnd)})</span></div>
+        <div class="etoro-ytd-net num ${discY > 0 ? 'gain' : discY < 0 ? 'loss' : ''}">${etoroMoney(discY, ccy)}</div>
+        <div class="etoro-ytd-split">
+          <span class="etoro-ytd-splitline">your own picks (discretionary) <strong class="num ${discY > 0 ? 'gain' : discY < 0 ? 'loss' : ''}">${etoroMoney(discY, ccy)}</strong></span>
+          <span class="etoro-ytd-splitline">copy / CFD <strong class="num ${copyY > 0 ? 'gain' : copyY < 0 ? 'loss' : ''}">${etoroMoney(copyY, ccy)}</strong></span>
+          <span class="etoro-ytd-splitline">closed realised total <strong class="num ${realisedTotal > 0 ? 'gain' : realisedTotal < 0 ? 'loss' : ''}">${etoroMoney(realisedTotal, ccy)}</strong> ${reconNote}</span>
+        </div>
         <div class="etoro-ytd-sub num dim">
-          realised ${etoroMoney(realised, ccy)} ·
           dividends ${etoroMoney(ccyPick(ytd, 'dividends', ccy), ccy)} ·
           fees ${etoroMoney(ccyPick(ytd, 'fees', ccy), ccy)} ·
-          interest ${etoroMoney(ccyPick(ytd, 'interest', ccy), ccy)}
+          interest ${etoroMoney(ccyPick(ytd, 'interest', ccy), ccy)} ·
+          net ${etoroMoney(ccyPick(ytd, 'net', ccy), ccy)}
         </div>
       </div>`;
   }
@@ -9637,21 +9659,45 @@ async function renderPerformance() {
     </div>
   ` : '';
 
+  // SC-26 — the Performance tab's home/primary content is the SC-17 eToro
+  // realised history (real P&L from performance_history). The FT-native
+  // regime-cohort analytics below are relabelled "Forward-looking" — they
+  // populate as FT logs its own trades (closed_trades/performance_snapshots).
+  // Currency follows the existing display_currency cookie convention (no
+  // summary payload is guaranteed on this tab, so read it directly).
+  const ccyMatch = document.cookie.match(/(?:^|;\s*)display_currency=(EUR|USD)/);
+  const perfCcy = ccyMatch ? ccyMatch[1] : 'USD';
+
   content.innerHTML = `
-    <div class="perf-toolbar">
-      <div class="currency-toggle" role="tablist">${windowSel}</div>
-      <a class="btn-ghost" href="/api/performance/export.csv" download>Export CSV</a>
+    <div id="etoro-perf-panel" class="etoro-perf"></div>
+
+    <div class="perf-forward">
+      <div class="perf-forward-head">
+        <h3 class="perf-section-title">Forward-looking — populates as FT logs its own trades</h3>
+        <p class="dim perf-forward-note">
+          FT-native regime-cohort analytics from FT's own logged closures
+          (separate from the eToro realised history above). Sample sizes below
+          n=5 are dimmed as low-confidence.
+        </p>
+      </div>
+      <div class="perf-toolbar">
+        <div class="currency-toggle" role="tablist">${windowSel}</div>
+        <a class="btn-ghost" href="/api/performance/export.csv" download>Export CSV</a>
+      </div>
+      ${emptyBanner}
+      ${kpiRow}
+      <h4 class="rh-side" style="margin-top:1rem">R-multiple distribution</h4>
+      <div class="hist-row">${histBars}</div>
+      ${equityHTML}
+      <h4 class="rh-side" style="margin-top:1.2rem">Methodology calibration <span class="dim" style="font-size:0.78rem; font-weight:normal">(does scoring trades higher produce better outcomes?)</span></h4>
+      <div class="calib-row">${calibBlocks}</div>
+      <h4 class="rh-side" style="margin-top:1.2rem">Cohort breakdown</h4>
+      ${cohortSections || '<div class="dim">No cohort data yet.</div>'}
     </div>
-    ${emptyBanner}
-    ${kpiRow}
-    <h4 class="rh-side" style="margin-top:1rem">R-multiple distribution</h4>
-    <div class="hist-row">${histBars}</div>
-    ${equityHTML}
-    <h4 class="rh-side" style="margin-top:1.2rem">Methodology calibration <span class="dim" style="font-size:0.78rem; font-weight:normal">(does scoring trades higher produce better outcomes?)</span></h4>
-    <div class="calib-row">${calibBlocks}</div>
-    <h4 class="rh-side" style="margin-top:1.2rem">Cohort breakdown</h4>
-    ${cohortSections || '<div class="dim">No cohort data yet.</div>'}
   `;
+
+  // SC-26 — mount the eToro realised history as the tab's primary surface.
+  renderEtoroPerformance(perfCcy);
 
   // Window selector clicks.
   document.querySelectorAll('[data-pwin]').forEach(btn => {
