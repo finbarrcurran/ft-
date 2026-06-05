@@ -10693,23 +10693,41 @@ async function renderScorecards() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading scorecards…</div>';
 
-  let list;
+  // SC-27: two labelled sections on the Scorecards tab — "Stock Scorecards"
+  // (sector_scorecards) then "Crypto Scorecards". The crypto section is a
+  // second mount of the Crypto Theses tab's Adapter-Repository render reading
+  // the same live /api/crypto/adapters path (mirror, not relocate; read-only,
+  // no copy). The Crypto Theses tab itself is unchanged.
+  let list, cryptoAdapters;
   try {
-    const r = await api('/api/scorecards');
-    list = r.scorecards || [];
+    const [scRes, caRes] = await Promise.all([
+      api('/api/scorecards'),
+      api('/api/crypto/adapters').catch(() => ({ adapters: [] })),
+    ]);
+    list = scRes.scorecards || [];
+    cryptoAdapters = caRes.adapters || [];
     _scorecardListCache = list;
+    _cryptoAdapterListCache = cryptoAdapters;
   } catch (e) {
     content.innerHTML = `<div class="empty"><div class="loss">scorecards failed: ${escapeHTML(e.message)}</div></div>`;
     return;
   }
 
-  // Pre-select: state.selectedScorecard → first locked → first row.
+  // Pre-select stock: state.selectedScorecard → first locked → first row.
   let selected = state.selectedScorecard
     || list.find(s => s.status === 'locked' && !s.isDoctrine)?.code
     || list.find(s => s.status === 'locked')?.code
     || list[0]?.code
     || null;
   state.selectedScorecard = selected;
+
+  // Pre-select crypto (dedicated key so it never bleeds into the Crypto
+  // Theses tab's own selection state).
+  let cryptoSelected = state.selectedScCryptoAdapter
+    || cryptoAdapters.find(a => a.status === 'locked')?.slug
+    || cryptoAdapters[0]?.slug
+    || null;
+  state.selectedScCryptoAdapter = cryptoSelected;
 
   const statusIcon = (s) => {
     if (s.isDoctrine) return '📖';
@@ -10739,18 +10757,21 @@ async function renderScorecards() {
   }).join('');
 
   content.innerHTML = `
-    <div class="scorecards-layout">
-      <aside class="sc-left">
-        <h3 class="sc-pane-head">Scorecards <span class="dim" style="font-size:0.72rem; font-weight:normal">(${list.length})</span></h3>
-        <div class="sc-list">${leftPane || '<p class="dim">No scorecards seeded.</p>'}</div>
-      </aside>
-      <section class="sc-right" id="sc-right">
-        <div class="empty">loading…</div>
-      </section>
+    <div class="ct-section">
+      <h3 class="ct-section-head">Stock Scorecards <span class="dim">(${list.length})</span></h3>
+      <div class="scorecards-layout">
+        <aside class="sc-left">
+          <div class="sc-list">${leftPane || '<p class="dim">No scorecards seeded.</p>'}</div>
+        </aside>
+        <section class="sc-right" id="sc-right">
+          <div class="empty">loading…</div>
+        </section>
+      </div>
     </div>
+    ${renderAdapterRepository(cryptoAdapters, cryptoSelected, 'Crypto Scorecards')}
   `;
 
-  // Wire left-pane clicks.
+  // Wire stock left-pane clicks.
   for (const row of content.querySelectorAll('.sc-row[data-sc-code]')) {
     const open = () => {
       state.selectedScorecard = row.dataset.scCode;
@@ -10762,9 +10783,24 @@ async function renderScorecards() {
     });
   }
 
-  if (selected) {
-    await loadScorecardRightPane(selected);
+  // SC-27: wire crypto adapter pane clicks (stay on the Scorecards tab — keep
+  // the crypto selection in the dedicated Scorecards-tab state key).
+  for (const row of content.querySelectorAll('.ca-row[data-ca-slug]')) {
+    const open = () => {
+      state.selectedScCryptoAdapter = row.dataset.caSlug;
+      renderScorecards();
+    };
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
+    });
   }
+
+  // Load both right panes (#sc-right and #ca-right are unique on this tab).
+  await Promise.all([
+    selected ? loadScorecardRightPane(selected) : Promise.resolve(),
+    cryptoSelected ? loadCryptoAdapterRightPane(cryptoSelected) : Promise.resolve(),
+  ]);
 }
 
 // ---------- Spec 15: Theses tab (GitHub-backed thesis library) ---------
@@ -11992,7 +12028,7 @@ function wireAllocationPanel() {
 }
 
 // ---------- Adapter Repository pane (existing, extracted) --------------
-function renderAdapterRepository(adapters, selected) {
+function renderAdapterRepository(adapters, selected, sectionTitle = 'Adapter Repository') {
   const statusIcon = (a) => {
     if (a.status === 'locked') return '🔒';
     if (a.status === 'needs-review') return '🔄';
@@ -12022,7 +12058,7 @@ function renderAdapterRepository(adapters, selected) {
 
   return `
     <div class="ct-section">
-      <h3 class="ct-section-head">Adapter Repository <span class="dim">(${adapters.length})</span></h3>
+      <h3 class="ct-section-head">${escapeHTML(sectionTitle)} <span class="dim">(${adapters.length})</span></h3>
       <div class="scorecards-layout">
         <aside class="sc-left">
           <div class="sc-list">${leftPane || '<p class="dim">No adapters seeded yet.</p>'}</div>
