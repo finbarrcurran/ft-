@@ -10998,6 +10998,156 @@ async function loadJordiSectorRead() {
 if (state.selectedScorecard == null) state.selectedScorecard = null;
 let _scorecardListCache = null;
 
+// SC-34 — static "Process / Playbook" doctrine card pinned to the top of the
+// Scorecards tab. Renders the FT process-flow flowchart (idea → locked thesis):
+// Phase A (hedge-fund-analyst skill → candidate) → Phase B (ft-thesis skill →
+// lock). Reference material only — no DB schema, no endpoints, no data binding.
+// The SVG is inlined (not served as a file) to match FT's single-file SPA
+// convention and so neutral structural fills theme via FT's CSS vars; the
+// semantic A-teal / B-blue / decision-amber / veto-red / locked-green colours
+// are kept hardcoded because they carry meaning (per the handover). Update the
+// chart only when the process itself changes (re-issue the asset from Claude.ai).
+const PLAYBOOK_SVG = `<svg viewBox="0 0 720 1440" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FT process flow from idea to locked thesis">
+  <style>
+    text { font-family: var(--font-sans), system-ui, -apple-system, 'Segoe UI', sans-serif; fill: rgb(var(--color-text)); }
+    .mono { font-family: var(--font-mono), ui-monospace,'SF Mono',Menlo,Consolas,monospace; }
+    .dim  { fill: rgb(var(--color-text-muted)); }
+    .ttl  { font-weight:700; }
+    .teal { fill:#2dd4bf; } .blue { fill:#60a5fa; } .amber{ fill:#f5a524; }
+    .red  { fill:#f87171; } .grn  { fill:#4ade80; }
+    .ls   { letter-spacing:1.6px; }
+    .panel{ fill: rgb(var(--color-bg)); stroke: rgb(var(--color-border)); }
+    .ncard{ fill: rgb(var(--color-surface)); stroke: rgb(var(--color-border-strong)); }
+  </style>
+  <defs>
+    <marker id="ah" markerWidth="12" markerHeight="12" refX="5" refY="5" orient="auto">
+      <path d="M1,1 L9,5 L1,9" fill="none" stroke="#566472" stroke-width="1.6"/>
+    </marker>
+  </defs>
+
+  <rect x="6" y="6" width="708" height="1428" rx="14" class="panel"/>
+
+  <text x="40" y="44" class="ttl" font-size="22">FT — From Idea to Locked Thesis</text>
+  <text x="40" y="64" class="dim" font-size="12.5">Two skills, two phases. They never overlap — and don't skip a stage.</text>
+  <text x="680" y="40" class="mono dim" font-size="10" text-anchor="end">personal use · not advice</text>
+  <line x1="40" y1="80" x2="680" y2="80" stroke="#1f2630"/>
+
+  <!-- PHASE A -->
+  <text x="40" y="108" class="mono teal ls" font-size="13">PHASE A · IDENTIFY THE PICK</text>
+  <text x="680" y="108" class="mono teal" font-size="11" text-anchor="end">hedge-fund-analyst skill</text>
+  <line x1="40" y1="116" x2="680" y2="116" stroke="#2dd4bf" stroke-opacity="0.45"/>
+  <rect x="44" y="132" width="3" height="488" fill="#2dd4bf" fill-opacity="0.4"/>
+
+  <rect x="56" y="132" width="608" height="60" rx="9" class="ncard"/>
+  <text x="76" y="160" class="ttl" font-size="14">① Signal spotted</text>
+  <text x="76" y="180" class="mono dim" font-size="11">podcast · article · earnings transcript · a raw idea — you notice it (human-led)</text>
+  <line x1="360" y1="192" x2="360" y2="212" stroke="#566472" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="56" y="216" width="608" height="76" rx="9" fill="#1a1710" stroke="#f5a524"/>
+  <rect x="76" y="228" width="64" height="16" rx="3" fill="#f5a524" fill-opacity="0.15" stroke="#f5a524" stroke-opacity="0.5"/>
+  <text x="108" y="240" class="mono amber" font-size="9" text-anchor="middle">DECISION</text>
+  <text x="76" y="266" class="ttl" font-size="13.5">Is the theme worth the research bandwidth?</text>
+  <text x="76" y="284" class="mono dim" font-size="11">scale · transmission mechanism · opportunity cost (Jordi evaluation gate)</text>
+  <text x="644" y="240" class="mono dim" font-size="10" text-anchor="end">no → park / monitor</text>
+  <line x1="360" y1="292" x2="360" y2="312" stroke="#566472" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- A3 skill -->
+  <rect x="56" y="316" width="608" height="144" rx="9" fill="#0f211f" stroke="#2dd4bf" stroke-width="1.5"/>
+  <rect x="76" y="328" width="46" height="16" rx="3" fill="#2dd4bf" fill-opacity="0.15" stroke="#2dd4bf" stroke-opacity="0.5"/>
+  <text x="99" y="340" class="mono teal" font-size="9" text-anchor="middle">SKILL</text>
+  <text x="76" y="366" class="ttl" font-size="14">② Run hedge-fund-analyst → PM Research Memo</text>
+  <text x="76" y="386" class="mono dim" font-size="11">value-chain · 2nd/3rd-order · Bull/Base/Bear · candidate watchlist</text>
+  <line x1="76" y1="398" x2="644" y2="398" stroke="#243a38"/>
+  <rect x="76" y="406" width="44" height="18" rx="3" fill="#2dd4bf" fill-opacity="0.18" stroke="#2dd4bf" stroke-opacity="0.6"/>
+  <text x="98" y="419" class="mono teal" font-size="9" text-anchor="middle">TYPE</text>
+  <text x="128" y="419" class="mono teal" font-size="11">Use the "hedge-fund-analyst" skill<tspan class="dim"> + your input</tspan></text>
+  <text x="76" y="443" class="mono dim" font-size="10">or fires automatically on investment material — "read-through?", "winners/losers?", "thesis on X"</text>
+  <line x1="360" y1="460" x2="360" y2="480" stroke="#566472" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="56" y="484" width="608" height="56" rx="9" class="ncard"/>
+  <text x="76" y="510" class="ttl" font-size="14">③ Candidate name(s) → add to FT watchlist</text>
+  <text x="76" y="528" class="mono dim" font-size="11">the memo's names are leads to investigate, never scored verdicts</text>
+  <line x1="360" y1="540" x2="360" y2="560" stroke="#566472" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="56" y="564" width="608" height="56" rx="9" fill="#1a1710" stroke="#f5a524"/>
+  <rect x="76" y="574" width="64" height="16" rx="3" fill="#f5a524" fill-opacity="0.15" stroke="#f5a524" stroke-opacity="0.5"/>
+  <text x="108" y="586" class="mono amber" font-size="9" text-anchor="middle">DECISION</text>
+  <text x="150" y="587" class="ttl" font-size="13.5">Does it clear YOUR judgment?</text>
+  <text x="76" y="610" class="mono dim" font-size="11">crowding · sentiment · macro / regime · portfolio fit (the human call)</text>
+  <text x="644" y="587" class="mono dim" font-size="10" text-anchor="end">no → watchlist</text>
+
+  <line x1="360" y1="620" x2="360" y2="688" stroke="#566472" stroke-width="1.6" marker-end="url(#ah)"/>
+  <rect x="252" y="654" width="216" height="20" rx="4" fill="#0d1117"/>
+  <text x="360" y="668" class="mono" font-size="10.5" fill="#9fb0c0" text-anchor="middle">HANDOFF · you've chosen a ticker to score</text>
+
+  <!-- PHASE B -->
+  <text x="40" y="714" class="mono blue ls" font-size="13">PHASE B · COMPLETE THE THESIS</text>
+  <text x="680" y="714" class="mono blue" font-size="11" text-anchor="end">ft-thesis skill (in build)</text>
+  <line x1="40" y1="722" x2="680" y2="722" stroke="#60a5fa" stroke-opacity="0.45"/>
+  <rect x="44" y="738" width="3" height="600" fill="#60a5fa" fill-opacity="0.4"/>
+
+  <rect x="56" y="738" width="608" height="68" rx="9" class="ncard"/>
+  <text x="76" y="766" class="ttl" font-size="14">④ Route to sector adapter (+ sub-type)</text>
+  <text x="76" y="786" class="mono dim" font-size="11">pick the adapter · new sector? register its slug in the FT parser first</text>
+  <line x1="360" y1="806" x2="360" y2="826" stroke="#566472" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <!-- B2 skill -->
+  <rect x="56" y="830" width="608" height="240" rx="9" fill="#101a2b" stroke="#60a5fa" stroke-width="1.5"/>
+  <rect x="76" y="842" width="46" height="16" rx="3" fill="#60a5fa" fill-opacity="0.15" stroke="#60a5fa" stroke-opacity="0.5"/>
+  <text x="99" y="854" class="mono blue" font-size="9" text-anchor="middle">SKILL</text>
+  <text x="76" y="880" class="ttl" font-size="14">⑤ Run ft-thesis → Stage 1–4 lock</text>
+  <text x="76" y="904" class="mono" font-size="11"><tspan class="blue">Stage 1</tspan> — Gemini 3.1 Pro blind draft (8-Q scorecard; NO expected band)</text>
+  <text x="76" y="924" class="mono" font-size="11"><tspan class="blue">Stage 2</tspan> — Claude empirical audit: primary sources, flag fabrications,</text>
+  <text x="150" y="940" class="mono dim" font-size="11">and ask "why is this NOT a higher score?"</text>
+  <text x="76" y="960" class="mono" font-size="11"><tspan class="blue">Stage 3</tspan> — optional Gemini re-pass; skip / abandon if it adds errors (CCJ)</text>
+  <text x="76" y="980" class="mono" font-size="11"><tspan class="blue">Stage 4</tspan> — Claude + you → tally + pass-gate (6+ pillars ≥1; Q1 and Q3 ≥1) + band</text>
+  <line x1="76" y1="996" x2="644" y2="996" stroke="#21304a"/>
+  <rect x="76" y="1002" width="44" height="18" rx="3" fill="#60a5fa" fill-opacity="0.18" stroke="#60a5fa" stroke-opacity="0.6"/>
+  <text x="98" y="1015" class="mono blue" font-size="9" text-anchor="middle">TYPE</text>
+  <text x="128" y="1015" class="mono blue" font-size="11">Use the "ft-thesis" skill<tspan class="dim"> then: score / audit / lock TICKER</tspan></text>
+  <text x="76" y="1038" class="mono dim" font-size="10">or: "score TICKER" · "build the stage-1 prompt" · "which adapter?" · "re-score after earnings"</text>
+  <text x="76" y="1056" class="mono dim" font-size="10">two-step guard: the skill confirms scope, waits, then runs</text>
+  <line x1="360" y1="1070" x2="360" y2="1090" stroke="#566472" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="56" y="1094" width="608" height="56" rx="9" fill="#1a1710" stroke="#f5a524"/>
+  <rect x="76" y="1104" width="64" height="16" rx="3" fill="#f5a524" fill-opacity="0.15" stroke="#f5a524" stroke-opacity="0.5"/>
+  <text x="108" y="1116" class="mono amber" font-size="9" text-anchor="middle">DECISION</text>
+  <text x="150" y="1117" class="ttl" font-size="13.5">Do YOU lock it? — the skill never auto-locks</text>
+  <text x="76" y="1140" class="mono dim" font-size="11">hold or re-score if it doesn't clear; lock as v1 when it does</text>
+  <line x1="360" y1="1150" x2="360" y2="1170" stroke="#566472" stroke-width="1.6" marker-end="url(#ah)"/>
+
+  <rect x="56" y="1174" width="608" height="56" rx="9" fill="#0f1f16" stroke="#4ade80" stroke-width="1.3"/>
+  <text x="76" y="1200" class="ttl" font-size="14">⑥ Locked thesis v1 — stored</text>
+  <text x="76" y="1218" class="mono dim" font-size="11">title em-dashes · &gt; metadata · Status: Locked — date · Final Score line</text>
+  <line x1="360" y1="1230" x2="360" y2="1254" stroke="#566472" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#ah)"/>
+  <text x="372" y="1246" class="mono dim" font-size="10">at entry</text>
+
+  <rect x="56" y="1258" width="608" height="80" rx="9" class="ncard"/>
+  <text x="76" y="1284" class="ttl" font-size="14">⑦ At entry → Execution layer (Percoco)</text>
+  <text x="76" y="1304" class="mono dim" font-size="11">regime check + Percoco 8-Q + position sizing + portfolio-risk caps</text>
+  <text x="76" y="1322" class="mono" font-size="11">all three layers must clear  ·  <tspan class="red">R-multiple &lt; 1.5 = VETO</tspan></text>
+
+  <line x1="40" y1="1370" x2="680" y2="1370" stroke="#1f2630"/>
+  <text x="40" y="1392" class="mono dim" font-size="10.5">Phase A = candidates and context, never a score.   Phase B = scores and locks, never invents the idea.</text>
+  <text x="40" y="1410" class="mono dim" font-size="10.5">Colours remap to FT's CSS vars on embed.  ·  Not investment advice — personal use.</text>
+</svg>`;
+
+function playbookCardHTML(collapsed) {
+  return `
+    <div class="ct-section playbook-card">
+      <div class="playbook-head" id="playbook-head" role="button" tabindex="0"
+           aria-expanded="${collapsed ? 'false' : 'true'}" aria-controls="playbook-body"
+           title="Click to ${collapsed ? 'expand' : 'collapse'}">
+        <span class="playbook-caret">${collapsed ? '▸' : '▾'}</span>
+        <h3 class="ct-section-head" style="margin:0">Process / Playbook <span class="dim">— idea → locked thesis</span></h3>
+      </div>
+      <div class="playbook-body${collapsed ? ' collapsed' : ''}" id="playbook-body">
+        <div class="playbook-svg-wrap">${PLAYBOOK_SVG}</div>
+      </div>
+    </div>
+  `;
+}
+
 async function renderScorecards() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading scorecards…</div>';
@@ -11007,14 +11157,17 @@ async function renderScorecards() {
   // second mount of the Crypto Theses tab's Adapter-Repository render reading
   // the same live /api/crypto/adapters path (mirror, not relocate; read-only,
   // no copy). The Crypto Theses tab itself is unchanged.
-  let list, cryptoAdapters;
+  let list, cryptoAdapters, playbookCollapsed = false;
   try {
-    const [scRes, caRes] = await Promise.all([
+    const [scRes, caRes, pbRes] = await Promise.all([
       api('/api/scorecards'),
       api('/api/crypto/adapters').catch(() => ({ adapters: [] })),
+      // SC-34 — collapse state for the Process/Playbook card (default expanded).
+      api('/api/preferences/playbook_card_collapsed').catch(() => ({ value: null })),
     ]);
     list = scRes.scorecards || [];
     cryptoAdapters = caRes.adapters || [];
+    playbookCollapsed = !!(pbRes && pbRes.value === 'true');
     _scorecardListCache = list;
     _cryptoAdapterListCache = cryptoAdapters;
   } catch (e) {
@@ -11066,6 +11219,7 @@ async function renderScorecards() {
   }).join('');
 
   content.innerHTML = `
+    ${playbookCardHTML(playbookCollapsed)}
     <div class="ct-section">
       <h3 class="ct-section-head">Stock Scorecards <span class="dim">(${list.length})</span></h3>
       <div class="scorecards-layout">
@@ -11079,6 +11233,31 @@ async function renderScorecards() {
     </div>
     ${renderAdapterRepository(cryptoAdapters, cryptoSelected, 'Crypto Scorecards')}
   `;
+
+  // SC-34 — wire the Process/Playbook collapse toggle. Pure DOM toggle (no
+  // re-render) + persist the new state to user_preferences.playbook_card_collapsed.
+  const pbHead = content.querySelector('#playbook-head');
+  if (pbHead) {
+    const pbToggle = async () => {
+      const body = content.querySelector('#playbook-body');
+      const caret = pbHead.querySelector('.playbook-caret');
+      const nowCollapsed = !body.classList.contains('collapsed');
+      body.classList.toggle('collapsed', nowCollapsed);
+      if (caret) caret.textContent = nowCollapsed ? '▸' : '▾';
+      pbHead.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+      pbHead.title = 'Click to ' + (nowCollapsed ? 'expand' : 'collapse');
+      try {
+        await api('/api/preferences/playbook_card_collapsed', {
+          method: 'PUT',
+          body: JSON.stringify({ value: String(nowCollapsed) }),
+        });
+      } catch (e) { /* persistence is best-effort; UI already toggled */ }
+    };
+    pbHead.addEventListener('click', pbToggle);
+    pbHead.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pbToggle(); }
+    });
+  }
 
   // Wire stock left-pane clicks.
   for (const row of content.querySelectorAll('.sc-row[data-sc-code]')) {

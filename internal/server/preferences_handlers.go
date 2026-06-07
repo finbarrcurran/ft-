@@ -124,6 +124,9 @@ func validPreferenceValue(key, value string) bool {
 	case "demo_mode":
 		// SC-22 — server-read demo/privacy toggle. Only on/off.
 		return value == "on" || value == "off"
+	case "playbook_card_collapsed":
+		// SC-34 — Process/Playbook card collapse state. Boolean string.
+		return value == "true" || value == "false"
 	case "jordi_current_sector_read":
 		// Spec 9f D7 — free-text macro strip note. Bounded to avoid abuse.
 		return len(value) > 0 && len(value) <= 500

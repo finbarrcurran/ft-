@@ -4477,6 +4477,34 @@ a.score-badge { display: inline-block; }
   color: #e5e7eb;
 }
 
+/* SC-34 — Process/Playbook doctrine card (static flowchart, top of Scorecards tab). */
+.playbook-card { margin-bottom: 1.2rem; }
+.playbook-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  user-select: none;
+}
+.playbook-head:hover .ct-section-head { color: #fff; }
+.playbook-caret {
+  color: rgb(var(--color-text-muted));
+  font-size: 0.8rem;
+  width: 0.9rem;
+  text-align: center;
+}
+.playbook-body { margin-top: 0.6rem; }
+.playbook-body.collapsed { display: none; }
+.playbook-svg-wrap {
+  max-width: 760px;
+  overflow-x: auto;
+}
+.playbook-svg-wrap svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
 .ct-table-wrap {
   overflow-x: auto;
 }
