@@ -121,6 +121,28 @@ var adapterAliases = map[string]string{
 	"asset-hedge scorecard": "asset_hedge",
 	"asset hedge scorecard": "asset_hedge",
 	"hedge":                 "asset_hedge",
+	// Utilities / IPP adapter (17th). Remapped /16, pillars U1–U8.
+	// Sub-types (captured free-form, not validated): regulated-utility,
+	// ipp-merchant, hybrid-utility, renewables-yieldco.
+	"utilities_ipp":               "utilities_ipp",
+	"utilities/ipp":               "utilities_ipp",
+	"utilities / ipp":             "utilities_ipp",
+	"utilities-ipp":               "utilities_ipp",
+	"utilities ipp":               "utilities_ipp",
+	"utilities":                   "utilities_ipp",
+	"utility":                     "utilities_ipp",
+	"utilities/ipp v1":            "utilities_ipp",
+	"ipp":                         "utilities_ipp",
+	"independent power producer":  "utilities_ipp",
+	"independent power producers": "utilities_ipp",
+	// Financials adapter (18th). Remapped /16, pillars F1–F8.
+	// Sub-types (captured free-form, not validated): bank, insurer,
+	// asset-manager, exchange-marketinfra, fintech-balancesheet, mreit.
+	"financials":    "financials",
+	"financial":     "financials",
+	"financials v1": "financials",
+	"banks":         "financials",
+	"insurers":      "financials",
 }
 
 // NormaliseAdapter maps a free-form adapter name from the MD header to one
@@ -169,7 +191,19 @@ func NormaliseAdapter(raw string) string {
 		{[]string{"cloud"}, "cloud_infra"},
 		{[]string{"hyperscaler"}, "cloud_infra"},
 		{[]string{"hedge"}, "asset_hedge"},
-		{[]string{"asset"}, "asset_hedge"}, // safer to keep last; "hedge" usually present too
+		{[]string{"asset", "manager"}, "financials"}, // asset/wealth-manager financial sub-type — before bare "asset" hedge route
+		{[]string{"asset"}, "asset_hedge"},           // safer to keep last; "hedge" usually present too
+		// Utilities / IPP — MUST precede the generic energy/power routes so a
+		// utility/IPP thesis mentioning "power" doesn't mis-route to energy_power.
+		{[]string{"utilit"}, "utilities_ipp"}, // "utility" / "utilities"
+		{[]string{"ipp"}, "utilities_ipp"},
+		{[]string{"merchant", "power"}, "utilities_ipp"},
+		{[]string{"regulated", "utility"}, "utilities_ipp"},
+		// Financials — banks/insurers/exchanges/fintech-balance-sheet/mREITs.
+		{[]string{"financial"}, "financials"},
+		{[]string{"bank"}, "financials"},
+		{[]string{"insurer"}, "financials"},
+		{[]string{"insurance"}, "financials"},
 		{[]string{"energy"}, "energy_power"},
 		{[]string{"power"}, "energy_power"},
 	}
