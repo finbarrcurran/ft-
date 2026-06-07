@@ -143,10 +143,26 @@ var adapterAliases = map[string]string{
 	"financials v1": "financials",
 	"banks":         "financials",
 	"insurers":      "financials",
+	// Beverages adapter (19th — Consumer Staples: Spirits & Wine). 8-Q /16.
+	// Sub-types (captured free-form, not validated): spirits-diversified,
+	// spirits-aged, spirits-clear-rtd, wine-champagne, beer-brewing.
+	// NOTE: deliberately NOT routing bare "consumer staples" — non-alc soft
+	// drinks / packaged food are a FUTURE separate adapter (adapter §1).
+	"beverages":                    "beverages",
+	"beverages v1":                 "beverages",
+	"beverages (spirits & wine)":   "beverages",
+	"consumer staples — beverages": "beverages",
+	"consumer staples - beverages": "beverages",
+	"consumer-staples — beverages": "beverages",
+	"spirits & wine":               "beverages",
+	"spirits and wine":             "beverages",
+	"spirits":                      "beverages",
+	"wine & champagne":             "beverages",
+	"brewing":                      "beverages",
 }
 
 // NormaliseAdapter maps a free-form adapter name from the MD header to one
-// of the nine canonical folder slugs. Tries three strategies in order:
+// of the canonical adapter folder slugs. Tries three strategies in order:
 //
 //  1. Exact alias lookup (preferred — every recognised name is in the map)
 //  2. Normalised-then-canonical match (handles slash/dash/& variants)
@@ -204,6 +220,16 @@ func NormaliseAdapter(raw string) string {
 		{[]string{"bank"}, "financials"},
 		{[]string{"insurer"}, "financials"},
 		{[]string{"insurance"}, "financials"},
+		// Beverages — spirits/wine/Champagne/beer branded-goods producers.
+		// Specific needles only (NOT bare "consumer staples") so a future
+		// packaged-food adapter can't be swallowed here.
+		{[]string{"beverage"}, "beverages"},
+		{[]string{"spirits"}, "beverages"},
+		{[]string{"distill"}, "beverages"}, // distiller / distillery
+		{[]string{"wine"}, "beverages"},
+		{[]string{"champagne"}, "beverages"},
+		{[]string{"brewing"}, "beverages"},
+		{[]string{"brewer"}, "beverages"},
 		{[]string{"energy"}, "energy_power"},
 		{[]string{"power"}, "energy_power"},
 	}
