@@ -143,6 +143,15 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 					if atrW, volT, err := technicals.Refresh(ctx, s.Store, ticker, "stock", price); err == nil && atrW > 0 {
 						_ = s.Store.SetStockTechnicals(ctx, h.ID, atrW, volT)
 					}
+					// SC-35 W1+W2 — project sr_candidates onto support_1/2 +
+					// resistance_1/2 and write the bar-computed MA50W/MA200D.
+					// Runs independently of the ATR gate above so trend MAs +
+					// pivot-fallback levels still populate when ATR is thin.
+					if err := technicals.AutoFillHoldingLevels(ctx, s.Store, h.ID, ticker, "stock", price); err != nil {
+						stockMu.Lock()
+						r.Errors = append(r.Errors, fmt.Sprintf("levels %s: %s", ticker, err))
+						stockMu.Unlock()
+					}
 				}
 			}
 

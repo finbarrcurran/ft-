@@ -121,11 +121,11 @@ type StockHolding struct {
 	Support1         *float64   `json:"support1,omitempty"`
 	Support2         *float64   `json:"support2,omitempty"`
 	Resistance1      *float64   `json:"resistance1,omitempty"`
-	Resistance2     *float64   `json:"resistance2,omitempty"`
+	Resistance2      *float64   `json:"resistance2,omitempty"`
 	ATRWeekly        *float64   `json:"atrWeekly,omitempty"`
 	VolTierAuto      *string    `json:"volTierAuto,omitempty"`
-	SetupType        *string    `json:"setupType,omitempty"`         // 'A_breakout_retest' | 'B_support_bounce' | 'C_continuation'
-	Stage            string     `json:"stage"`                       // 'pre_tp1' | 'post_tp1' | 'runner' | 'stopped'
+	SetupType        *string    `json:"setupType,omitempty"` // 'A_breakout_retest' | 'B_support_bounce' | 'C_continuation'
+	Stage            string     `json:"stage"`               // 'pre_tp1' | 'post_tp1' | 'runner' | 'stopped'
 	TP1HitAt         *time.Time `json:"tp1HitAt,omitempty"`
 	TP2HitAt         *time.Time `json:"tp2HitAt,omitempty"`
 	TimeStopReviewAt *string    `json:"timeStopReviewAt,omitempty"` // ISO YYYY-MM-DD
@@ -175,6 +175,26 @@ type StockHolding struct {
 	SLMethod    *string  `json:"slMethod,omitempty"`
 	SLSafetyPct *float64 `json:"slSafetyPct,omitempty"`
 
+	// SC-35 / migration 0044 — Percoco position-class lever + manual-wins flag.
+	//   PositionClass: 'hold' (conviction; vol_envelope catastrophe stop, no
+	//                  fixed target) | 'trade' (technical support−0.5×ATR stop,
+	//                  R:R-gated, resistance_1/2 = TP1/TP2). Drives the sl_method
+	//                  DEFAULT, TP behaviour, and alert tone. Backfills to 'hold'.
+	//   LevelsSource:  'auto' (nightly cron owns support_1/2 + resistance_1/2) |
+	//                  'manual' (user hand-edited; cron skips S/R writes, ATR
+	//                  still updates). Mirrors forecast_source semantics exactly.
+	PositionClass string `json:"positionClass,omitempty"`
+	LevelsSource  string `json:"levelsSource,omitempty"`
+
+	// SC-35 / migration 0044 — trend MAs computed from BARS (NOT Yahoo's
+	// 50-day / 200-day quote averages in MA50/MA200 above). MA50W is the Percoco
+	// weekly trend line and the spine of the Phase-4 "never sell a trend-intact
+	// hold" guard; MA200D is secondary confirmation. Stored columns populated
+	// nightly by technicals.Refresh so the alert layer can read them cheaply at
+	// eval time. Nil until first cron pass / thin history.
+	MA50W  *float64 `json:"ma50w,omitempty"`
+	MA200D *float64 `json:"ma200d,omitempty"`
+
 	// SC-17 P2 / migration 0039 — durable external identity for eToro
 	// reconciliation. Nullable; seeded from an eToro statement's ISIN when an
 	// approved match has one (so future uploads can match high-confidence on
@@ -217,12 +237,12 @@ type CryptoHolding struct {
 	Change7dPct    *float64 `json:"change7dPct"`
 	Change30dPct   *float64 `json:"change30dPct"`
 
-	StrategyNote string    `json:"strategyNote"`
+	StrategyNote string `json:"strategyNote"`
 
 	// Spec 3 extensions
 	Note      *string    `json:"note"`
-	VolTier   string     `json:"volTier"`         // "low" | "medium" | "high" | "extreme"
-	DeletedAt *time.Time `json:"deletedAt"`       // nil when active; non-nil when soft-deleted
+	VolTier   string     `json:"volTier"`   // "low" | "medium" | "high" | "extreme"
+	DeletedAt *time.Time `json:"deletedAt"` // nil when active; non-nil when soft-deleted
 
 	// Spec 9c — Percoco execution layer (same shape as StockHolding).
 	Support1         *float64   `json:"support1,omitempty"`
@@ -272,15 +292,15 @@ type HoldingsAudit struct {
 	HoldingID   int64     `json:"holdingId"`
 	Ticker      *string   `json:"ticker,omitempty"`
 	Symbol      *string   `json:"symbol,omitempty"`
-	Action      string    `json:"action"` // "create" | "update" | "soft_delete" | "restore" | "import_replace"
+	Action      string    `json:"action"`  // "create" | "update" | "soft_delete" | "restore" | "import_replace"
 	Changes     string    `json:"changes"` // raw JSON string of the diff
 	Reason      *string   `json:"reason,omitempty"`
 	// Spec 12 D9 — typed reason code (one of tech_break, tp1_hit,
 	// tighten_on_profit, loosen_vol, thesis_break, earnings_approaching,
 	// rebalance, manual_other). Free-form Reason still carries the prose
 	// elaboration when present.
-	ReasonCode  *string   `json:"reasonCode,omitempty"`
-	Actor       string    `json:"actor"`
+	ReasonCode *string `json:"reasonCode,omitempty"`
+	Actor      string  `json:"actor"`
 }
 
 // AlertResult is the structured outcome of running alert rules on a holding.
@@ -292,29 +312,29 @@ type AlertResult struct {
 
 // WatchlistEntry is a row in the `watchlist` table (Spec 4 D1).
 type WatchlistEntry struct {
-	ID                 int64      `json:"id"`
-	UserID             int64      `json:"-"`
-	Ticker             string     `json:"ticker"`
-	Kind               string     `json:"kind"` // "stock" | "crypto"
-	CompanyName        *string    `json:"companyName"`
-	Sector             *string    `json:"sector"`
-	CurrentPrice       *float64   `json:"currentPrice"`
-	TargetEntryLow     *float64   `json:"targetEntryLow"`
-	TargetEntryHigh    *float64   `json:"targetEntryHigh"`
-	ThesisLink         *string    `json:"thesisLink"`
-	Note               *string    `json:"note"`
-	AddedAt            time.Time  `json:"addedAt"`
-	PromotedHoldingID  *int64     `json:"promotedHoldingId"`
-	DeletedAt          *time.Time `json:"deletedAt"`
+	ID                int64      `json:"id"`
+	UserID            int64      `json:"-"`
+	Ticker            string     `json:"ticker"`
+	Kind              string     `json:"kind"` // "stock" | "crypto"
+	CompanyName       *string    `json:"companyName"`
+	Sector            *string    `json:"sector"`
+	CurrentPrice      *float64   `json:"currentPrice"`
+	TargetEntryLow    *float64   `json:"targetEntryLow"`
+	TargetEntryHigh   *float64   `json:"targetEntryHigh"`
+	ThesisLink        *string    `json:"thesisLink"`
+	Note              *string    `json:"note"`
+	AddedAt           time.Time  `json:"addedAt"`
+	PromotedHoldingID *int64     `json:"promotedHoldingId"`
+	DeletedAt         *time.Time `json:"deletedAt"`
 
 	// Spec 9c — levels carry through from watchlist to holding on promote.
-	Support1     *float64 `json:"support1,omitempty"`
-	Support2     *float64 `json:"support2,omitempty"`
-	Resistance1  *float64 `json:"resistance1,omitempty"`
-	Resistance2  *float64 `json:"resistance2,omitempty"`
-	ATRWeekly    *float64 `json:"atrWeekly,omitempty"`
-	VolTierAuto  *string  `json:"volTierAuto,omitempty"`
-	SetupType    *string  `json:"setupType,omitempty"`
+	Support1    *float64 `json:"support1,omitempty"`
+	Support2    *float64 `json:"support2,omitempty"`
+	Resistance1 *float64 `json:"resistance1,omitempty"`
+	Resistance2 *float64 `json:"resistance2,omitempty"`
+	ATRWeekly   *float64 `json:"atrWeekly,omitempty"`
+	VolTierAuto *string  `json:"volTierAuto,omitempty"`
+	SetupType   *string  `json:"setupType,omitempty"`
 
 	// Spec 12 D4a — analyst Bear/Base/Bull targets (stocks only).
 	// SC-31 — median + analyst count enrichment; forecast_source flips to
@@ -331,22 +351,22 @@ type WatchlistEntry struct {
 	// on promote (Spec 4 D6 atomic tx).
 	SectorUniverseID *int64 `json:"sectorUniverseId,omitempty"`
 
-	UpdatedAt          time.Time  `json:"updatedAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // FrameworkScore is a row in the `framework_scores` table. Append-only — every
 // re-score creates a new row. Latest = MAX(scored_at) per (target_kind, target_id).
 type FrameworkScore struct {
-	ID            int64     `json:"id"`
-	UserID        int64     `json:"-"`
-	TargetKind    string    `json:"targetKind"` // "holding" | "watchlist"
-	TargetID      int64     `json:"targetId"`
-	FrameworkID   string    `json:"frameworkId"`
-	ScoredAt      time.Time `json:"scoredAt"`
-	TotalScore    int       `json:"totalScore"`
-	MaxScore      int       `json:"maxScore"`
-	Passes        bool      `json:"passes"`
-	ScoresJSON    string    `json:"scoresJson"`         // raw JSON: {qid: {score, note}}
-	TagsJSON      *string   `json:"tagsJson,omitempty"` // raw JSON: {tagKey: value}
-	ReviewerNote  *string   `json:"reviewerNote,omitempty"`
+	ID           int64     `json:"id"`
+	UserID       int64     `json:"-"`
+	TargetKind   string    `json:"targetKind"` // "holding" | "watchlist"
+	TargetID     int64     `json:"targetId"`
+	FrameworkID  string    `json:"frameworkId"`
+	ScoredAt     time.Time `json:"scoredAt"`
+	TotalScore   int       `json:"totalScore"`
+	MaxScore     int       `json:"maxScore"`
+	Passes       bool      `json:"passes"`
+	ScoresJSON   string    `json:"scoresJson"`         // raw JSON: {qid: {score, note}}
+	TagsJSON     *string   `json:"tagsJson,omitempty"` // raw JSON: {tagKey: value}
+	ReviewerNote *string   `json:"reviewerNote,omitempty"`
 }

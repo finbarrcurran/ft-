@@ -35,26 +35,26 @@ type Server struct {
 	cfg              *config.Config
 	store            *store.Store
 	refresh          *refresh.Service
-	llm              *llm.Service              // Spec 9c.1; nil-safe — handlers guard
-	scorecards       *scorecards.Service       // Spec 9g
+	llm              *llm.Service                     // Spec 9c.1; nil-safe — handlers guard
+	scorecards       *scorecards.Service              // Spec 9g
 	cryptoAdapters   *cryptotheses.Service            // Spec 9l adapter CRUD
 	cryptoTheses     *cryptotheses.ThesisService      // Spec 9l thesis read
 	cryptoCascade    *cryptotheses.CascadeService     // Spec 9l cascade engine
 	cryptoWrite      *cryptotheses.ThesisWriteService // Spec 9l D25 thesis write
-	theses           *theses.Engine            // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
-	cryptoIndicators *cryptoindicators.Service // Spec 9e Phase 1
-	signals          *signals.Service          // Spec 9k Phase A
-	macroRegime      *macroregime.Service      // Spec 9p
-	cryptoScreener   *cryptoscreener.Service   // SC-21 crypto market screener
+	theses           *theses.Engine                   // Spec 15; nil-safe when FT_GITHUB_TOKEN unset
+	cryptoIndicators *cryptoindicators.Service        // Spec 9e Phase 1
+	signals          *signals.Service                 // Spec 9k Phase A
+	macroRegime      *macroregime.Service             // Spec 9p
+	cryptoScreener   *cryptoscreener.Service          // SC-21 crypto market screener
 	mux              *http.ServeMux
 }
 
 func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 	s := &Server{
-		cfg:        cfg,
-		store:      st,
-		refresh:    refresh.New(st),
-		llm:        llmSvc,
+		cfg:            cfg,
+		store:          st,
+		refresh:        refresh.New(st),
+		llm:            llmSvc,
 		scorecards:     scorecards.New(st.DB),
 		cryptoAdapters: cryptotheses.New(st.DB),
 		cryptoTheses:   cryptotheses.NewThesisService(st.DB),
@@ -231,6 +231,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/sector-rotation/digests", s.requireUserOrToken(s.handleSectorDigests))
 	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}/sector", s.requireUser(s.handleUpdateStockSector))
 	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}/sl-method", s.requireUser(s.handleUpdateStockSLMethod))
+	// SC-35 Phase 3 — position_class lever + levels_source ownership toggle.
+	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}/position-class", s.requireUser(s.handleUpdateStockPositionClass))
+	s.mux.HandleFunc("PUT /api/holdings/stocks/{id}/levels-source", s.requireUser(s.handleUpdateStockLevelsSource))
 
 	// Spec 14: Per-holding theses.
 	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis", s.requireUser(s.handleGetHoldingThesis))

@@ -139,6 +139,30 @@ function slMethodToggle(r, m) {
     </span>`;
 }
 
+// SC-35 Phase 3 — per-row position-class lever (Hold | Trade). Hold = conviction
+// (vol-envelope catastrophe stop, no fixed TP); Trade = tactical (technical
+// support−ATR stop, staged exits at resistance). Flipping it re-defaults the
+// stop method server-side; the click handler offers to keep a manual override.
+const POSITION_CLASS_HELP = {
+  hold: 'Hold — conviction position. Vol-envelope catastrophe stop, resistances are informational, RSI never triggers a sell while the trend is intact.',
+  trade: 'Trade — tactical position. Technical stop (support − 0.5×weekly ATR), staged exits at R1/R2, R-multiple gated.',
+};
+function positionClassToggle(r) {
+  const cls = r.positionClass === 'trade' ? 'trade' : 'hold';
+  return `<span class="pos-class-toggle" data-row-id="${r.id}" data-class="${cls}" data-method="${escapeHTML(r.slMethod || 'vol_envelope')}">
+      <button class="pc-btn ${cls === 'hold' ? 'active' : ''}" data-class="hold" title="${escapeHTML(POSITION_CLASS_HELP.hold)}">Hold</button>
+      <button class="pc-btn ${cls === 'trade' ? 'active' : ''}" data-class="trade" title="${escapeHTML(POSITION_CLASS_HELP.trade)}">Trade</button>
+    </span>`;
+}
+
+// SC-35 Phase 2.1 — "needs levels" marker. When sl_method='technical' is chosen
+// but support_1 / weekly ATR are missing, NO stop computes — surface the gap
+// rather than silently dropping to vol-envelope.
+function needsLevelsMark(m) {
+  if (!m || !m.needsLevels) return '';
+  return ' <span class="needs-levels" title="Technical stop selected but support_1 / weekly ATR are missing — no stop is in force. Add a manual stop or wait for the nightly levels pass.">⚠ needs levels</span>';
+}
+
 function escapeHTML(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -3632,6 +3656,7 @@ async function renderStocks() {
         <td class="holding-name-cell" data-holding-detail="stock:${r.id}" title="Open detail page">
           <div>${escapeHTML(r.name)}</div>
           <div class="ticker">${tickerCell}${r.category ? ' · <span class="dim">' + escapeHTML(r.category) + '</span>' : ''}</div>
+          <div class="row-class-line">${positionClassToggle(r)}</div>
           ${sectorFlowPill(r.sectorUniverseId, sectorTagMap)}
         </td>
         <td class="num">${fmtUSD.format(r.investedUsd)}</td>
@@ -3640,7 +3665,7 @@ async function renderStocks() {
         <td class="num" data-flash-id="stock-${r.id}-pnl" data-flash-value="${m.pnlUsd ?? ''}">${pnlCurrencyCell(m.pnlUsd, state.pnlCurrency, fxEURUSD)}</td>
         <td class="num">${pct(m.pnlPct, 2)}</td>
         <td class="num">${dash(r.rsi14, fmtNum2)}</td>
-        <td class="num">${proposedSL}<div class="sl-method-row">${slMethodToggle(r, m)}</div></td>
+        <td class="num">${proposedSL}${needsLevelsMark(m)}<div class="sl-method-row">${slMethodToggle(r, m)}</div></td>
         <td class="num">${proposedTP}</td>
         <td class="num">${distToSlCell(m.distanceToSlPct)}</td>
         <td class="num">${distToTpCell(m.distanceToTpPct)}</td>
@@ -3727,6 +3752,45 @@ async function renderStocks() {
       } catch (e) {
         btn.disabled = false;
         alert('Could not change stop method: ' + e.message);
+      }
+    });
+  }
+  // SC-35 Phase 3 — per-row Hold|Trade toggle. PUTs the new class; the server
+  // re-defaults sl_method (hold→vol_envelope, trade→technical) and writes an
+  // audit row. If the user had a stop method that differs from the new class's
+  // default, we ask whether to keep it (keepSlMethod) before sending.
+  for (const btn of document.querySelectorAll('.pos-class-toggle .pc-btn')) {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (btn.classList.contains('active')) return;
+      const wrap = btn.closest('.pos-class-toggle');
+      const id = wrap && wrap.dataset.rowId;
+      const cls = btn.dataset.class;
+      if (!id || !cls) return;
+      const curMethod = (wrap.dataset.method === 'technical' || wrap.dataset.method === 'vol_envelope') ? wrap.dataset.method : 'vol_envelope';
+      const wantMethod = cls === 'trade' ? 'technical' : 'vol_envelope';
+      let keepSlMethod = false;
+      if (curMethod !== wantMethod) {
+        // OK = keep the current (manually chosen) method; Cancel = adopt the
+        // class default. Defaulting to adopt keeps the lever's intent crisp.
+        keepSlMethod = confirm(
+          `Switch this position to ${cls === 'trade' ? 'TRADE' : 'HOLD'}.\n\n` +
+          `Keep your current stop method "${curMethod}"?\n` +
+          `OK = keep "${curMethod}" · Cancel = use the ${cls} default "${wantMethod}".`
+        );
+      }
+      btn.disabled = true;
+      try {
+        await api(`/api/holdings/stocks/${id}/position-class`, {
+          method: 'PUT',
+          body: JSON.stringify({ positionClass: cls, keepSlMethod }),
+        });
+        state.stocks = null;
+        state.summary = null;
+        loadActiveTab();
+      } catch (e) {
+        btn.disabled = false;
+        alert('Could not change position class: ' + e.message);
       }
     });
   }

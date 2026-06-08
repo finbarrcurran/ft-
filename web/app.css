@@ -4262,6 +4262,48 @@ input.autofilled, select.autofilled {
 .sl-method-toggle .slm-btn:disabled { opacity: 0.5; cursor: default; }
 .sl-method-toggle .slm-lock { font-size: 0.7rem; opacity: 0.8; }
 
+/* === SC-35 Phase 3 — per-row Hold|Trade position-class lever === */
+.row-class-line { margin-top: 0.18rem; }
+.pos-class-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.12rem;
+}
+.pos-class-toggle .pc-btn {
+  border: 1px solid rgba(255,255,255,0.18);
+  background: transparent;
+  color: var(--dim, #9aa4b2);
+  border-radius: 4px;
+  font-size: 0.66rem;
+  line-height: 1;
+  padding: 0.1rem 0.34rem;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.pos-class-toggle .pc-btn:hover { border-color: rgba(255,255,255,0.4); }
+/* Hold = conviction (teal); Trade = tactical (amber) — distinct so the book's
+   posture is legible at a glance. */
+.pos-class-toggle .pc-btn[data-class="hold"].active {
+  background: rgba(45,212,191,0.22);
+  border-color: rgba(45,212,191,0.6);
+  color: #d7fff7;
+}
+.pos-class-toggle .pc-btn[data-class="trade"].active {
+  background: rgba(245,165,36,0.22);
+  border-color: rgba(245,165,36,0.6);
+  color: #ffe9c7;
+}
+.pos-class-toggle .pc-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* SC-35 Phase 2.1 — "needs levels" gap marker on the Proposed SL cell. */
+.needs-levels {
+  font-size: 0.66rem;
+  color: #f5a524;
+  white-space: nowrap;
+  cursor: help;
+}
+
 /* === SC-09 — reusable contextual hover-explainers === */
 .ft-explain {
   display: inline-block;

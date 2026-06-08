@@ -6,6 +6,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"ft/internal/alert"
 	"ft/internal/domain"
@@ -69,9 +70,27 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 		Triggers        []string `json:"triggers"`
 		CurrentPrice    *float64 `json:"currentPrice,omitempty"`
 		DistanceToSLPct *float64 `json:"distanceToSlPct,omitempty"`
+
+		// SC-35 Phase 4 — server-side action intelligence. The bot renders
+		// these verbatim (Decision I): `action` is the recommended-action clause
+		// keyed on event × position_class × trend; `severity` is the actionability
+		// tier (info|amber|red); `eventClass` is the re-classified SC-35 kind.
+		Action     string `json:"action,omitempty"`
+		Severity   string `json:"severity,omitempty"`
+		EventClass string `json:"eventClass,omitempty"`
 	}
 	out := []alertOut{}
 	margin := s.currentAlertMargin(r.Context()) // Spec 9b D6
+
+	// SC-35 Phase 4 — precompute the trend gate per holding and read the
+	// RSI-mute preference once. `muteRSI` suppresses RSI-only-on-trend-intact-
+	// hold notes from the PROACTIVE ping (only_unnotified=1); they still surface
+	// on demand (only_unnotified=0).
+	muteRSI := s.muteRSIOnlyOnHolds(r.Context())
+	trendOf := make(map[int64]alert.TrendState, len(stocks))
+	for _, h := range stocks {
+		trendOf[h.ID] = alert.Trend(h)
+	}
 
 	for _, h := range stocks {
 		m := metrics.ComputeStock(h)
@@ -89,6 +108,12 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		dec := alert.Decide(h, string(ar.Status), ar.Triggers, trendOf[h.ID])
+		// Hard rule / Decision J: mute RSI-only-on-trend-intact-hold notes from
+		// the proactive ping when the preference is on.
+		if dec.RSIOnlyHold && muteRSI && onlyUnnotified {
+			continue
+		}
 		out = append(out, alertOut{
 			HoldingKind:     "stock",
 			HoldingID:       h.ID,
@@ -98,6 +123,9 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 			Triggers:        ar.Triggers,
 			CurrentPrice:    h.CurrentPrice,
 			DistanceToSLPct: m.DistanceToSLPct,
+			Action:          dec.Action,
+			Severity:        dec.Severity,
+			EventClass:      dec.Kind,
 		})
 	}
 
@@ -116,6 +144,7 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
+			dec := alert.Decide(h, ev.Kind, []string{ev.Trigger}, trendOf[h.ID])
 			out = append(out, alertOut{
 				HoldingKind:  "stock",
 				HoldingID:    h.ID,
@@ -124,6 +153,9 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 				Kind:         ev.Kind,
 				Triggers:     []string{ev.Trigger},
 				CurrentPrice: h.CurrentPrice,
+				Action:       dec.Action,
+				Severity:     dec.Severity,
+				EventClass:   dec.Kind,
 			})
 		}
 	}
@@ -146,6 +178,7 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
+			dec := alert.Decide(h, ev.Kind, []string{ev.Trigger}, trendOf[h.ID])
 			out = append(out, alertOut{
 				HoldingKind:     "stock",
 				HoldingID:       h.ID,
@@ -155,6 +188,9 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 				Triggers:        []string{ev.Trigger},
 				CurrentPrice:    h.CurrentPrice,
 				DistanceToSLPct: m.DistanceToSLPct,
+				Action:          dec.Action,
+				Severity:        dec.Severity,
+				EventClass:      dec.Kind,
 			})
 		}
 	}
@@ -164,7 +200,8 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 	// i.e. earnings has passed since the thesis was locked. Matches by
 	// ticker to stock_holdings so the bot can deep-link / ack against
 	// the right holding row.
-	if s.cryptoIndicators == nil { /* keep nil safe */ }
+	if s.cryptoIndicators == nil { /* keep nil safe */
+	}
 	if s.theses != nil {
 		thesesRows, terr := s.theses.List(r.Context(), "")
 		if terr == nil {
@@ -325,12 +362,12 @@ func (s *Server) handleBotMovers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type moverRow struct {
-		Kind           string   `json:"kind"`
-		ID             int64    `json:"id"`
-		Symbol         string   `json:"symbol"`
-		Name           string   `json:"name"`
-		ChangePct      float64  `json:"changePct"`
-		CurrentPrice   *float64 `json:"currentPrice,omitempty"`
+		Kind         string   `json:"kind"`
+		ID           int64    `json:"id"`
+		Symbol       string   `json:"symbol"`
+		Name         string   `json:"name"`
+		ChangePct    float64  `json:"changePct"`
+		CurrentPrice *float64 `json:"currentPrice,omitempty"`
 	}
 
 	// Stocks — by daily_change_pct.
@@ -481,6 +518,20 @@ func tail[T any](xs []T, n int) []T {
 		out[n-1-i] = x
 	}
 	return out
+}
+
+// muteRSIOnlyOnHolds reads the SC-35 Phase-4 preference
+// `alert_mute_rsi_only_on_holds` (Decision D-mute, default TRUE). When true,
+// standalone RSI/momentum notes on trend-intact holds are kept off the
+// proactive ping (they're the noise you tune out today) and surfaced only on
+// demand. Any unset/garbled value falls back to the safe default (muted).
+func (s *Server) muteRSIOnlyOnHolds(ctx context.Context) bool {
+	v, err := s.store.GetPreference(ctx, "alert_mute_rsi_only_on_holds")
+	if err != nil {
+		return true
+	}
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v != "false" && v != "0" && v != "no"
 }
 
 // avoid "imported and not used" if these end up unreferenced during build:

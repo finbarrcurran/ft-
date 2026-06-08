@@ -18,6 +18,71 @@ func (s *Store) SetStockTechnicals(ctx context.Context, id int64, atrWeekly floa
 	return err
 }
 
+// SetStockTrendMAs writes the bar-computed 50-week + 200-day moving averages
+// (SC-35 W1). Either may be nil when history is too thin; NULL is written so
+// the trend gate falls through rather than asserting a level it can't justify.
+// Owned by the nightly cron, never the user.
+func (s *Store) SetStockTrendMAs(ctx context.Context, id int64, ma50w, ma200d *float64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings
+		    SET ma_50w = ?, ma_200d = ?, updated_at = strftime('%s','now')
+		  WHERE id = ?`,
+		fp(ma50w), fp(ma200d), id)
+	return err
+}
+
+// SetStockLevels auto-fills support_1/2 + resistance_1/2 from the nightly S/R
+// pass (SC-35 W2). The WHERE clause is the manual-override-wins guard: rows the
+// user hand-edited (levels_source='manual') are SKIPPED entirely, so a chosen
+// level is never clobbered by the cron. ATR/MA writes are separate and always
+// run (they're measurements, not chosen levels). Any of the four may be nil →
+// NULL (e.g. no resistance above price for a name at all-time highs).
+func (s *Store) SetStockLevels(ctx context.Context, id int64, s1, s2, r1, r2 *float64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings
+		    SET support_1 = ?, support_2 = ?, resistance_1 = ?, resistance_2 = ?,
+		        updated_at = strftime('%s','now')
+		  WHERE id = ? AND levels_source != 'manual'`,
+		fp(s1), fp(s2), fp(r1), fp(r2), id)
+	return err
+}
+
+// SetStockPositionClass flips a holding between 'hold' and 'trade' (SC-35
+// Phase 3). Audit is written by the handler, not here. Returns the row's
+// effect so the caller can detect a no-op.
+func (s *Store) SetStockPositionClass(ctx context.Context, userID, id int64, class string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings
+		    SET position_class = ?, updated_at = strftime('%s','now')
+		  WHERE user_id = ? AND id = ?`,
+		class, userID, id)
+	return err
+}
+
+// SetStockSLMethod sets the stop-loss method explicitly. Used by the Phase-3
+// position-class change to re-default sl_method (hold→vol_envelope,
+// trade→technical) unless the user had a manual override they want kept.
+func (s *Store) SetStockSLMethod(ctx context.Context, userID, id int64, method string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings
+		    SET sl_method = ?, updated_at = strftime('%s','now')
+		  WHERE user_id = ? AND id = ?`,
+		method, userID, id)
+	return err
+}
+
+// SetStockLevelsSource toggles a holding between 'auto' and 'manual' level
+// ownership (SC-35 Phase 3 / Decision B). 'manual' freezes the four S/R
+// columns against the nightly cron; 'auto' hands them back. Audit at handler.
+func (s *Store) SetStockLevelsSource(ctx context.Context, userID, id int64, source string) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE stock_holdings
+		    SET levels_source = ?, updated_at = strftime('%s','now')
+		  WHERE user_id = ? AND id = ?`,
+		source, userID, id)
+	return err
+}
+
 func (s *Store) SetCryptoTechnicals(ctx context.Context, id int64, atrWeekly float64, volTierAuto string) error {
 	_, err := s.DB.ExecContext(ctx,
 		`UPDATE crypto_holdings
@@ -113,9 +178,9 @@ func (s *Store) BulkInsertDailyBars(ctx context.Context, ticker, kind string, ba
 
 // DailyBarRow is the input shape for BulkInsertDailyBars.
 type DailyBarRow struct {
-	Date                     string // ISO YYYY-MM-DD
-	Open, High, Low, Close   float64
-	Volume                   float64
+	Date                   string // ISO YYYY-MM-DD
+	Open, High, Low, Close float64
+	Volume                 float64
 }
 
 // GetDailyBars returns OHLC rows for a ticker, ordered ascending by date.
@@ -133,6 +198,70 @@ func (s *Store) GetDailyBars(ctx context.Context, ticker, kind string) ([]DailyB
 	for rows.Next() {
 		var b DailyBarRow
 		if err := rows.Scan(&b.Date, &b.Open, &b.High, &b.Low, &b.Close, &b.Volume); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// ----- weekly_bars storage (SC-35 W5) ----------------------------------
+//
+// The weekly aggregation was previously in-memory only (the table shipped
+// empty in 0009). SC-35 persists it because THREE consumers now read the
+// weekly series — ATR(14), MA50W, and the runner's weekly-swing-low logic —
+// and re-deriving it three times per ticker per night is wasteful.
+
+// WeeklyBarRow is one persisted weekly OHLC bar.
+type WeeklyBarRow struct {
+	WeekStart              string // 'YYYY-MM-DD' Monday (UTC)
+	Open, High, Low, Close float64
+}
+
+// ReplaceWeeklyBars wipes + repopulates the weekly cache for one ticker in a
+// single transaction. Called nightly right after the daily→weekly aggregation.
+func (s *Store) ReplaceWeeklyBars(ctx context.Context, ticker, kind string, bars []WeeklyBarRow) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM weekly_bars WHERE ticker = ? AND kind = ?`, ticker, kind); err != nil {
+		return err
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO weekly_bars (ticker, kind, week_start, open, high, low, close)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ticker, kind, week_start) DO UPDATE SET
+		  open = excluded.open, high = excluded.high,
+		  low = excluded.low, close = excluded.close`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, b := range bars {
+		if _, err := stmt.ExecContext(ctx, ticker, kind, b.WeekStart, b.Open, b.High, b.Low, b.Close); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetWeeklyBars returns persisted weekly OHLC rows for a ticker, ascending by
+// week. Empty slice on no data (no error).
+func (s *Store) GetWeeklyBars(ctx context.Context, ticker, kind string) ([]WeeklyBarRow, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT week_start, open, high, low, close
+		  FROM weekly_bars WHERE ticker = ? AND kind = ?
+		  ORDER BY week_start ASC`, ticker, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WeeklyBarRow
+	for rows.Next() {
+		var b WeeklyBarRow
+		if err := rows.Scan(&b.WeekStart, &b.Open, &b.High, &b.Low, &b.Close); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -223,10 +352,10 @@ func (s *Store) UpsertPortfolioValue(ctx context.Context, date string, totalUSD,
 
 // PortfolioValuePoint is one snapshot row.
 type PortfolioValuePoint struct {
-	Date     string
-	Total    float64
-	Stocks   float64
-	Crypto   float64
+	Date   string
+	Total  float64
+	Stocks float64
+	Crypto float64
 }
 
 // GetPortfolioValueHistory returns rows in ASC order by date.

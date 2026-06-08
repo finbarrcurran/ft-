@@ -35,6 +35,7 @@ const stockSelectCols = `id, user_id, name, ticker, category, sector,
         sector_adapter_subtype,
         sl_method, sl_safety_pct,
         isin,
+        position_class, levels_source, ma_50w, ma_200d,
         updated_at`
 
 func (s *Store) ListStockHoldings(ctx context.Context, userID int64) ([]*domain.StockHolding, error) {
@@ -452,6 +453,9 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	var slSafetyPct sql.NullFloat64
 	// SC-17 P2 — durable ISIN match key:
 	var isin sql.NullString
+	// SC-35 / migration 0044 — position-class lever, manual-wins flag, trend MAs:
+	var positionClass, levelsSource sql.NullString
+	var ma50w, ma200d sql.NullFloat64
 	if err := r.Scan(
 		&h.ID, &h.UserID, &h.Name, &ticker, &category, &sector,
 		&h.InvestedUSD, &avgOpen, &currentPrice,
@@ -473,6 +477,7 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 		&sectorAdapterSubtype,
 		&slMethod, &slSafetyPct,
 		&isin,
+		&positionClass, &levelsSource, &ma50w, &ma200d,
 		&updatedAt,
 	); err != nil {
 		return nil, err
@@ -480,6 +485,18 @@ func scanStock(r Scannable) (*domain.StockHolding, error) {
 	h.SLMethod = nsToPtrNonEmpty(slMethod)
 	h.SLSafetyPct = nfToPtr(slSafetyPct)
 	h.ISIN = nsToPtrNonEmpty(isin)
+	if positionClass.Valid && positionClass.String != "" {
+		h.PositionClass = positionClass.String
+	} else {
+		h.PositionClass = "hold"
+	}
+	if levelsSource.Valid && levelsSource.String != "" {
+		h.LevelsSource = levelsSource.String
+	} else {
+		h.LevelsSource = "auto"
+	}
+	h.MA50W = nfToPtr(ma50w)
+	h.MA200D = nfToPtr(ma200d)
 	h.Currency = nsToPtrNonEmpty(currency)
 	if sectorUniverseID.Valid {
 		v := sectorUniverseID.Int64
