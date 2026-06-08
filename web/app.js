@@ -142,7 +142,8 @@ function slMethodToggle(r, m) {
 // SC-35 Phase 3 — per-row position-class lever (Hold | Trade). Hold = conviction
 // (vol-envelope catastrophe stop, no fixed TP); Trade = tactical (technical
 // support−ATR stop, staged exits at resistance). Flipping it re-defaults the
-// stop method server-side; the click handler offers to keep a manual override.
+// stop method server-side; the click handler only prompts when the flip would
+// discard a MANUAL stop method (otherwise it's silent — no nag on auto flips).
 const POSITION_CLASS_HELP = {
   hold: 'Hold — conviction position. Vol-envelope catastrophe stop, resistances are informational, RSI never triggers a sell while the trend is intact.',
   trade: 'Trade — tactical position. Technical stop (support − 0.5×weekly ATR), staged exits at R1/R2, R-multiple gated.',
@@ -3757,33 +3758,40 @@ async function renderStocks() {
   }
   // SC-35 Phase 3 — per-row Hold|Trade toggle. PUTs the new class; the server
   // re-defaults sl_method (hold→vol_envelope, trade→technical) and writes an
-  // audit row. If the user had a stop method that differs from the new class's
-  // default, we ask whether to keep it (keepSlMethod) before sending.
+  // audit row either way. We only prompt when the flip would DISCARD A MANUAL
+  // stop method: a method counts as manual when it deviates from its CURRENT
+  // class's default (a deliberate override), and only then if the new class's
+  // default would actually replace it. A normal default→default transition is
+  // silent — no nag (e.g. an auto Hold→Trade). On proceed the class default
+  // wins (keepSlMethod:false); cancel is a no-op.
+  const classDefaultSL = (cls) => (cls === 'trade' ? 'technical' : 'vol_envelope');
   for (const btn of document.querySelectorAll('.pos-class-toggle .pc-btn')) {
     btn.addEventListener('click', async (ev) => {
       ev.stopPropagation();
       if (btn.classList.contains('active')) return;
       const wrap = btn.closest('.pos-class-toggle');
       const id = wrap && wrap.dataset.rowId;
-      const cls = btn.dataset.class;
-      if (!id || !cls) return;
+      const wantClass = btn.dataset.class;
+      if (!id || !wantClass) return;
+      const curClass = wrap.dataset.class === 'trade' ? 'trade' : 'hold';
+      if (wantClass === curClass) return;
       const curMethod = (wrap.dataset.method === 'technical' || wrap.dataset.method === 'vol_envelope') ? wrap.dataset.method : 'vol_envelope';
-      const wantMethod = cls === 'trade' ? 'technical' : 'vol_envelope';
-      let keepSlMethod = false;
-      if (curMethod !== wantMethod) {
-        // OK = keep the current (manually chosen) method; Cancel = adopt the
-        // class default. Defaulting to adopt keeps the lever's intent crisp.
-        keepSlMethod = confirm(
-          `Switch this position to ${cls === 'trade' ? 'TRADE' : 'HOLD'}.\n\n` +
-          `Keep your current stop method "${curMethod}"?\n` +
-          `OK = keep "${curMethod}" · Cancel = use the ${cls} default "${wantMethod}".`
-        );
+      const wantDefault = classDefaultSL(wantClass);
+      // Manual = the stored method differs from the CURRENT class's default.
+      const isManual = curMethod !== classDefaultSL(curClass);
+      const wouldDiscardManual = isManual && wantDefault !== curMethod;
+      if (wouldDiscardManual) {
+        const label = wantClass === 'trade' ? 'Trade' : 'Hold';
+        const methodLabel = wantDefault === 'vol_envelope' ? 'vol-envelope' : 'technical';
+        if (!confirm(
+          `Switching to ${label} resets this stop to ${methodLabel} and replaces your manual setting — proceed?`
+        )) return; // cancel = no change
       }
       btn.disabled = true;
       try {
         await api(`/api/holdings/stocks/${id}/position-class`, {
           method: 'PUT',
-          body: JSON.stringify({ positionClass: cls, keepSlMethod }),
+          body: JSON.stringify({ positionClass: wantClass, keepSlMethod: false }),
         });
         state.stocks = null;
         state.summary = null;

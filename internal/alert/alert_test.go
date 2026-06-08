@@ -1,7 +1,10 @@
 // Spec 13 — Test coverage for alert classification.
 //
-// Tests the priority order RED > AMBER > GREEN > NEUTRAL, the 5%
-// proximity-margin SL/TP triggers, and Spec 9b D6's margin scaling.
+// Tests the priority order RED > AMBER > GREEN > NEUTRAL and the
+// distance-to-SL / RSI thresholds. The old flat-margin SL/TP proximity (and
+// the Spec 9b D6 margin scaling that tuned it) was retired in SC-08 — the
+// progress-based two-tier proximity family now lives in proximity.go and is
+// covered by proximity_test.go.
 
 package alert
 
@@ -109,38 +112,6 @@ func TestAmber_RSI74(t *testing.T) {
 	}
 }
 
-// AMBER — SL proximity (Spec 3 D12) ----------------------------------------
-
-func TestAmber_SLProximityWithin5Pct_NegativeDay(t *testing.T) {
-	// SL = 100, price = 104 → within 5% margin AND today negative.
-	// Distance-to-SL would be ~4% which also triggers the dist-to-SL
-	// AMBER rule, so we exercise both — just confirm AMBER overall.
-	h := hold(nil, pf(-1.2), pf(100), nil, pf(104), nil)
-	r := Compute(h, met(nil, nil))
-	if r.Status != domain.AlertAmber {
-		t.Fatalf("SL proximity → expected AMBER, got %s (triggers %v)", r.Status, r.Triggers)
-	}
-	found := false
-	for _, tr := range r.Triggers {
-		if strings.Contains(tr, "stop loss") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected stop-loss trigger present, got %v", r.Triggers)
-	}
-}
-
-func TestAmber_SLProximityDoesntFireOnPositiveDay(t *testing.T) {
-	// SL = 100, price = 104 (within margin) but today's change positive.
-	h := hold(nil, pf(+1.2), pf(100), nil, pf(104), nil)
-	r := Compute(h, met(nil, nil))
-	// Should be NEUTRAL — only fires SL proximity if today is negative.
-	if r.Status != domain.AlertNeutral {
-		t.Fatalf("SL proximity + positive day → expected NEUTRAL, got %s", r.Status)
-	}
-}
-
 // GREEN --------------------------------------------------------------------
 
 func TestGreen_ClassicTriad(t *testing.T) {
@@ -159,25 +130,6 @@ func TestGreen_NoGoldenCross_FallsThrough(t *testing.T) {
 	r := Compute(h, met(nil, pf(2.5)))
 	if r.Status != domain.AlertNeutral {
 		t.Fatalf("RSI low + R/R good but no golden cross → expected NEUTRAL, got %s", r.Status)
-	}
-}
-
-// GREEN — TP proximity (Spec 3 D12) ----------------------------------------
-
-func TestGreen_TPProximityWithin5Pct_PositiveDay(t *testing.T) {
-	// TP = 100, price = 97 (within 5% AND below TP), today positive.
-	h := hold(nil, pf(+1.5), nil, pf(100), pf(97), nil)
-	r := Compute(h, met(nil, nil))
-	if r.Status != domain.AlertGreen {
-		t.Fatalf("TP proximity + positive day → expected GREEN, got %s", r.Status)
-	}
-}
-
-func TestGreen_TPProximityDoesntFireOnNegativeDay(t *testing.T) {
-	h := hold(nil, pf(-1.5), nil, pf(100), pf(97), nil)
-	r := Compute(h, met(nil, nil))
-	if r.Status != domain.AlertNeutral {
-		t.Fatalf("TP proximity + negative day → expected NEUTRAL, got %s", r.Status)
 	}
 }
 
@@ -219,26 +171,6 @@ func TestPriority_AmberBeatsGreen(t *testing.T) {
 	r := Compute(h, met(pf(5.0), pf(2.5)))
 	if r.Status != domain.AlertAmber {
 		t.Fatalf("AMBER + green-eligible → expected AMBER, got %s", r.Status)
-	}
-}
-
-// Spec 9b D6 — margin scaling ---------------------------------------------
-
-func TestMarginScaling_TighterTriggersWhenDefensive(t *testing.T) {
-	// Price within 4% of SL. At 5% margin → AMBER fires. At 3% margin
-	// → does NOT fire (price is 4% away, > 3% margin).
-	h := hold(nil, pf(-0.5), pf(100), nil, pf(104), nil)
-	// 5% margin: AMBER (dist-to-SL < 6 too).
-	r5 := ComputeWithMargin(h, met(nil, nil), 0.05)
-	if r5.Status != domain.AlertAmber {
-		t.Errorf("margin=0.05 -> expected AMBER, got %s", r5.Status)
-	}
-	// 3% margin: SL proximity no longer fires (gap > 3%). But because
-	// our metrics package wasn't called the dist-to-SL is nil; result
-	// is NEUTRAL with no triggers.
-	r3 := ComputeWithMargin(h, met(nil, nil), 0.03)
-	if r3.Status != domain.AlertNeutral {
-		t.Errorf("margin=0.03 no dist-to-SL -> expected NEUTRAL, got %s (triggers %v)", r3.Status, r3.Triggers)
 	}
 }
 
