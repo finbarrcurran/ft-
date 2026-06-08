@@ -159,6 +159,31 @@ var adapterAliases = map[string]string{
 	"spirits":                      "beverages",
 	"wine & champagne":             "beverages",
 	"brewing":                      "beverages",
+	// Automotive — EV & Mobility adapter (20th parser registration). Sub-type
+	// codes (free-form): ev-pure, legacy-oem-transition, auto-supplier,
+	// commercial-ev. Lock Adapter line reads "Automotive". Routing guard:
+	// automakers route here, NOT to industrial_electrical /
+	// battery-cell-manufacturing (reserved for pure-play cell merchants, CATL).
+	"auto_ev":          "auto_ev",
+	"automotive":       "auto_ev",
+	"auto/ev":          "auto_ev",
+	"auto ev":          "auto_ev",
+	"auto-ev":          "auto_ev",
+	"ev & mobility":    "auto_ev",
+	"ev and mobility":  "auto_ev",
+	"electric vehicle": "auto_ev",
+	"ev":               "auto_ev",
+	// Software/SaaS adapter (21st parser registration). Sub-type codes
+	// (free-form): infrastructure-software, application-software, etc. Lock
+	// Adapter line reads "Software/SaaS". Routing guard: EDA / Synopsys route
+	// here, NOT to ai_infra_semi via the "semi" keyword (EDA is software).
+	"software_saas": "software_saas",
+	"software/saas": "software_saas",
+	"software-saas": "software_saas",
+	"software saas": "software_saas",
+	"software":      "software_saas",
+	"saas":          "software_saas",
+	"eda":           "software_saas",
 }
 
 // NormaliseAdapter maps a free-form adapter name from the MD header to one
@@ -189,12 +214,27 @@ func NormaliseAdapter(raw string) string {
 		needles   []string // ALL must appear in k for the route to fire
 		canonical string
 	}{
+		// Automotive — route automakers to auto_ev. Specific needles only
+		// (automotive/automaker/vehicle); deliberately NOT bare "auto" (would
+		// catch "automation", e.g. EDA's "Design Automation") and NOT
+		// "battery"/"cell" (reserved for the battery-cell-manufacturing sub-type).
+		{[]string{"automotive"}, "auto_ev"},
+		{[]string{"automaker"}, "auto_ev"},
+		{[]string{"vehicle"}, "auto_ev"},
 		{[]string{"industrial", "electrical", "equipment"}, "industrial_electrical_equipment"}, // MUST come before the contractor route
 		{[]string{"industrial", "electrical"}, "industrial_electrical"},
 		{[]string{"heavy", "machinery"}, "heavy_machinery"}, // CAT, DE, Oshkosh — diversified-equipment-major sub-type
 		{[]string{"frontier"}, "ai_frontier_tech"},          // AI-Frontier-Tech (RGTI quantum-pre-commercial, IonQ, etc.)
 		{[]string{"quantum"}, "ai_frontier_tech"},
 		{[]string{"fusion"}, "ai_frontier_tech"},
+		// Software/SaaS — MUST precede the "semi"/"semiconductor" routes so an
+		// EDA name ("Design Automation", "Semiconductor EDA") routes to software,
+		// not ai_infra_semi. EDA is software tooling, not a chip maker.
+		{[]string{"eda"}, "software_saas"},
+		{[]string{"design", "automation"}, "software_saas"},
+		{[]string{"design", "ip"}, "software_saas"},
+		{[]string{"software"}, "software_saas"},
+		{[]string{"saas"}, "software_saas"},
 		{[]string{"semi"}, "ai_infra_semi"}, // catches "Semiconductor", "AI-Semi", etc.
 		{[]string{"semiconductor"}, "ai_infra_semi"},
 		{[]string{"pharma"}, "pharma"},
