@@ -36,28 +36,28 @@ var seedFS embed.FS
 // ----- Errors ------------------------------------------------------------
 
 var (
-	ErrNotFound       = errors.New("scorecard not found")
-	ErrIsDoctrine     = errors.New("scorecard is doctrine; UI edit blocked")
-	ErrInvalidStatus  = errors.New("status must be draft|locked|needs-review")
-	ErrVersionExists  = errors.New("version already exists in history")
+	ErrNotFound      = errors.New("scorecard not found")
+	ErrIsDoctrine    = errors.New("scorecard is doctrine; UI edit blocked")
+	ErrInvalidStatus = errors.New("status must be draft|locked|needs-review")
+	ErrVersionExists = errors.New("version already exists in history")
 )
 
 // ----- Domain ------------------------------------------------------------
 
 // Scorecard is the row shape returned by list/get.
 type Scorecard struct {
-	ID                int64     `json:"id"`
-	Code              string    `json:"code"`
-	DisplayName       string    `json:"displayName"`
-	ShortDescription  string    `json:"shortDescription"`
-	CurrentVersion    string    `json:"currentVersion"`
-	Status            string    `json:"status"`
-	MarkdownCurrent   string    `json:"markdownCurrent,omitempty"`
-	AppliesToSectors  []string  `json:"appliesToSectors"`
-	IsDoctrine        bool      `json:"isDoctrine"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
-	HoldingsCount     int       `json:"holdingsCount"`
+	ID               int64     `json:"id"`
+	Code             string    `json:"code"`
+	DisplayName      string    `json:"displayName"`
+	ShortDescription string    `json:"shortDescription"`
+	CurrentVersion   string    `json:"currentVersion"`
+	Status           string    `json:"status"`
+	MarkdownCurrent  string    `json:"markdownCurrent,omitempty"`
+	AppliesToSectors []string  `json:"appliesToSectors"`
+	IsDoctrine       bool      `json:"isDoctrine"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+	HoldingsCount    int       `json:"holdingsCount"`
 }
 
 // Version is one row of sector_scorecard_versions.
@@ -362,96 +362,96 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 	}
 	seeds := []seed{
 		{
-			Code: "master-spec",
-			DisplayName: "Master Spec (living)",
+			Code:             "master-spec",
+			DisplayName:      "Master Spec (living)",
 			ShortDescription: "Canonical record of how FT works right now. Updated after every shipped change.",
-			File: "seed/master-spec.md",
-			Version: "1.0",
-			Status: "locked",
-			IsDoctrine: false, // editable from UI
-			AppliesTo: []string{}, // doesn't pollute sector pills
+			File:             "seed/master-spec.md",
+			Version:          "1.0",
+			Status:           "locked",
+			IsDoctrine:       false,      // editable from UI
+			AppliesTo:        []string{}, // doesn't pollute sector pills
 		},
 		{
-			Code: "philosophy",
-			DisplayName: "Cross-Sector Investment Philosophy",
+			Code:             "philosophy",
+			DisplayName:      "Cross-Sector Investment Philosophy",
 			ShortDescription: "Doctrine — Universal Law + two-layer model. Read-only.",
-			File: "seed/philosophy.md",
-			Version: "1.1",
-			Status: "locked",
-			IsDoctrine: true,
-			AppliesTo: []string{}, // doctrine applies to all
+			File:             "seed/philosophy.md",
+			Version:          "1.1",
+			Status:           "locked",
+			IsDoctrine:       true,
+			AppliesTo:        []string{}, // doctrine applies to all
 		},
 		{
-			Code: "energy-power",
-			DisplayName: "Energy — Power Infrastructure",
+			Code:             "energy-power",
+			DisplayName:      "Energy — Power Infrastructure",
 			ShortDescription: "Power generation + grid for AI / industrial buildout (Jensen 1000x).",
-			File: "seed/energy-power.md",
-			Version: "1",
-			Status: "locked",
-			IsDoctrine: false,
+			File:             "seed/energy-power.md",
+			Version:          "1",
+			Status:           "locked",
+			IsDoctrine:       false,
 			AppliesTo: []string{
 				"power_gas_turbines", "power_nuclear_smr", "power_distributed",
 				"power_diversified", "grid_transmission",
 			},
 		},
 		{
-			Code: "hydrocarbons",
-			DisplayName: "Hydrocarbons",
+			Code:             "hydrocarbons",
+			DisplayName:      "Hydrocarbons",
 			ShortDescription: "Oil & gas, LNG, refining, midstream, OFS, tanker shipping.",
-			File: "seed/hydrocarbons.md",
-			Version: "1",
-			Status: "locked",
-			IsDoctrine: false,
-			AppliesTo: []string{"oil_gas_integrated", "gics_energy"},
+			File:             "seed/hydrocarbons.md",
+			Version:          "1",
+			Status:           "locked",
+			IsDoctrine:       false,
+			AppliesTo:        []string{"oil_gas_integrated", "gics_energy"},
 		},
 		{
-			Code: "pharma",
-			DisplayName: "Pharma",
+			Code:             "pharma",
+			DisplayName:      "Pharma",
 			ShortDescription: "Branded pharma — innovators with patent-protected revenue. Sub-types: metabolic-obesity / diversified-immunology / oncology / rare-specialty / mega-diversified.",
-			File: "seed/pharma.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft has 5 open decisions per §7
-			IsDoctrine: false,
-			AppliesTo: []string{"pharma_metabolic", "pharma_immunology", "gics_healthcare"},
+			File:             "seed/pharma.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft has 5 open decisions per §7
+			IsDoctrine:       false,
+			AppliesTo:        []string{"pharma_metabolic", "pharma_immunology", "gics_healthcare"},
 		},
 		{
-			Code: "defense",
-			DisplayName: "Defense",
+			Code:             "defense",
+			DisplayName:      "Defense",
 			ShortDescription: "Primes, munitions, air-defense, drones, military propulsion, C4ISR, shipbuilding. European rearmament tailwind.",
-			File: "seed/defense.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft, open decisions in §7
-			IsDoctrine: false,
-			AppliesTo: []string{"defense_sovereign", "gics_industrials"},
+			File:             "seed/defense.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine:       false,
+			AppliesTo:        []string{"defense_sovereign", "gics_industrials"},
 		},
 		{
-			Code: "mining-metals",
-			DisplayName: "Mining & Metals",
+			Code:             "mining-metals",
+			DisplayName:      "Mining & Metals",
 			ShortDescription: "Gold, silver, copper, lithium, nickel, uranium, rare earths. Streaming/royalty + tier-1/mid-tier producers.",
-			File: "seed/mining-metals.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft, open decisions in §7
-			IsDoctrine: false,
-			AppliesTo: []string{"precious_metals_gold", "precious_metals_silver", "battery_storage", "gics_materials"},
+			File:             "seed/mining-metals.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine:       false,
+			AppliesTo:        []string{"precious_metals_gold", "precious_metals_silver", "battery_storage", "gics_materials"},
 		},
 		{
-			Code: "industrial-electrical",
-			DisplayName: "Industrial Electrical",
+			Code:             "industrial-electrical",
+			DisplayName:      "Industrial Electrical",
 			ShortDescription: "Diversified industrial-electrical, power management, building/industrial automation, components, electrification (SU.PA, etc).",
-			File: "seed/industrial-electrical.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft, open decisions in §7
-			IsDoctrine: false,
-			AppliesTo: []string{"grid_transmission", "cooling_thermal", "gics_industrials"},
+			File:             "seed/industrial-electrical.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine:       false,
+			AppliesTo:        []string{"grid_transmission", "cooling_thermal", "gics_industrials"},
 		},
 		{
-			Code: "ai-infra-semi",
-			DisplayName: "AI Infrastructure & Semis",
+			Code:             "ai-infra-semi",
+			DisplayName:      "AI Infrastructure & Semis",
 			ShortDescription: "GPUs, chip design IP, optical networking, HBM/packaging, foundry, semicap, specialty chem, cooling, edge silicon.",
-			File: "seed/ai-infra-semi.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft, open decisions in §7
-			IsDoctrine: false,
+			File:             "seed/ai-infra-semi.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine:       false,
 			AppliesTo: []string{
 				"gpus_ai_accel", "chip_design_ip", "optical_networking", "hbm_packaging",
 				"foundry", "semicap", "specialty_semi_chem", "cooling_thermal",
@@ -459,14 +459,14 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 			},
 		},
 		{
-			Code: "cloud-infra",
-			DisplayName: "Cloud Infrastructure",
+			Code:             "cloud-infra",
+			DisplayName:      "Cloud Infrastructure",
 			ShortDescription: "Hyperscaler pure-play / segment, neoclouds, DC REITs, sovereign cloud. Built for ORCL after v1.1 retag.",
-			File: "seed/cloud-infra.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft, open decisions in §7
-			IsDoctrine: false,
-			AppliesTo: []string{"data_center_reits", "gics_it"},
+			File:             "seed/cloud-infra.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft, open decisions in §7
+			IsDoctrine:       false,
+			AppliesTo:        []string{"data_center_reits", "gics_it"},
 		},
 		// --- Stock Adapter Expansion v1 (adapters 12–16, 2026-06-01) ---------
 		// Claude.ai-authored v1 draft templates taking the stock side 11 → 16.
@@ -476,54 +476,64 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 		// scoring. No schema change: sector_scorecards is free-form markdown,
 		// so REIT's remapped R1–R8 pillars need no enum handling.
 		{
-			Code: "aerospace",
-			DisplayName: "Aerospace",
+			Code:             "aerospace",
+			DisplayName:      "Aerospace",
 			ShortDescription: "Civil aerospace & space — aircraft OEMs, aero-engines, aerostructures, launch. Aftermarket-annuity thesis; dual-segment rule resolves the RR.L civil leg (v1.4 NULL trigger).",
-			File: "seed/aerospace.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft template, open decisions in §6; live RR.L trigger
-			IsDoctrine: false,
-			AppliesTo: []string{"gics_industrials"},
+			File:             "seed/aerospace.md",
+			Version:          "1.1",
+			Status:           "locked", // v1.1 calibrated against RR.L civil leg (12/16); pillars/pass-gate held
+			IsDoctrine:       false,
+			AppliesTo:        []string{"gics_industrials"},
 		},
 		{
-			Code: "software-saas",
-			DisplayName: "Software / SaaS",
+			Code:             "software-saas",
+			DisplayName:      "Software / SaaS",
 			ShortDescription: "Application & infrastructure SaaS — recurring-revenue compounding; NRR moat; Q5 visibility dominant; rate-sensitive. Distinct from Cloud-Infra (capacity) and AI-Infra (silicon).",
-			File: "seed/software-saas.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft template, open decisions in §6
-			IsDoctrine: false,
-			AppliesTo: []string{"gics_it"},
+			File:             "seed/software-saas.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft template, open decisions in §6
+			IsDoctrine:       false,
+			AppliesTo:        []string{"gics_it"},
 		},
 		{
-			Code: "robotics-embodiment",
-			DisplayName: "Robotics & Embodiment",
+			Code:             "robotics-embodiment",
+			DisplayName:      "Robotics & Embodiment",
 			ShortDescription: "Physical-AI / robotics — humanoid, industrial automation, autonomous systems. Reality-gate (Q1/Q5) keeps narrative out; Scarcity-Map stage 10 terminal.",
-			File: "seed/robotics-embodiment.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft template + forward-looking, open decisions in §6
-			IsDoctrine: false,
-			AppliesTo: []string{"embodiment", "gics_industrials"},
+			File:             "seed/robotics-embodiment.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft template + forward-looking, open decisions in §6
+			IsDoctrine:       false,
+			AppliesTo:        []string{"embodiment", "gics_industrials"},
 		},
 		{
-			Code: "reit",
-			DisplayName: "REIT / Real Estate",
+			Code:             "reit",
+			DisplayName:      "REIT / Real Estate",
 			ShortDescription: "REITs & real estate — rent + asset value + cost of capital. Remapped pillars R1–R8 (balance-sheet/yield model); dominant rate-regime link (Pal/9p).",
-			File: "seed/reit.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft template (REIT-remapped /16), open decisions in §6
-			IsDoctrine: false,
-			AppliesTo: []string{"gics_real_estate", "data_center_reits"},
+			File:             "seed/reit.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft template (REIT-remapped /16), open decisions in §6
+			IsDoctrine:       false,
+			AppliesTo:        []string{"gics_real_estate", "data_center_reits"},
 		},
 		{
-			Code: "clinical-stage-biotech",
-			DisplayName: "Clinical-Stage Biotech",
+			Code:             "clinical-stage-biotech",
+			DisplayName:      "Clinical-Stage Biotech",
 			ShortDescription: "Pre-commercial biotech — pipeline of unapproved candidates. Binary-payoff + runway gate + mandatory position caps. Pharma's <$50M run-rate carve-out.",
-			File: "seed/clinical-stage-biotech.md",
-			Version: "1",
-			Status: "needs-review", // v1 draft template, highest-risk + position-capped, open decisions in §6
-			IsDoctrine: false,
-			AppliesTo: []string{"gics_healthcare"},
+			File:             "seed/clinical-stage-biotech.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft template, highest-risk + position-capped, open decisions in §6
+			IsDoctrine:       false,
+			AppliesTo:        []string{"gics_healthcare"},
+		},
+		{
+			Code:             "managed-care",
+			DisplayName:      "Managed Care / Health Insurance",
+			ShortDescription: "Health payers — Medicare Advantage, Medicaid MCO, commercial/group, diversified managed care. Remapped pillars M1–M8 (medical-cost-ratio + reimbursement-regime survival model); turnaround_subscale flag → mandatory position cap. Excludes P&C/life insurers (Financials) and pharma.",
+			File:             "seed/managed-care.md",
+			Version:          "1",
+			Status:           "needs-review", // v1 draft, uncalibrated (CLOV illustrative); managed_care slug → hyphenated code per live convention
+			IsDoctrine:       false,
+			AppliesTo:        []string{"gics_healthcare"},
 		},
 	}
 
