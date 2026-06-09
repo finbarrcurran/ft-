@@ -184,6 +184,28 @@ var adapterAliases = map[string]string{
 	"software":      "software_saas",
 	"saas":          "software_saas",
 	"eda":           "software_saas",
+	// Managed-Care / Health-Insurance adapter (22nd). Remapped /16, pillars M1–M8
+	// (medical-cost-ratio + reimbursement-regime survival model). v1.1 locked
+	// (calibrated vs CLOV 9/16). SLUG RECONCILIATION: canonical parser slug is the
+	// UNDERSCORED "managed_care"; the live sector_scorecards DB code is the
+	// HYPHENATED "managed-care" — these two forms are DELIBERATELY MAPPED to each
+	// other (same pattern as energy_power <-> energy-power), so a managed-care
+	// thesis routes to the managed_care rubric at lock time. Sub-types (captured
+	// free-form, NOT validated): ma-focused, diversified-managed-care, medicaid-mco,
+	// commercial-group. Flags carried in adapter PROSE (no structured columns):
+	// turnaround_subscale (mandatory position cap), multi_segment=true. Excludes
+	// P&C/life insurers (Financials) and pharma.
+	"managed_care":                    "managed_care",
+	"managed-care":                    "managed_care",
+	"managed care":                    "managed_care",
+	"managed care / health insurance": "managed_care",
+	"managed care/health insurance":   "managed_care",
+	"health insurance":                "managed_care",
+	"health-insurance":                "managed_care",
+	"health payer":                    "managed_care",
+	"health payers":                   "managed_care",
+	"medicare advantage":              "managed_care",
+	"medicaid mco":                    "managed_care",
 }
 
 // NormaliseAdapter maps a free-form adapter name from the MD header to one
@@ -255,6 +277,17 @@ func NormaliseAdapter(raw string) string {
 		{[]string{"ipp"}, "utilities_ipp"},
 		{[]string{"merchant", "power"}, "utilities_ipp"},
 		{[]string{"regulated", "utility"}, "utilities_ipp"},
+		// Managed-Care / Health-Insurance — MUST precede the Financials block below,
+		// because "health insurance" contains "insurance" and would otherwise be
+		// swallowed by the {"insurance"} -> financials route. Health PAYERS only
+		// (Medicare Advantage / Medicaid MCO / commercial-group / diversified MCO);
+		// P&C/life carriers still fall through to financials.
+		{[]string{"managed", "care"}, "managed_care"},
+		{[]string{"health", "payer"}, "managed_care"},
+		{[]string{"health", "insurance"}, "managed_care"},
+		{[]string{"health", "plan"}, "managed_care"},
+		{[]string{"medicare", "advantage"}, "managed_care"},
+		{[]string{"medicaid"}, "managed_care"},
 		// Financials — banks/insurers/exchanges/fintech-balance-sheet/mREITs.
 		{[]string{"financial"}, "financials"},
 		{[]string{"bank"}, "financials"},

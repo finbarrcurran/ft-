@@ -530,8 +530,8 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 			DisplayName:      "Managed Care / Health Insurance",
 			ShortDescription: "Health payers — Medicare Advantage, Medicaid MCO, commercial/group, diversified managed care. Remapped pillars M1–M8 (medical-cost-ratio + reimbursement-regime survival model); turnaround_subscale flag → mandatory position cap. Excludes P&C/life insurers (Financials) and pharma.",
 			File:             "seed/managed-care.md",
-			Version:          "1",
-			Status:           "needs-review", // v1 draft, uncalibrated (CLOV illustrative); managed_care slug → hyphenated code per live convention
+			Version:          "1.1",
+			Status:           "locked", // v1.1 Lock Supplement: calibrated vs CLOV 9/16 (ma-focused + turnaround_subscale); M7 routine-print=1 adjudicated; managed_care slug → hyphenated code per live convention
 			IsDoctrine:       false,
 			AppliesTo:        []string{"gics_healthcare"},
 		},

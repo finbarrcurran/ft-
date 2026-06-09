@@ -157,7 +157,83 @@ Chart clean, exhaustion / turbulence signals quiet. Same as base framework. **No
 | Version | Date | Notes |
 |---|---|---|
 | v1 draft | 2026-06-09 | Initial draft. Closes the managed-care NULL-adapter gap (CLOV trigger). D-A→D-H resolved at authoring. Uncalibrated; CLOV illustrative anchor (10/16). Registered in `sector_scorecards` (code `managed-care`, status needs-review) by Claude Code. |
+| **v1.1 Lock Supplement** | **2026-06-09** | Calibrated against CLOV (Q1 FY26-anchored) at **9/16**. Pillars/pass-gate held; M7 catalyst convention adjudicated (routine print = 1); BER-vs-MCR labelling resolved. Multi-segment confirmed. Status `needs-review → locked`. Supplement appended below. |
 
 ---
 
-*Draft v1, uncalibrated, managed-care-remapped /16. Authored 2026-06-09, Claude.ai. Pending user review + parser slug registration (Claude Code) before any lock. Personal use only. Not investment advice.*
+*Base draft v1 above; v1.1 Lock Supplement appended below. Managed-care-remapped /16. Authored 2026-06-09, Claude.ai. Personal use only. Not investment advice.*
+
+---
+---
+
+# Sector Adapter — Managed-Care / Health-Insurance — v1.1 Lock Supplement
+
+> **Status:** Calibration supplement closing `Managed_Care_Sector_Adapter_v1.md` against its first anchor, **CLOV (Clover Health)**. Pillars and pass-gate confirmed; one pillar convention adjudicated (M7). Worked example moved from provisional to calibrated. Flips adapter status `needs-review → locked`.
+> **Doctrine sources:** `Managed_Care_Sector_Adapter_v1.md` (base), `Aerospace_Sector_Adapter_v1_1_Lock_Supplement.md` (calibration-supplement pattern + adjudication-of-contested-pillar precedent), `Financials_Sector_Adapter_v1.md` (remapped-pillar precedent), `Clinical_Stage_Biotech_Sector_Adapter_v1.md` (position-cap precedent), `Cross_Sector_Investment_Philosophy_v1_1.md`.
+> **Calibration anchor:** CLOV, `ma-focused` sub-type + `turnaround/subscale` flag, anchored to Q1 FY2026 results (quarter ended 31 Mar 2026, reported May 2026).
+> **Date:** 2026-06-09 · Claude.ai. **Not investment advice. Personal use only.**
+
+---
+
+## §A — Calibration summary
+
+CLOV scores **9 / 16** under the Managed-Care adapter (`ma-focused`, `turnaround/subscale`). The pillars and pass-gate held at first real use — **one convention adjudicated** (M7 catalyst: a routine scheduled earnings print is a 1, not a 2 — see §C). The score lands at the **bottom of the cross-adapter distribution**, which is the correct neighbourhood for a newly-profitable, regulation-exposed, subscale turnaround: it passes the gate (investable, scoreable) but conviction is capped, and the `turnaround/subscale` flag enforces a position cap regardless of band. Status flips `needs-review → locked`.
+
+## §B — Worked example, calibrated (CLOV · `ma-focused` + `turnaround/subscale`)
+
+Anchored to Q1 FY2026 primary financials. **Illustrative calibration, not a recommendation, not a locked thesis** (a formal CLOV lock would run separately through `ft-thesis`: Gemini Stage-1 → audit → human lock, and only after the slug is registered).
+
+| Pillar | Read (Q1 FY2026) | Score |
+|---|---|---|
+| M1 Cost Moat *(req ≥1)* | Clover Assistant clinical-cost engine (assoc. MCR benefit ~8% yr-1 → ~20% yr-4) is real and differentiated — but unproven at scale and subscale today. Emerging, not yet durable. | **1** |
+| M2 Narrative | "Managed-care rising tide + digital-health re-rating" partly priced after ~+66% YTD; not stale, no longer unpriced. Anti-inversion (note #11) caps it. | **1** |
+| M3 MCR/BER *(SURVIVAL, req ≥1, conservative)* | Insurance BER 86.5% vs 86.1% PY — broadly stable; one profitable quarter, newer cohorts unproven, mgmt flagged "appropriate discipline." Stable but not yet proven-durable → conservative. | **1** |
+| M4 Profitability & Capital | First-ever GAAP NI ($27.3M, $0.05 dil.); cash & investments $418.2M, no debt, OCF $107.9M — strong liquidity, but thin guided FY GAAP NI ($0–20M). | **1** |
+| M5 Membership & Retention *(emphasis)* | Retention >95%; avg MA membership +51.6% with a stated quality-over-volume shift. Genuinely strong recurring base. | **2** |
+| M6 Reimbursement Regime *(DOMINANT, conservative)* | MA risk-adjustment (V28) overhang + Star/quality-bonus exposure + thin margin sensitive to RAF. The dominant risk vector → conservative. | **1** |
+| M7 Catalyst | Q2 FY26 print (a genuine profitability-durability test) within 90 days; Star cycle is >90 days out; Counterpart contracts unscheduled. **Adjudicated to 1** (routine scheduled print = 1; see §C). | **1** |
+| M8 Technicals & Risk | Strong uptrend but pressing 52-wk high (~$4.18) with high realized vol (36 moves >5%/yr) → exhaustion risk; plus an insider-sell cluster into strength (sub-threshold, flagged). | **1** |
+| **Total** | | **9 / 16** |
+
+**Pass-gate result:** **PASSED.** All 8 pillars ≥1; M1 ≥1 and M3 ≥1 satisfied; M3/M5/M6 emphasis observed. The gate is met as a *result* of the scores, not engineered toward.
+
+**Interpretation:** a *scoreable, real inflection with capped conviction*. The framework correctly says "investable but conviction-limited; size small via the `turnaround/subscale` cap; resolve M6 (V28/Star) before committing." Drops one notch below the v1-draft illustrative (10/16) purely on the M7 adjudication — a deliberate anti-leniency tightening, not a change to the CLOV facts.
+
+**Multi-segment note (D-F):** Counterpart Health (external SaaS) is scored as a *separate segment* under the multi-segment doctrine (Note #4), not blended into M1–M8 above. Pre-material today; if it ever dominates revenue, the name re-routes toward a future SaaS adapter.
+
+## §C — Convention adjudicated + open item resolved
+
+1. **M7 catalyst convention (adjudicated).** A **routine scheduled earnings print scores 1** (catalyst within 12 months), not 2. **M7 = 2 requires a discrete, potentially-unpriced near-term event** — a Star-ratings release with real bonus-threshold stakes, a transformational deal close, a major external (Counterpart) contract, or a binding rate-notice within ~90 days. This mirrors the anti-narrative-inversion spirit (don't reward the already-on-the-calendar) and keeps M7 consistent with how the other adapters treat routine cadence. *(Applies adapter-wide, not just CLOV.)*
+2. **BER-vs-MCR labelling (v1 §6 open item — resolved).** M3 anchors to **the company's own reported metric** — CLOV reports *Insurance Benefits Expense Ratio (BER)*; others report MCR / MLR. Score M3 on the name's stated ratio and its trend; do not normalise across differing definitions (data-discipline doctrine: anchor to the primary metric as reported).
+
+## §D — Cross-adapter calibration distribution (updated)
+
+| Score | Holdings |
+|---|---|
+| 14/16 | RHM.DE (Defense), ASML (AI-Infra) |
+| 13/16 | LLY, ABBV, NVO (Pharma), ORCL (Cloud-Infra) |
+| 12/16 | AEM, NVDA, SU.PA, MRVL, RR.L (civil + defense legs) |
+| 11/16 | RR.L power leg, XOM, CLS |
+| 10/16 | ALB |
+| **9/16** | **CLOV (Managed-Care — illustrative calibration anchor, `turnaround/subscale`; not a held position)** |
+
+CLOV at 9/16 as the new distribution floor is coherent: a subscale, single-profitable-quarter, regulation-exposed turnaround *should* sit below a quality compounder band. The rubric is discriminating correctly.
+
+## §E — Build dependency (for Claude Code)
+
+- Flip `sector_scorecards.status` **`needs-review` → `locked`** for adapter slug `managed_care`; bump `current_version` → **1.1**.
+- **Slug reconciliation (flag):** the DB row is `managed-care` (hyphen); the parser alias was named `managed_care` (underscore). **Confirm these are deliberately mapped to each other** before any managed-care thesis routes, or routing will silently fail at lock time.
+- Register the four sub-type slugs (`ma-focused`, `diversified-managed-care`, `medicaid-mco`, `commercial-group`), the `turnaround_subscale` flag, and `multi_segment: true`.
+- **Store this supplement's markdown as TEXT, not BLOB** (per the readfile()→BLOB issue caught on the aerospace W1 row — otherwise SQL `LIKE`/search silently skips it).
+- Registration ≠ lock: this supplement calibrates the rubric. A formal CLOV (or any managed-care) thesis lock remains a separate human step via `ft-thesis`.
+
+## §F — Version history
+
+| Version | Date | Notes |
+|---|---|---|
+| v1 draft | 2026-06-09 | Initial draft; closes managed-care NULL gap (CLOV trigger); D-A→D-H resolved; uncalibrated; CLOV illustrative 10/16. |
+| **v1.1 Lock Supplement** | **2026-06-09** | Calibrated against CLOV (Q1 FY26-anchored) at **9/16**. Pillars/pass-gate held; M7 catalyst convention adjudicated (routine print = 1); BER-vs-MCR labelling resolved. Multi-segment handling confirmed. Status `needs-review → locked`. |
+
+---
+
+*Managed-Care adapter v1.1 (calibrated against CLOV). Authored 2026-06-09, Claude.ai. Slug registration + hyphen/underscore reconciliation applied by Claude Code. Personal use only. Not investment advice.*
