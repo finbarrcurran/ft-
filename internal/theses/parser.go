@@ -83,19 +83,33 @@ var (
 // canonical adapter names — folder slugs used in theses/<adapter>/.
 // Keep in sync with the directory list in cross_sector_research/theses/.
 var adapterAliases = map[string]string{
-	"pharma":                             "pharma",
-	"ai-infra/semi":                      "ai_infra_semi",
-	"ai-infra":                           "ai_infra_semi",
-	"ai infra/semi":                      "ai_infra_semi",
-	"ai infra semi":                      "ai_infra_semi",
-	"hydrocarbons":                       "hydrocarbons",
-	"energy-power":                       "energy_power",
-	"energy power":                       "energy_power",
-	"energy-power infrastructure":        "energy_power",
-	"energy power infrastructure":        "energy_power",
-	"power-infrastructure":               "energy_power",
-	"power infrastructure":               "energy_power",
-	"defense":                            "defense",
+	"pharma":                      "pharma",
+	"ai-infra/semi":               "ai_infra_semi",
+	"ai-infra":                    "ai_infra_semi",
+	"ai infra/semi":               "ai_infra_semi",
+	"ai infra semi":               "ai_infra_semi",
+	"hydrocarbons":                "hydrocarbons",
+	"energy-power":                "energy_power",
+	"energy power":                "energy_power",
+	"energy-power infrastructure": "energy_power",
+	"energy power infrastructure": "energy_power",
+	"power-infrastructure":        "energy_power",
+	"power infrastructure":        "energy_power",
+	"defense":                     "defense",
+	// Aerospace adapter (calibrated v1.1/locked, 2026-06-09). Canonical folder
+	// slug "aerospace" (matches theses/aerospace/). Sub-types captured free-form
+	// (NOT validated): aerostructures (sole-source proprietary-component archetype
+	// — TDG), aero-engine (RR.L civil leg). DOCTRINE: a multi-segment name routes
+	// Aerospace (not Defense) when the government/defense channel is BELOW the 50%
+	// revenue line (note #4 / #8); above 50% gov rev it routes "defense". Multi-
+	// segment names use the "Primary Adapter:" header form.
+	"aerospace":                          "aerospace",
+	"aerospace v1":                       "aerospace",
+	"aerospace v1.1":                     "aerospace",
+	"aero":                               "aerospace",
+	"aerostructures":                     "aerospace",
+	"aero-engine":                        "aerospace",
+	"aero engine":                        "aerospace",
 	"mining-metals":                      "mining_metals",
 	"mining & metals":                    "mining_metals",
 	"mining and metals":                  "mining_metals",
@@ -260,6 +274,12 @@ func NormaliseAdapter(raw string) string {
 		{[]string{"semi"}, "ai_infra_semi"}, // catches "Semiconductor", "AI-Semi", etc.
 		{[]string{"semiconductor"}, "ai_infra_semi"},
 		{[]string{"pharma"}, "pharma"},
+		// Aerospace — MUST precede the defense routes: an aerospace-primary name that
+		// also says "defense" (gov channel <50%) routes aerospace; a pure defense
+		// name has no "aerospace" needle and still falls through to {"defense"}.
+		{[]string{"aerospace"}, "aerospace"},
+		{[]string{"aerostructure"}, "aerospace"}, // aerostructures sub-type
+		{[]string{"aero", "engine"}, "aerospace"},
 		{[]string{"defense"}, "defense"},
 		{[]string{"defence"}, "defense"}, // UK spelling
 		{[]string{"hydrocarbon"}, "hydrocarbons"},
