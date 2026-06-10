@@ -80,6 +80,7 @@ func (s *Server) handleThesesGaps(w http.ResponseWriter, r *http.Request) {
 //
 //	thesis        — required, the locked-thesis MD file
 //	scoring_log   — optional, the updated _scoring_log.md
+//	registry      — optional, the updated _methodology_notes_registry.md
 func (s *Server) handleUploadThesis(w http.ResponseWriter, r *http.Request) {
 	if s.theses == nil || !s.theses.Configured() {
 		writeError(w, http.StatusServiceUnavailable,
@@ -110,10 +111,19 @@ func (s *Server) handleUploadThesis(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var registryBytes []byte
+	if regFile, _, rerr := r.FormFile("registry"); rerr == nil {
+		defer regFile.Close()
+		if b, rerr2 := io.ReadAll(regFile); rerr2 == nil {
+			registryBytes = b
+		}
+	}
+
 	res, err := s.theses.Upload(r.Context(), theses.UploadOpts{
 		ThesisFilename: thesisHdr.Filename,
 		ThesisContent:  thesisBytes,
 		ScoringLog:     scoringLogBytes,
+		Registry:       registryBytes,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -201,12 +211,14 @@ func (s *Server) handleThesisRevisionPrompt(w http.ResponseWriter, r *http.Reque
 
 // POST /api/theses/scoring-log
 //
-// multipart/form-data:
+// multipart/form-data (at least one of):
 //
-//	scoring_log — required, the new _scoring_log.md body
+//	scoring_log — the new _scoring_log.md body
+//	registry    — the new _methodology_notes_registry.md body
 //
-// Replaces theses/_scoring_log.md verbatim and pushes. Use when refreshing
-// methodology notes or distribution diagrams without locking a new thesis.
+// Replaces the given file(s) verbatim and pushes them in a single commit. Use
+// when refreshing methodology notes, the registry, or distribution diagrams
+// without locking a new thesis.
 func (s *Server) handleUploadScoringLog(w http.ResponseWriter, r *http.Request) {
 	if s.theses == nil || !s.theses.Configured() {
 		writeError(w, http.StatusServiceUnavailable,
@@ -217,18 +229,29 @@ func (s *Server) handleUploadScoringLog(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "could not parse multipart form: "+err.Error())
 		return
 	}
-	logFile, _, err := r.FormFile("scoring_log")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "missing 'scoring_log' file part")
+
+	var logBytes []byte
+	if logFile, _, lerr := r.FormFile("scoring_log"); lerr == nil {
+		defer logFile.Close()
+		if b, rerr := io.ReadAll(logFile); rerr == nil {
+			logBytes = b
+		}
+	}
+
+	var registryBytes []byte
+	if regFile, _, rerr := r.FormFile("registry"); rerr == nil {
+		defer regFile.Close()
+		if b, rerr2 := io.ReadAll(regFile); rerr2 == nil {
+			registryBytes = b
+		}
+	}
+
+	if len(logBytes) == 0 && len(registryBytes) == 0 {
+		writeError(w, http.StatusBadRequest, "provide at least one of 'scoring_log' or 'registry' file parts")
 		return
 	}
-	defer logFile.Close()
-	body, err := io.ReadAll(logFile)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "could not read scoring log upload")
-		return
-	}
-	res, err := s.theses.UploadScoringLog(r.Context(), body)
+
+	res, err := s.theses.UploadScoringLog(r.Context(), logBytes, registryBytes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
