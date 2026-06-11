@@ -17,6 +17,7 @@ import (
 	"ft/internal/auth"
 	"ft/internal/config"
 	"ft/internal/cryptoindicators"
+	"ft/internal/cryptotheses"
 	"ft/internal/frameworks"
 	"ft/internal/health"
 	"ft/internal/llm"
@@ -24,10 +25,10 @@ import (
 	"ft/internal/macroregime"
 	"ft/internal/market"
 	"ft/internal/marketdata"
+	"ft/internal/nexus"
 	"ft/internal/performance"
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
-	"ft/internal/cryptotheses"
 	"ft/internal/sector_rotation"
 	"ft/internal/server"
 	"ft/internal/signals"
@@ -38,6 +39,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -71,6 +74,10 @@ func main() {
 		runSectorBackfill(os.Args[2:])
 	case "sector-ingest":
 		runSectorIngest(os.Args[2:])
+	case "nexus-ingest":
+		runNexusIngest(os.Args[2:])
+	case "nexus-backfill":
+		runNexusBackfill(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 	default:
@@ -204,6 +211,9 @@ func runServe() {
 		}
 		if err := cryptotheses.New(st.DB).SeedIfEmpty(seedCtx); err != nil {
 			slog.Warn("crypto adapters seed failed (continuing)", "err", err)
+		}
+		if err := nexus.New(st).SeedIfEmpty(seedCtx); err != nil {
+			slog.Warn("nexus universe seed failed (continuing)", "err", err)
 		}
 		seedCancel()
 	}
@@ -741,4 +751,128 @@ func scheduleAt(ctx context.Context, hour, minute int, fn func()) {
 		}
 		fn()
 	}
+}
+
+// runNexusIngest ingests Visser AI-Nexus xlsx snapshots from a directory into
+// the nexus_* tables (source='upload'). SC-36 W1. The as_of comes from the
+// sheet itself (Exhaustion/Fundamentals) or, for Technical sheets that carry no
+// internal date, from a YYYY-MM-DD in the filename (or --as-of). Idempotent —
+// a same-(as_of,kind) re-ingest replaces that slice.
+func runNexusIngest(args []string) {
+	fs := flag.NewFlagSet("nexus-ingest", flag.ExitOnError)
+	dir := fs.String("dir", "", "directory of .xlsx snapshots to ingest")
+	asOf := fs.String("as-of", "", "override as_of (YYYY-MM-DD) for Technical sheets")
+	_ = fs.Parse(args)
+	if *dir == "" {
+		fmt.Fprintln(os.Stderr, "nexus-ingest: --dir is required")
+		os.Exit(2)
+	}
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	svc := nexus.New(st)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if err := svc.SeedIfEmpty(ctx); err != nil {
+		fmt.Printf("  (universe seed warning: %s)\n", err)
+	}
+
+	entries, err := os.ReadDir(*dir)
+	must("read dir", err)
+	dateRe := regexp.MustCompile(`(\d{4}-\d{2}-\d{2})`)
+	ok, failed := 0, 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".xlsx") {
+			continue
+		}
+		path := filepath.Join(*dir, e.Name())
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			fmt.Printf("  %-44s  read failed: %s\n", e.Name(), rerr)
+			failed++
+			continue
+		}
+		hint := *asOf
+		if hint == "" {
+			hint = dateRe.FindString(e.Name())
+		}
+		res, ierr := svc.Ingest(ctx, data, hint)
+		if ierr != nil {
+			fmt.Printf("  %-44s  FAILED: %s\n", e.Name(), ierr)
+			failed++
+			continue
+		}
+		fmt.Printf("  %-44s  %-12s %s  %d rows\n", e.Name(), res.Kind, res.AsOf, res.Rows)
+		ok++
+	}
+	fmt.Printf("\nnexus-ingest done. ok=%d  failed=%d\n", ok, failed)
+}
+
+// runNexusBackfill fetches 2y daily OHLC for the nexus universe + the SPY/QQQ/
+// SOXX benchmarks into daily_bars (benchmarks under kind='benchmark', equities
+// under kind='stock'). SC-36 W2. --skip-existing avoids re-pulling tickers that
+// already overlap the holdings backfill.
+func runNexusBackfill(args []string) {
+	fs := flag.NewFlagSet("nexus-backfill", flag.ExitOnError)
+	rng := fs.String("range", "2y", "Yahoo range string: 1y, 2y, 5y, max")
+	gap := fs.Int("gap-ms", 1200, "sleep between tickers (ms)")
+	minBars := fs.Int("skip-existing", 400, "skip a ticker that already has >= this many bars (0 = never skip)")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+	defer cancel()
+
+	type job struct{ ticker, kind string }
+	jobs := []job{{"SPY", "benchmark"}, {"QQQ", "benchmark"}, {"SOXX", "benchmark"}}
+	uni, err := st.ListNexusUniverse(ctx)
+	must("list nexus universe", err)
+	for _, u := range uni {
+		jobs = append(jobs, job{u.Ticker, "stock"})
+	}
+
+	fmt.Printf("nexus-backfill: %d jobs (3 benchmarks + %d universe), range=%s, gap=%dms\n",
+		len(jobs), len(uni), *rng, *gap)
+	ok, failed, skipped := 0, 0, 0
+	for i, j := range jobs {
+		if *minBars > 0 {
+			if n, _ := st.CountDailyBars(ctx, j.ticker, j.kind); n >= *minBars {
+				skipped++
+				continue
+			}
+		}
+		bars, ferr := market.FetchYahooDailyBars(ctx, j.ticker, *rng)
+		if ferr != nil {
+			fmt.Printf("  [%d/%d] %-12s %-9s fetch failed: %s\n", i+1, len(jobs), j.ticker, j.kind, ferr)
+			failed++
+			time.Sleep(time.Duration(*gap) * time.Millisecond)
+			continue
+		}
+		rows := make([]store.DailyBarRow, 0, len(bars))
+		for _, b := range bars {
+			rows = append(rows, store.DailyBarRow{Date: b.Date, Open: b.Open, High: b.High, Low: b.Low, Close: b.Close, Volume: b.Volume})
+		}
+		if serr := st.BulkInsertDailyBars(ctx, j.ticker, j.kind, rows); serr != nil {
+			fmt.Printf("  [%d/%d] %-12s %-9s store failed: %s\n", i+1, len(jobs), j.ticker, j.kind, serr)
+			failed++
+			time.Sleep(time.Duration(*gap) * time.Millisecond)
+			continue
+		}
+		fmt.Printf("  [%d/%d] %-12s %-9s %d bars\n", i+1, len(jobs), j.ticker, j.kind, len(rows))
+		ok++
+		time.Sleep(time.Duration(*gap) * time.Millisecond)
+	}
+	fmt.Printf("\nnexus-backfill done. ok=%d  failed=%d  skipped=%d\n", ok, failed, skipped)
 }

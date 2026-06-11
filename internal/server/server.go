@@ -16,6 +16,7 @@ import (
 	"ft/internal/domain"
 	"ft/internal/llm"
 	"ft/internal/macroregime"
+	"ft/internal/nexus"
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
 	"ft/internal/signals"
@@ -46,6 +47,7 @@ type Server struct {
 	signals          *signals.Service                 // Spec 9k Phase A
 	macroRegime      *macroregime.Service             // Spec 9p
 	cryptoScreener   *cryptoscreener.Service          // SC-21 crypto market screener
+	nexus            *nexus.Service                   // SC-36 AI Nexus tab
 	mux              *http.ServeMux
 }
 
@@ -67,6 +69,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		signals:          signals.New(st.DB),          // Spec 9k Phase A
 		macroRegime:      macroregime.New(st.DB),      // Spec 9p
 		cryptoScreener:   cryptoscreener.New(),        // SC-21 crypto market screener
+		nexus:            nexus.New(st),               // SC-36 AI Nexus tab
 		mux:              http.NewServeMux(),
 	}
 	s.cryptoWrite = cryptotheses.NewThesisWriteService(st.DB, s.cryptoAdapters, s.cryptoCascade)
@@ -287,6 +290,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/theses/scoring-log", s.requireUser(s.handleUploadScoringLog))
 	s.mux.HandleFunc("POST /api/theses/sync", s.requireUser(s.handleThesesSync))
 	s.mux.HandleFunc("GET /api/theses/{id}/revision-prompt", s.requireUser(s.handleThesisRevisionPrompt))
+
+	// SC-36: AI Nexus tab (Visser replication layer).
+	s.mux.HandleFunc("POST /api/nexus/upload", s.requireUser(s.handleUploadNexus))
+	s.mux.HandleFunc("GET /api/nexus/universe", s.requireUser(s.handleNexusUniverse))
+	s.mux.HandleFunc("GET /api/nexus/technical", s.requireUser(s.handleNexusTechnical))
+	s.mux.HandleFunc("GET /api/nexus/exhaustion", s.requireUser(s.handleNexusExhaustion))
+	s.mux.HandleFunc("GET /api/nexus/fundamentals", s.requireUser(s.handleNexusFundamentals))
 
 	// Spec 9g: Scorecard Repository.
 	s.mux.HandleFunc("GET /api/scorecards", s.requireUserOrToken(s.handleScorecardsList))

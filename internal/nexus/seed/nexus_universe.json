@@ -1,0 +1,502 @@
+[
+ {
+  "ticker": "STLTECH.NS",
+  "company": "Sterlite Technologies",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "MRK.DE",
+  "company": "Merck KGaA",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "MRN.PA",
+  "company": "Mersen",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "HPE",
+  "company": "HPE",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "DELL",
+  "company": "Dell Technologies",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "MRVL",
+  "company": "Marvell Technology",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "CSCO",
+  "company": "Cisco Systems",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "LLY",
+  "company": "Eli Lilly",
+  "theme": "Macro Satellites"
+ },
+ {
+  "ticker": "ALAB",
+  "company": "Astera Labs",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "IFX.DE",
+  "company": "Infineon",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "000660.KS",
+  "company": "SK hynix",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "EXTR",
+  "company": "Extreme Networks",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "ARM",
+  "company": "Arm Holdings",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "AMD",
+  "company": "AMD",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "6146.T",
+  "company": "Disco Corp",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "MU",
+  "company": "Micron Technology",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "AIP",
+  "company": "Arteris",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "6526.T",
+  "company": "Socionext",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "J",
+  "company": "Jacobs Solutions",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "PSTG",
+  "company": "Pure Storage",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "FLNC",
+  "company": "Fluence Energy",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "RMBS",
+  "company": "Rambus",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "SMCI",
+  "company": "Super Micro",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "4062.T",
+  "company": "Ibiden",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "D",
+  "company": "Dominion Energy",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "HEN3.DE",
+  "company": "Henkel",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "CLFD",
+  "company": "Clearfield",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "QCOM",
+  "company": "Qualcomm",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "CDNS",
+  "company": "Cadence Design",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "4203.T",
+  "company": "Sumitomo Bakelite",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "AVGO",
+  "company": "Broadcom",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "CRDO",
+  "company": "Credo Technology",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "IBIT",
+  "company": "iShares Bitcoin",
+  "theme": "Macro Satellites"
+ },
+ {
+  "ticker": "NXPI",
+  "company": "NXP Semiconductors",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "INTC",
+  "company": "Intel",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "CIEN",
+  "company": "Ciena",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "ASML",
+  "company": "ASML",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "MOD",
+  "company": "Modine Mfg",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "AMKR",
+  "company": "Amkor Technology",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "LSCC",
+  "company": "Lattice Semi",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "SOI.PA",
+  "company": "Soitec",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "CAT",
+  "company": "Caterpillar",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "KLAC",
+  "company": "KLA Corp",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "NVDA",
+  "company": "NVIDIA",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "SNPS",
+  "company": "Synopsys",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "BESI.AS",
+  "company": "BE Semiconductor",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "ENTG",
+  "company": "Entegris",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "SLV",
+  "company": "iShares Silver",
+  "theme": "Macro Satellites"
+ },
+ {
+  "ticker": "ROG",
+  "company": "Rogers Corp",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "2802.T",
+  "company": "Ajinomoto",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "NVT",
+  "company": "nVent Electric",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "4063.T",
+  "company": "Shin-Etsu Chemical",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "TSM",
+  "company": "TSMC",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "FN",
+  "company": "Fabrinet",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "PLTR",
+  "company": "Palantir",
+  "theme": "Macro Satellites"
+ },
+ {
+  "ticker": "COHR",
+  "company": "Coherent",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "VRT",
+  "company": "Vertiv",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "PRY.MI",
+  "company": "Prysmian",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "ETR",
+  "company": "Entergy",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "EOSE",
+  "company": "Eos Energy",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "LITE",
+  "company": "Lumentum",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "ACM",
+  "company": "AECOM",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "POWL",
+  "company": "Powell Industries",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "GLW",
+  "company": "Corning",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "ANET",
+  "company": "Arista Networks",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "CBT",
+  "company": "Cabot Corp",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "SIE.DE",
+  "company": "Siemens",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "APH",
+  "company": "Amphenol",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "VIAV",
+  "company": "Viavi Solutions",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "XOM",
+  "company": "Exxon Mobil",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "NEE",
+  "company": "NextEra Energy",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "AAOI",
+  "company": "Applied Optoelectronics",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "BE",
+  "company": "Bloom Energy",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "CVX",
+  "company": "Chevron",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "4186.T",
+  "company": "TOK",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "Q",
+  "company": "Qnity Electronics",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "PWR",
+  "company": "Quanta Services",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "SU.PA",
+  "company": "Schneider Electric",
+  "theme": "Whole Rack"
+ },
+ {
+  "ticker": "ETN",
+  "company": "Eaton",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "VISN",
+  "company": "Vistance Networks",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "GEV",
+  "company": "GE Vernova",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "MKSI",
+  "company": "MKS Instruments",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "AKE.PA",
+  "company": "Arkema",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "EME",
+  "company": "EMCOR Group",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "CEG",
+  "company": "Constellation Energy",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "VST",
+  "company": "Vistra",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "BDC",
+  "company": "Belden",
+  "theme": "Optical & Interconnects"
+ },
+ {
+  "ticker": "WMB",
+  "company": "Williams Companies",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "ET",
+  "company": "Energy Transfer",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "VCT.L",
+  "company": "Victrex",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "KMI",
+  "company": "Kinder Morgan",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "CC",
+  "company": "Chemours",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "ESI",
+  "company": "Element Solutions",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "EWZ",
+  "company": "iShares Brazil",
+  "theme": "Macro Satellites"
+ },
+ {
+  "ticker": "BIPC",
+  "company": "Brookfield Infra",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "6857.T",
+  "company": "Advantest",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "HO.PA",
+  "company": "Thales",
+  "theme": "Semicon Architecture"
+ },
+ {
+  "ticker": "CE",
+  "company": "Celanese",
+  "theme": "Chemicals & Materials"
+ },
+ {
+  "ticker": "HUBB",
+  "company": "Hubbell",
+  "theme": "Energy & Infrastructure"
+ },
+ {
+  "ticker": "TT",
+  "company": "Trane Technologies",
+  "theme": "Energy & Infrastructure"
+ }
+]

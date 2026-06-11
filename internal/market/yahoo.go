@@ -118,22 +118,45 @@ func (y *yahooClient) yahooGet(ctx context.Context, baseURL string) (json.RawMes
 		return y.client.Do(req)
 	}
 
-	res, err := doReq()
-	if err != nil {
-		return nil, err
-	}
-	if res.StatusCode == 401 {
-		res.Body.Close()
-		y.invalidate()
-		newCrumb, err2 := y.ensureCrumb(ctx)
-		if err2 != nil {
-			return nil, err2
-		}
-		full = fmt.Sprintf("%s%scrumb=%s", baseURL, sep, url.QueryEscape(newCrumb))
+	// SC-36 W2: retry on rate-limit / transient unavailability with exponential
+	// backoff + jitter. Yahoo returns 429 (rate-limited) or 503 under load; the
+	// pre-existing 401-crumb refresh is preserved inside the loop. 4 attempts:
+	// ~0.5s, 1s, 2s spacing (plus up to 250ms jitter) before giving up.
+	const maxAttempts = 4
+	var res *http.Response
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		res, err = doReq()
 		if err != nil {
 			return nil, err
 		}
+		if res.StatusCode == 401 {
+			res.Body.Close()
+			y.invalidate()
+			newCrumb, err2 := y.ensureCrumb(ctx)
+			if err2 != nil {
+				return nil, err2
+			}
+			full = fmt.Sprintf("%s%scrumb=%s", baseURL, sep, url.QueryEscape(newCrumb))
+			res, err = doReq()
+			if err != nil {
+				return nil, err
+			}
+		}
+		if res.StatusCode == 429 || res.StatusCode == 503 {
+			res.Body.Close()
+			if attempt == maxAttempts-1 {
+				return nil, fmt.Errorf("yahoo http %d after %d attempts (rate-limited)", res.StatusCode, maxAttempts)
+			}
+			jitter := time.Duration(time.Now().UnixNano()/1e6%250) * time.Millisecond
+			backoff := time.Duration(500*(1<<attempt))*time.Millisecond + jitter
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+			continue
+		}
+		break
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
