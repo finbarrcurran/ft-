@@ -63,6 +63,18 @@ func (s *Store) CountDailyBars(ctx context.Context, ticker, kind string) (int, e
 	return n, err
 }
 
+// LastDailyBarDate returns the most recent bar date for a (ticker, kind), or ""
+// when none exist.
+func (s *Store) LastDailyBarDate(ctx context.Context, ticker, kind string) (string, error) {
+	var d sql.NullString
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT MAX(date) FROM daily_bars WHERE ticker = ? AND kind = ?`, ticker, kind).Scan(&d)
+	if err != nil {
+		return "", err
+	}
+	return d.String, nil
+}
+
 // --- universe + ticker map -------------------------------------------------
 
 // CountNexusUniverse returns how many seeded (is_nexus=1) members exist.
@@ -147,6 +159,31 @@ func (s *Store) GetNexusTickerMap(ctx context.Context) (map[string]string, error
 		m[a] = b
 	}
 	return m, rows.Err()
+}
+
+// NexusSnapshotDates returns the distinct as_of dates present for a source in
+// one of the nexus snapshot tables (whitelisted).
+func (s *Store) NexusSnapshotDates(ctx context.Context, table, source string) ([]string, error) {
+	switch table {
+	case "nexus_technical", "nexus_exhaustion", "nexus_fundamentals":
+	default:
+		return nil, nil
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT DISTINCT as_of FROM `+table+` WHERE source = ? ORDER BY as_of`, source)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // --- technical snapshots ---------------------------------------------------

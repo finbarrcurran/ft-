@@ -48,6 +48,76 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 	return s.st.BulkUpsertNexusUniverse(ctx, rows)
 }
 
+// spyCloses returns SPY's date→close map from the benchmark bars.
+func (s *Service) spyCloses(ctx context.Context) (map[string]float64, error) {
+	bars, err := s.st.GetDailyBars(ctx, "SPY", "benchmark")
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]float64, len(bars))
+	for _, b := range bars {
+		m[b.Date] = b.Close
+	}
+	return m, nil
+}
+
+// ComputeResult reports a compute pass.
+type ComputeResult struct {
+	AsOf     string
+	Computed int
+	Degraded []string // "TICKER: reason"
+}
+
+// ComputeForDate runs both bar-based engines (Trend + Exhaustion) for every
+// universe member as of asOf and writes source='computed' snapshot rows. The
+// Fundamentals engine is separate (it needs a live Yahoo earningsTrend fetch).
+func (s *Service) ComputeForDate(ctx context.Context, asOf string) (*ComputeResult, *ComputeResult, error) {
+	uni, err := s.st.ListNexusUniverse(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	spy, err := s.spyCloses(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	tech := &ComputeResult{AsOf: asOf}
+	exh := &ComputeResult{AsOf: asOf}
+	var techRows []domain.NexusTechnical
+	var exhRows []domain.NexusExhaustion
+	for _, u := range uni {
+		bars, berr := s.st.GetDailyBars(ctx, u.Ticker, "stock")
+		if berr != nil || len(bars) == 0 {
+			tech.Degraded = append(tech.Degraded, u.Ticker+": no bars")
+			exh.Degraded = append(exh.Degraded, u.Ticker+": no bars")
+			continue
+		}
+		if t, reason := ComputeTrend(bars, spy, u.Ticker, asOf); t != nil {
+			techRows = append(techRows, *t)
+		} else {
+			tech.Degraded = append(tech.Degraded, u.Ticker+": "+reason)
+		}
+		if e, reason := ComputeExhaustion(bars, u.Ticker, asOf); e != nil {
+			exhRows = append(exhRows, *e)
+		} else {
+			exh.Degraded = append(exh.Degraded, u.Ticker+": "+reason)
+		}
+	}
+	if err := s.st.ReplaceNexusTechnical(ctx, asOf, "computed", techRows); err != nil {
+		return nil, nil, err
+	}
+	if err := s.st.ReplaceNexusExhaustion(ctx, asOf, "computed", exhRows); err != nil {
+		return nil, nil, err
+	}
+	tech.Computed = len(techRows)
+	exh.Computed = len(exhRows)
+	return tech, exh, nil
+}
+
+// UploadDates returns the distinct upload as_of dates for a snapshot table.
+func (s *Service) UploadDates(ctx context.Context, table string) ([]string, error) {
+	return s.st.NexusSnapshotDates(ctx, table, "upload")
+}
+
 // Ingest parses one uploaded xlsx and replaces the matching (as_of, 'upload')
 // snapshot slice. asOfHint supplies the date for Technical sheets (which carry
 // no internal date); Exhaustion/Fundamentals self-date and ignore it.

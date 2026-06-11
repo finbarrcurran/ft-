@@ -78,6 +78,8 @@ func main() {
 		runNexusIngest(os.Args[2:])
 	case "nexus-backfill":
 		runNexusBackfill(os.Args[2:])
+	case "nexus-compute":
+		runNexusCompute(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 	default:
@@ -822,7 +824,8 @@ func runNexusBackfill(args []string) {
 	fs := flag.NewFlagSet("nexus-backfill", flag.ExitOnError)
 	rng := fs.String("range", "2y", "Yahoo range string: 1y, 2y, 5y, max")
 	gap := fs.Int("gap-ms", 1200, "sleep between tickers (ms)")
-	minBars := fs.Int("skip-existing", 400, "skip a ticker that already has >= this many bars (0 = never skip)")
+	minBars := fs.Int("skip-existing", 400, "skip a ticker that already has >= this many bars AND is fresh (0 = never skip)")
+	freshDays := fs.Int("fresh-days", 7, "a ticker is 'fresh' if its last bar is within this many calendar days of now (~5 trading days)")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load()
@@ -834,6 +837,7 @@ func runNexusBackfill(args []string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
+	freshCutoff := time.Now().AddDate(0, 0, -*freshDays).Format("2006-01-02")
 
 	type job struct{ ticker, kind string }
 	jobs := []job{{"SPY", "benchmark"}, {"QQQ", "benchmark"}, {"SOXX", "benchmark"}}
@@ -847,10 +851,16 @@ func runNexusBackfill(args []string) {
 		len(jobs), len(uni), *rng, *gap)
 	ok, failed, skipped := 0, 0, 0
 	for i, j := range jobs {
+		// Skip only when a ticker is both well-covered AND fresh — a stale-but-
+		// numerous series (the SC-35 holdings backfill artifact) must still be
+		// topped up, not skipped on count alone.
 		if *minBars > 0 {
 			if n, _ := st.CountDailyBars(ctx, j.ticker, j.kind); n >= *minBars {
-				skipped++
-				continue
+				last, _ := st.LastDailyBarDate(ctx, j.ticker, j.kind)
+				if last >= freshCutoff {
+					skipped++
+					continue
+				}
 			}
 		}
 		bars, ferr := market.FetchYahooDailyBars(ctx, j.ticker, *rng)
@@ -875,4 +885,49 @@ func runNexusBackfill(args []string) {
 		time.Sleep(time.Duration(*gap) * time.Millisecond)
 	}
 	fmt.Printf("\nnexus-backfill done. ok=%d  failed=%d  skipped=%d\n", ok, failed, skipped)
+}
+
+// runNexusCompute runs the bar-based Trend + Exhaustion engines for the nexus
+// universe and writes source='computed' snapshot rows. SC-36 W3. With no
+// --as-of it computes for every ingested upload date (so computed vs upload can
+// be compared for verification); otherwise just the given date.
+func runNexusCompute(args []string) {
+	fs := flag.NewFlagSet("nexus-compute", flag.ExitOnError)
+	asOf := fs.String("as-of", "", "compute a single date (YYYY-MM-DD); empty = all ingested upload dates")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	svc := nexus.New(st)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+
+	var dates []string
+	if *asOf != "" {
+		dates = []string{*asOf}
+	} else {
+		seen := map[string]bool{}
+		for _, tbl := range []string{"nexus_technical", "nexus_exhaustion"} {
+			ds, derr := svc.UploadDates(ctx, tbl)
+			must("upload dates", derr)
+			for _, d := range ds {
+				if !seen[d] {
+					seen[d] = true
+					dates = append(dates, d)
+				}
+			}
+		}
+	}
+	for _, d := range dates {
+		tech, exh, cerr := svc.ComputeForDate(ctx, d)
+		must("compute "+d, cerr)
+		fmt.Printf("  %s  trend=%d (degraded %d)  exhaustion=%d (degraded %d)\n",
+			d, tech.Computed, len(tech.Degraded), exh.Computed, len(exh.Degraded))
+	}
+	fmt.Printf("nexus-compute done. %d date(s).\n", len(dates))
 }
