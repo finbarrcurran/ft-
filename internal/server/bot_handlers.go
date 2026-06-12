@@ -246,6 +246,35 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// SC-36 W4 close-out — AI Nexus health anomalies, re-derived from the latest
+	// computed snapshot so the bot relays them even though the daily compute cron
+	// ran earlier. System-level alert (HoldingID 0); deduped once per day via
+	// notification_log. Silent when all-clear.
+	if s.nexus != nil {
+		if anomalies, herr := s.nexus.NexusHealthCheck(r.Context()); herr == nil && len(anomalies) > 0 {
+			emit := true
+			if onlyUnnotified {
+				acked, err := s.store.HasAlertBeenAckedToday(r.Context(), "nexus", 0, "nexus_anomaly", today)
+				if err != nil {
+					mapStoreError(w, err)
+					return
+				}
+				emit = !acked
+			}
+			if emit {
+				out = append(out, alertOut{
+					HoldingKind: "nexus",
+					HoldingID:   0,
+					Name:        "AI Nexus",
+					Kind:        "nexus_anomaly",
+					Triggers:    anomalies,
+					Severity:    "amber",
+					EventClass:  "nexus_anomaly",
+				})
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"asOf":   time.Now().UTC().Format(time.RFC3339),
 		"alerts": out,

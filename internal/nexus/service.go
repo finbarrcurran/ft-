@@ -236,6 +236,52 @@ func (s *Service) NexusWeeklyFundamentals(ctx context.Context) (*ComputeResult, 
 	return s.ComputeFundamentals(ctx, today, 700*time.Millisecond)
 }
 
+// NexusHealthCheck re-derives the persistent anomaly conditions from the latest
+// computed snapshot, so the Telegram bot can relay them at poll time even though
+// the daily cron ran earlier. Empty slice = all-clear (the bot stays silent).
+func (s *Service) NexusHealthCheck(ctx context.Context) ([]string, error) {
+	var a []string
+	td, _ := s.st.LatestNexusTechnicalAsOf(ctx, "computed")
+	if td == "" {
+		a = append(a, "no computed Trend snapshot yet")
+	} else {
+		t, _ := s.st.ListNexusTechnical(ctx, td, "computed")
+		if len(t) < 90 {
+			a = append(a, fmt.Sprintf("Trend snapshot incomplete: %d rows (%s)", len(t), td))
+		}
+		var vals []float64
+		for _, r := range t {
+			if r.TrendScore != nil {
+				vals = append(vals, float64(*r.TrendScore))
+			}
+		}
+		if len(vals) >= 10 && pstdev(vals) < 5 {
+			a = append(a, "Trend-score distribution collapsed (std-dev < 5) — degenerate input signal")
+		}
+	}
+	ed, _ := s.st.LatestNexusExhaustionAsOf(ctx, "computed")
+	if ed == "" {
+		a = append(a, "no computed Exhaustion snapshot yet")
+	} else {
+		e, _ := s.st.ListNexusExhaustion(ctx, ed, "computed")
+		low := 0
+		for _, r := range e {
+			if r.DataWtPct != nil && *r.DataWtPct < 100 {
+				low++
+			}
+		}
+		if len(e) > 0 && float64(low)/float64(len(e)) > 0.10 {
+			a = append(a, fmt.Sprintf("%d/%d exhaustion rows have incomplete model weight", low, len(e)))
+		}
+	}
+	if last, _ := s.st.LastDailyBarDate(ctx, "SPY", "benchmark"); last != "" {
+		if last < time.Now().AddDate(0, 0, -5).Format("2006-01-02") {
+			a = append(a, "benchmark bars stale (SPY last "+last+")")
+		}
+	}
+	return a, nil
+}
+
 // dailyAnomalies returns anomaly-only health flags (empty when all-clear):
 // bar fetch failures, >10% of exhaustion rows with missing model weight, a
 // degenerate (collapsed) Trend-score distribution, or a degraded compute.
