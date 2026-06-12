@@ -5473,3 +5473,74 @@ a.score-badge { display: inline-block; }
   font-size: 0.8rem;
   color: rgb(var(--color-accent));
 }
+
+/* ===== SC-36 W5 — AI Nexus tab ========================================= */
+/* 17 tabs now: let the bar scroll horizontally instead of wrapping. */
+.tabbar { overflow-x: auto; scrollbar-width: thin; }
+.tab { flex: 0 0 auto; white-space: nowrap; }
+.tab-nexus.active { color: rgb(var(--color-accent)); }
+body.demo-active [data-tab="nexus"] { display: none; }
+
+.nx-wrap { padding: 1.25rem 1.5rem; }
+.nx-head { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; justify-content: space-between; }
+.nx-head h2 { margin: 0; font-size: 1.1rem; }
+.nx-sub { color: rgb(var(--color-text-dim)); font-size: 0.8rem; font-weight: 400; }
+.nx-bench { display: flex; gap: 1rem; flex-wrap: wrap; }
+.nx-bench-item { font-size: 0.8rem; color: rgb(var(--color-text-muted)); }
+.nx-bench-item b { color: rgb(var(--color-text)); }
+
+.nx-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.6rem; margin: 0.9rem 0; }
+.nx-theme-card { border: 1px solid rgb(var(--color-border)); border-radius: 8px; padding: 0.6rem 0.7rem; background: rgb(var(--color-bg)); }
+.nx-theme-name { font-size: 0.8rem; font-weight: 600; margin-bottom: 0.35rem; color: rgb(var(--color-text)); }
+.nx-theme-row { display: flex; justify-content: space-between; font-size: 0.78rem; color: rgb(var(--color-text-muted)); }
+.nx-theme-row b { color: rgb(var(--color-text)); }
+.nx-theme-top { font-size: 0.72rem; color: rgb(var(--color-text-dim)); margin-top: 0.3rem; }
+
+.nx-controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.nx-vtabs { display: flex; gap: 0.3rem; }
+.nx-vtab { padding: 0.4rem 0.9rem; border: 1px solid rgb(var(--color-border)); background: transparent; color: rgb(var(--color-text-muted)); border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+.nx-vtab.active { background: rgb(var(--color-accent) / 0.15); color: rgb(var(--color-accent)); border-color: rgb(var(--color-accent) / 0.5); }
+.nx-strap { color: rgb(var(--color-text-dim)); font-size: 0.82rem; font-style: italic; }
+
+.nx-filters { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin: 0.7rem 0; }
+.nx-pill { padding: 0.3rem 0.7rem; border: 1px solid rgb(var(--color-border)); background: transparent; color: rgb(var(--color-text-muted)); border-radius: 999px; cursor: pointer; font-size: 0.8rem; }
+.nx-pill.active { background: rgb(var(--color-accent) / 0.15); color: rgb(var(--color-accent)); border-color: rgb(var(--color-accent) / 0.5); }
+.nx-datepick { font-size: 0.8rem; color: rgb(var(--color-text-muted)); }
+.nx-datepick input { background: rgb(var(--color-bg)); color: rgb(var(--color-text)); border: 1px solid rgb(var(--color-border)); border-radius: 5px; padding: 0.2rem 0.4rem; }
+.nx-count { margin-left: auto; color: rgb(var(--color-text-dim)); font-size: 0.8rem; }
+
+.nx-tablewrap { overflow-x: auto; }
+.nx-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+.nx-table th, .nx-table td { padding: 0.4rem 0.55rem; text-align: left; border-bottom: 1px solid rgb(var(--color-border)); white-space: nowrap; }
+.nx-table td.num, .nx-table th.num { text-align: right; }
+.nx-th { cursor: pointer; color: rgb(var(--color-text-muted)); user-select: none; }
+.nx-th:hover { color: rgb(var(--color-text)); }
+.nx-th.sorted { color: rgb(var(--color-accent)); }
+.nx-tk { font-weight: 600; }
+.nx-badge { margin-left: 0.25rem; }
+.nx-score { font-weight: 700; }
+.nx-setup, .nx-band, .nx-status { padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.74rem; }
+.nx-buy { background: rgb(46 160 67 / 0.18); color: rgb(126 231 135); }
+.nx-ext { background: rgb(255 184 0 / 0.18); color: rgb(255 204 64); }
+.nx-con { background: rgb(88 166 255 / 0.16); color: rgb(140 190 255); }
+.nx-pull { background: rgb(88 166 255 / 0.12); color: rgb(140 190 255); }
+.nx-neu { color: rgb(var(--color-text-muted)); }
+.nx-weak { background: rgb(255 120 60 / 0.14); color: rgb(255 150 100); }
+.nx-down { background: rgb(248 81 73 / 0.18); color: rgb(255 130 122); }
+.nx-extreme { background: rgb(248 81 73 / 0.2); color: rgb(255 130 122); }
+.nx-elevated { background: rgb(255 184 0 / 0.18); color: rgb(255 204 64); }
+.nx-moderate { color: rgb(var(--color-text-muted)); }
+.nx-low { color: rgb(126 231 135); }
+.nx-lowwt { color: rgb(255 150 100); }
+.nx-warn { color: rgb(255 184 0); cursor: help; }
+.nx-theme-cell, .nx-theme-cell { color: rgb(var(--color-text-dim)); font-size: 0.78rem; }
+.nx-status { font-size: 0.7rem; }
+.nx-st-ok { color: rgb(var(--color-text-dim)); }
+.nx-st-unstable_base { background: rgb(255 184 0 / 0.16); color: rgb(255 204 64); }
+.nx-st-neg_base, .nx-st-missing_est, .nx-st-missing_px { color: rgb(var(--color-text-dim)); font-style: italic; }
+
+/* Summary-tab card */
+.nx-sum-card { border: 1px solid rgb(255 184 0 / 0.4); background: rgb(255 184 0 / 0.06); border-radius: 8px; padding: 0.7rem 0.9rem; margin-bottom: 1rem; cursor: pointer; }
+.nx-sum-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem; color: rgb(255 204 64); }
+.nx-sum-items { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.nx-sum-item { font-size: 0.78rem; padding: 0.15rem 0.5rem; border-radius: 4px; border: 1px solid rgb(var(--color-border)); }

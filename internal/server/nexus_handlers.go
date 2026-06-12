@@ -114,7 +114,8 @@ func (s *Server) handleNexusTechnical(w http.ResponseWriter, r *http.Request) {
 			rows[i].Company, rows[i].Theme = u.Company, u.Theme
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"asOf": asOf, "source": src, "rows": rows})
+	benches, _ := s.store.GetBenchmarkSnapshot(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{"asOf": asOf, "source": src, "rows": rows, "benchmarks": benches})
 }
 
 func (s *Server) handleNexusExhaustion(w http.ResponseWriter, r *http.Request) {

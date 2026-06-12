@@ -640,6 +640,11 @@ const state = {
   user: null,
   tab: 'summary',       // 'summary' | 'stocks' | 'crypto' | 'heatmap' | 'news' | 'crypto-news'
   cryptoView: 'list',   // D25 Phase 2: 'list' | 'drafts' | 'create' | 'edit:SYM:VER'
+  nexusView: 'technical',   // SC-36 W5 D25 view-swap: 'technical' | 'exhaustion' | 'fundamentals'
+  nexusFilter: 'all',       // 'all' | 'nexus' | 'holdings' | 'watchlist'
+  nexusAsOf: '',            // exhaustion date picker; '' = latest
+  nexusData: null,          // cache: { universe, owned:Set, watch:Set }
+  nexusSort: { technical: { k: 'trendScore', dir: -1 }, exhaustion: { k: 'exhScore', dir: -1 }, fundamentals: { k: 'fwdPeg', dir: 1 } },
   stocks: null,         // array of stock rows
   crypto: null,         // array of crypto rows
   summary: null,        // cached summary response
@@ -695,6 +700,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'performance' ? 'active' : ''}" data-tab="performance">Performance</button>
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
         <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Macro Regime &amp; Sector Rotation</button>
+        <button class="tab tab-nexus ${state.tab === 'nexus' ? 'active' : ''}" data-tab="nexus">AI Nexus</button>
         <button class="tab ${state.tab === 'scorecards' ? 'active' : ''}" data-tab="scorecards">Scorecards</button>
         <button class="tab ${state.tab === 'theses' ? 'active' : ''}" data-tab="theses">Stock Theses${state.thesesRevisionCount > 0 ? ` <span class="tab-badge warn">⚠ ${state.thesesRevisionCount}</span>` : ''}</button>
         <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
@@ -1907,6 +1913,7 @@ async function loadActiveTab() {
     }
     if (state.tab === 'summary') {
       await renderSummary();
+      if (!state.demo) injectNexusSummaryCard();
     } else if (state.tab === 'stocks') {
       if (state.stocks == null) {
         const res = await api('/api/holdings/stocks');
@@ -1931,6 +1938,8 @@ async function loadActiveTab() {
       await renderScreener();
     } else if (state.tab === 'sector-rotation') {
       await renderSectorRotation();
+    } else if (state.tab === 'nexus') {
+      await renderNexus();
     } else if (state.tab === 'scorecards') {
       await renderScorecards();
     } else if (state.tab === 'theses') {
@@ -12331,6 +12340,270 @@ document.addEventListener('focusout', (ev) => {
 //   - D30 9e sell-window verdict badge
 
 let _cryptoAdapterListCache = null;
+
+// ===== SC-36 W5 — AI Nexus tab ============================================
+// Visser replication layer: three sub-views (Technical / Exhaustion /
+// Fundamentals) via the D25 view-swap, a shared header strip (benchmarks +
+// theme rollups), filter pills, and held/watchlist badges. Excluded in Demo
+// Mode (Visser-derived universe + methodology must not appear in shareable
+// surfaces).
+
+const NEXUS_STRAPLINE = {
+  technical: 'What to own this week',
+  exhaustion: "What's stretched",
+  fundamentals: "What's cheap",
+};
+
+function nexusMembership(ticker) {
+  const t = (ticker || '').toUpperCase();
+  const d = state.nexusData;
+  if (!d) return 'nexus';
+  if (d.owned.has(t)) return 'holdings';
+  if (d.watch.has(t)) return 'watchlist';
+  return 'nexus';
+}
+function nexusBadge(m) {
+  if (m === 'holdings') return '<span class="nx-badge held" title="In your holdings">📌</span>';
+  if (m === 'watchlist') return '<span class="nx-badge watch" title="On your watchlist">👁</span>';
+  return '';
+}
+function nexusFilterMatch(m, f) {
+  if (f === 'all') return true;
+  if (f === 'nexus') return true; // every row shown here is a nexus member
+  if (f === 'holdings') return m === 'holdings';
+  if (f === 'watchlist') return m === 'watchlist';
+  return true;
+}
+const nxNum = (v, d = 1) => (v == null || v === '' ? '—' : Number(v).toFixed(d));
+const nxPct = (v) => (v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%');
+function nxSetupClass(label) {
+  if (!label) return '';
+  if (label.includes('Buyable')) return 'nx-buy';
+  if (label.includes('Extended')) return 'nx-ext';
+  if (label.includes('Constructive')) return 'nx-con';
+  if (label.includes('Pullback')) return 'nx-pull';
+  if (label.includes('Breakdown')) return 'nx-down';
+  if (label.includes('Weakening')) return 'nx-weak';
+  return 'nx-neu';
+}
+function nxBandClass(b) {
+  return b === 'Extreme' ? 'nx-extreme' : b === 'Elevated' ? 'nx-elevated' : b === 'Moderate' ? 'nx-moderate' : 'nx-low';
+}
+
+function nexusThemeCards(techRows, exhRows) {
+  const byTheme = {};
+  const add = (theme) => { if (!byTheme[theme]) byTheme[theme] = { theme, t: [], e: [], elevated: 0, top: null }; return byTheme[theme]; };
+  for (const r of techRows) { if (r.theme && r.trendScore != null) add(r.theme).t.push(r.trendScore); }
+  for (const r of exhRows) {
+    if (!r.theme || r.exhScore == null) continue;
+    const g = add(r.theme); g.e.push(r.exhScore);
+    if (r.exhScore >= 60) g.elevated++;
+    if (!g.top || r.exhScore > g.top.s) g.top = { ticker: r.ticker, s: r.exhScore };
+  }
+  const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+  const cards = Object.values(byTheme).sort((a, b) => (avg(b.t) || 0) - (avg(a.t) || 0));
+  return cards.map((c) => `
+    <div class="nx-theme-card">
+      <div class="nx-theme-name">${escapeHTML(c.theme)}</div>
+      <div class="nx-theme-row"><span>Trend</span><b>${nxNum(avg(c.t), 0)}</b></div>
+      <div class="nx-theme-row"><span>Exhaustion</span><b>${nxNum(avg(c.e), 0)}</b></div>
+      <div class="nx-theme-row"><span>Elevated+</span><b>${c.elevated}</b></div>
+      <div class="nx-theme-top">top: ${c.top ? escapeHTML(c.top.ticker) + ' ' + nxNum(c.top.s, 0) : '—'}</div>
+    </div>`).join('');
+}
+
+function nexusBenchStrip(benches) {
+  if (!benches || !benches.length) return '';
+  return '<div class="nx-bench">' + benches.map((b) =>
+    `<span class="nx-bench-item"><b>${escapeHTML(b.ticker)}</b> $${nxNum(b.price, 2)} <span class="${(b.ret1w||0) >= 0 ? 'gain' : 'loss'}">${nxPct(b.ret1w)} 1w</span></span>`
+  ).join('') + '</div>';
+}
+
+function nexusSortRows(rows, view) {
+  const s = state.nexusSort[view];
+  const dir = s.dir;
+  return rows.slice().sort((a, b) => {
+    const av = a[s.k], bv = b[s.k];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;   // nulls last
+    if (bv == null) return -1;
+    if (typeof av === 'string') return av.localeCompare(bv) * dir;
+    return (av - bv) * dir;
+  });
+}
+
+function nexusTechTable(rows) {
+  const cols = [['ticker', 'Ticker'], ['trendScore', 'Score'], ['setupLabel', 'Setup'], ['price', 'Price'], ['ret1m', '1M%'], ['ret3m', '3M%'], ['rsi14', 'RSI'], ['vs50d', 'vs50D'], ['vs200d', 'vs200D'], ['rsRank', 'RS#']];
+  return nexusTable('technical', cols, rows, (r) => `
+    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
+    <td class="num"><span class="nx-score">${nxNum(r.trendScore, 0)}</span></td>
+    <td><span class="nx-setup ${nxSetupClass(r.setupLabel)}">${escapeHTML(r.setupLabel || '—')}</span></td>
+    <td class="num">${nxNum(r.price, 2)}</td>
+    <td class="num ${(r.ret1m||0) >= 0 ? 'gain' : 'loss'}">${nxPct(r.ret1m)}</td>
+    <td class="num ${(r.ret3m||0) >= 0 ? 'gain' : 'loss'}">${nxPct(r.ret3m)}</td>
+    <td class="num">${nxNum(r.rsi14, 0)}</td>
+    <td class="num">${nxPct(r.vs50d)}</td>
+    <td class="num">${nxPct(r.vs200d)}</td>
+    <td class="num">${r.rsRank == null ? '—' : '#' + r.rsRank}</td>`);
+}
+
+function nexusExhTable(rows) {
+  const cols = [['ticker', 'Ticker'], ['exhScore', 'Exh'], ['band', 'Band'], ['rsi14', 'RSI14'], ['williamsR', '%R'], ['tdScore', 'TD'], ['ret1m', '1M%'], ['atrPct', 'ATR%'], ['dataWtPct', 'Wt%']];
+  return nexusTable('exhaustion', cols, rows, (r) => `
+    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
+    <td class="num"><span class="nx-score">${nxNum(r.exhScore, 0)}</span></td>
+    <td><span class="nx-band ${nxBandClass(r.band)}">${escapeHTML(r.band || '—')}</span></td>
+    <td class="num">${nxNum(r.rsi14, 0)}</td>
+    <td class="num">${nxNum(r.williamsR, 0)}</td>
+    <td class="num">${nxNum(r.tdScore, 0)}</td>
+    <td class="num ${(r.ret1m||0) >= 0 ? 'gain' : 'loss'}">${nxPct(r.ret1m)}</td>
+    <td class="num">${nxNum(r.atrPct, 1)}</td>
+    <td class="num">${r.dataWtPct != null && r.dataWtPct < 100 ? '<span class="nx-lowwt">' + nxNum(r.dataWtPct, 0) + '</span>' : nxNum(r.dataWtPct, 0)}</td>`);
+}
+
+function nexusFundTable(rows) {
+  const cols = [['theme', 'Theme'], ['ticker', 'Ticker'], ['fwdPeg', 'Fwd PEG'], ['fwdPe', 'Fwd P/E'], ['nextFyEpsGrowth', 'Growth'], ['marketCap', 'Mkt Cap'], ['dataStatus', 'Status']];
+  return nexusTable('fundamentals', cols, rows, (r) => {
+    const unstable = r.dataStatus === 'UNSTABLE_BASE';
+    const pegCell = r.fwdPeg == null ? '—' : nxNum(r.fwdPeg, 2) + (unstable ? ' <span class="nx-warn" title="Unstable growth base — PEG hypersensitive">⚠</span>' : '');
+    return `
+    <td class="nx-theme-cell">${escapeHTML(r.theme || '—')}</td>
+    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
+    <td class="num">${pegCell}</td>
+    <td class="num">${nxNum(r.fwdPe, 1)}</td>
+    <td class="num">${r.nextFyEpsGrowth == null ? '—' : (r.nextFyEpsGrowth * 100).toFixed(0) + '%'}</td>
+    <td class="num">${r.marketCap == null ? '—' : '$' + fmtCompact(r.marketCap)}</td>
+    <td><span class="nx-status nx-st-${(r.dataStatus || 'ok').toLowerCase()}">${escapeHTML(r.dataStatus || 'OK')}</span></td>`;
+  });
+}
+
+function nexusTable(view, cols, rows, rowFn) {
+  const s = state.nexusSort[view];
+  const head = cols.map(([k, label]) =>
+    `<th data-nxsort="${k}" class="nx-th ${s.k === k ? 'sorted' : ''}">${label}${s.k === k ? (s.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('');
+  const body = rows.length
+    ? rows.map((r) => `<tr>${rowFn(r)}</tr>`).join('')
+    : `<tr><td colspan="${cols.length}" class="empty">no rows</td></tr>`;
+  return `<table class="nx-table" data-nxview="${view}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function fmtCompact(n) {
+  const a = Math.abs(n);
+  if (a >= 1e12) return (n / 1e12).toFixed(1) + 'T';
+  if (a >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (a >= 1e6) return (n / 1e6).toFixed(0) + 'M';
+  return String(Math.round(n));
+}
+
+async function renderNexus() {
+  const content = $('#content');
+  if (state.demo) {
+    content.innerHTML = '<div class="empty">🔒 AI Nexus is hidden in Demo Mode.</div>';
+    return;
+  }
+  content.innerHTML = '<div class="empty">loading…</div>';
+
+  // Membership sets (client-side join with holdings + watchlist).
+  if (!state.nexusData) {
+    const [uni, stocks, watch] = await Promise.all([
+      api('/api/nexus/universe'),
+      api('/api/holdings/stocks').catch(() => ({ holdings: [] })),
+      api('/api/watchlist').catch(() => ({ watchlist: [] })),
+    ]);
+    const owned = new Set((stocks.holdings || []).map((h) => (h.ticker || '').toUpperCase()).filter(Boolean));
+    const watchset = new Set(((watch.watchlist || watch.rows || [])).map((w) => (w.ticker || '').toUpperCase()).filter(Boolean));
+    state.nexusData = { universe: uni.universe || [], owned, watch: watchset };
+  }
+
+  const view = state.nexusView;
+  // Header always needs technical (for benchmarks + trend theme avg) + exhaustion.
+  const exhPath = '/api/nexus/exhaustion' + (state.nexusAsOf ? `?as_of=${state.nexusAsOf}` : '');
+  const [tech, exh, fund] = await Promise.all([
+    api('/api/nexus/technical'),
+    api(exhPath),
+    view === 'fundamentals' ? api('/api/nexus/fundamentals') : Promise.resolve(null),
+  ]);
+  const tag = (r) => ({ ...r, _m: nexusMembership(r.ticker) });
+  const techRows = (tech.rows || []).map(tag);
+  const exhRows = (exh.rows || []).map(tag);
+  const fundRows = fund ? (fund.rows || []).map(tag) : [];
+
+  // Active view rows + filter + sort.
+  let active = view === 'technical' ? techRows : view === 'exhaustion' ? exhRows : fundRows;
+  active = active.filter((r) => nexusFilterMatch(r._m, state.nexusFilter));
+  active = nexusSortRows(active, view);
+  const table = view === 'technical' ? nexusTechTable(active) : view === 'exhaustion' ? nexusExhTable(active) : nexusFundTable(active);
+
+  const asOfLabel = view === 'fundamentals' ? (fund && fund.asOf) : (view === 'exhaustion' ? exh.asOf : tech.asOf);
+  const pill = (k, label) => `<button class="nx-pill ${state.nexusFilter === k ? 'active' : ''}" data-nxfilter="${k}">${label}</button>`;
+  const vtab = (k, label) => `<button class="nx-vtab ${state.nexusView === k ? 'active' : ''}" data-nxview="${k}">${label}</button>`;
+
+  // Exhaustion as_of date picker (distinct ingested dates available client-side is awkward; use a date input bound to the exhaustion as_of).
+  let datePicker = '';
+  if (view === 'exhaustion') {
+    datePicker = `<label class="nx-datepick">as of <input type="date" id="nx-asof" value="${escapeHTML(state.nexusAsOf || exh.asOf || '')}"></label>`;
+  }
+
+  content.innerHTML = `
+    <div class="nx-wrap">
+      <div class="nx-head">
+        <h2>AI Nexus <span class="nx-sub">— Visser replication (personal use)</span></h2>
+        ${nexusBenchStrip(tech.benchmarks)}
+      </div>
+      <div class="nx-themes">${nexusThemeCards(techRows, exhRows)}</div>
+      <div class="nx-controls">
+        <div class="nx-vtabs">${vtab('technical', 'Technical')}${vtab('exhaustion', 'Exhaustion')}${vtab('fundamentals', 'Fundamentals')}</div>
+        <div class="nx-strap">${escapeHTML(NEXUS_STRAPLINE[view])}${asOfLabel ? ` · ${escapeHTML(asOfLabel)}` : ''}</div>
+      </div>
+      <div class="nx-filters">
+        ${pill('all', 'All')}${pill('nexus', 'Nexus')}${pill('holdings', '📌 Holdings')}${pill('watchlist', '👁 Watchlist')}
+        ${datePicker}
+        <span class="nx-count">${active.length} names</span>
+      </div>
+      <div class="nx-tablewrap">${table}</div>
+    </div>`;
+
+  // Wire interactions.
+  for (const el of content.querySelectorAll('[data-nxview]')) {
+    if (el.tagName === 'BUTTON') el.addEventListener('click', () => { state.nexusView = el.dataset.nxview; renderNexus(); });
+  }
+  for (const el of content.querySelectorAll('[data-nxfilter]')) {
+    el.addEventListener('click', () => { state.nexusFilter = el.dataset.nxfilter; renderNexus(); });
+  }
+  for (const th of content.querySelectorAll('th[data-nxsort]')) {
+    th.addEventListener('click', () => {
+      const k = th.dataset.nxsort, s = state.nexusSort[view];
+      if (s.k === k) s.dir = -s.dir; else { s.k = k; s.dir = (k === 'ticker' || k === 'theme' || k === 'fwdPeg' || k === 'fwdPe') ? 1 : -1; }
+      renderNexus();
+    });
+  }
+  const dp = content.querySelector('#nx-asof');
+  if (dp) dp.addEventListener('change', () => { state.nexusAsOf = dp.value; renderNexus(); });
+}
+
+// Summary-tab card: held tickers at Elevated+ exhaustion (≥60). Hidden (not
+// rendered) when none qualify. Best-effort; never blocks the summary.
+async function injectNexusSummaryCard() {
+  try {
+    const exh = await api('/api/nexus/exhaustion');
+    let owned = state.nexusData && state.nexusData.owned;
+    if (!owned) {
+      const stocks = await api('/api/holdings/stocks').catch(() => ({ holdings: [] }));
+      owned = new Set((stocks.holdings || []).map((h) => (h.ticker || '').toUpperCase()).filter(Boolean));
+    }
+    const hot = (exh.rows || [])
+      .filter((r) => owned.has((r.ticker || '').toUpperCase()) && r.exhScore != null && r.exhScore >= 60)
+      .sort((a, b) => b.exhScore - a.exhScore);
+    if (!hot.length) return;
+    const items = hot.map((r) => `<span class="nx-sum-item ${nxBandClass(r.band)}">${escapeHTML(r.ticker)} <b>${nxNum(r.exhScore, 0)}</b> ${escapeHTML(r.band || '')}</span>`).join('');
+    const card = `<div class="nx-sum-card"><div class="nx-sum-title">⚠ Nexus exhaustion — holdings stretched (≥60)</div><div class="nx-sum-items">${items}</div></div>`;
+    const content = $('#content');
+    if (!content || state.tab !== 'summary') return;
+    content.insertAdjacentHTML('afterbegin', card);
+    const el = content.querySelector('.nx-sum-card');
+    if (el) el.addEventListener('click', () => switchTab('nexus'));
+  } catch (_) { /* best-effort */ }
+}
 
 async function renderCryptoTheses() {
   // D25 Phase 2: dispatch on state.cryptoView for create/drafts/edit pages

@@ -186,6 +186,51 @@ func (s *Store) NexusSnapshotDates(ctx context.Context, table, source string) ([
 	return out, rows.Err()
 }
 
+// BenchmarkSnapshot is the latest close + short-window returns for a benchmark.
+type BenchmarkSnapshot struct {
+	Ticker string   `json:"ticker"`
+	Price  float64  `json:"price"`
+	Ret1W  *float64 `json:"ret1w"`
+	Ret1M  *float64 `json:"ret1m"`
+}
+
+// GetBenchmarkSnapshot returns SPY/QQQ/SOXX latest close + 1w/1m returns from
+// the benchmark daily_bars, for the Nexus header strip.
+func (s *Store) GetBenchmarkSnapshot(ctx context.Context) ([]BenchmarkSnapshot, error) {
+	out := make([]BenchmarkSnapshot, 0, 3)
+	for _, t := range []string{"SPY", "QQQ", "SOXX"} {
+		rows, err := s.DB.QueryContext(ctx,
+			`SELECT close FROM daily_bars WHERE ticker = ? AND kind = 'benchmark' ORDER BY date DESC LIMIT 22`, t)
+		if err != nil {
+			return nil, err
+		}
+		var closes []float64
+		for rows.Next() {
+			var c float64
+			if err := rows.Scan(&c); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			closes = append(closes, c)
+		}
+		rows.Close()
+		if len(closes) == 0 {
+			continue
+		}
+		b := BenchmarkSnapshot{Ticker: t, Price: closes[0]}
+		if len(closes) > 5 && closes[5] != 0 {
+			v := (closes[0]/closes[5] - 1) * 100
+			b.Ret1W = &v
+		}
+		if len(closes) > 21 && closes[21] != 0 {
+			v := (closes[0]/closes[21] - 1) * 100
+			b.Ret1M = &v
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
 // --- technical snapshots ---------------------------------------------------
 
 // ReplaceNexusTechnical wipes then re-inserts the (as_of, source) slice in one tx.
