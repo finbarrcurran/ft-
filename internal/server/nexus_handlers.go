@@ -19,12 +19,17 @@ import (
 
 var nexusDateRe = regexp.MustCompile(`(\d{4}-\d{2}-\d{2})`)
 
+// nexusSource resolves the snapshot source. The live product shows FT's own
+// nightly-recomputed rows ('computed'); 'upload' (the ingested Visser sheets)
+// is the seed/verification reference. Explicit ?source= wins; otherwise default
+// to computed, with an upload fallback handled per-handler when computed is empty.
 func nexusSource(r *http.Request) string {
 	if s := r.URL.Query().Get("source"); s != "" {
 		return s
 	}
-	return "upload"
+	return "computed"
 }
+func nexusSourceExplicit(r *http.Request) bool { return r.URL.Query().Get("source") != "" }
 
 // POST /api/nexus/upload — multipart, one or more "file" parts. An optional
 // "as_of" form value (or a YYYY-MM-DD in the filename) supplies the date for
@@ -102,6 +107,13 @@ func (s *Server) handleNexusTechnical(w http.ResponseWriter, r *http.Request) {
 		if mapStoreError(w, err) {
 			return
 		}
+		if d == "" && !nexusSourceExplicit(r) {
+			src = "upload"
+			d, err = s.store.LatestNexusTechnicalAsOf(r.Context(), src)
+			if mapStoreError(w, err) {
+				return
+			}
+		}
 		asOf = d
 	}
 	rows, err := s.store.ListNexusTechnical(r.Context(), asOf, src)
@@ -126,6 +138,13 @@ func (s *Server) handleNexusExhaustion(w http.ResponseWriter, r *http.Request) {
 		if mapStoreError(w, err) {
 			return
 		}
+		if d == "" && !nexusSourceExplicit(r) {
+			src = "upload"
+			d, err = s.store.LatestNexusExhaustionAsOf(r.Context(), src)
+			if mapStoreError(w, err) {
+				return
+			}
+		}
 		asOf = d
 	}
 	rows, err := s.store.ListNexusExhaustion(r.Context(), asOf, src)
@@ -138,7 +157,9 @@ func (s *Server) handleNexusExhaustion(w http.ResponseWriter, r *http.Request) {
 			rows[i].Company, rows[i].Theme = u.Company, u.Theme
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"asOf": asOf, "source": src, "rows": rows})
+	// Available snapshot dates for the as-of dropdown.
+	dates, _ := s.store.NexusSnapshotDates(r.Context(), "nexus_exhaustion", src)
+	writeJSON(w, http.StatusOK, map[string]any{"asOf": asOf, "source": src, "rows": rows, "dates": dates})
 }
 
 func (s *Server) handleNexusFundamentals(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +169,13 @@ func (s *Server) handleNexusFundamentals(w http.ResponseWriter, r *http.Request)
 		d, err := s.store.LatestNexusFundamentalsAsOf(r.Context(), src)
 		if mapStoreError(w, err) {
 			return
+		}
+		if d == "" && !nexusSourceExplicit(r) {
+			src = "upload"
+			d, err = s.store.LatestNexusFundamentalsAsOf(r.Context(), src)
+			if mapStoreError(w, err) {
+				return
+			}
 		}
 		asOf = d
 	}

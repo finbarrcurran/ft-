@@ -5506,7 +5506,7 @@ body.demo-active [data-tab="nexus"] { display: none; }
 .nx-pill { padding: 0.3rem 0.7rem; border: 1px solid rgb(var(--color-border)); background: transparent; color: rgb(var(--color-text-muted)); border-radius: 999px; cursor: pointer; font-size: 0.8rem; }
 .nx-pill.active { background: rgb(var(--color-accent) / 0.15); color: rgb(var(--color-accent)); border-color: rgb(var(--color-accent) / 0.5); }
 .nx-datepick { font-size: 0.8rem; color: rgb(var(--color-text-muted)); }
-.nx-datepick input { background: rgb(var(--color-bg)); color: rgb(var(--color-text)); border: 1px solid rgb(var(--color-border)); border-radius: 5px; padding: 0.2rem 0.4rem; }
+.nx-datepick input, .nx-datepick select { background: rgb(var(--color-bg)); color: rgb(var(--color-text)); border: 1px solid rgb(var(--color-border)); border-radius: 5px; padding: 0.2rem 0.4rem; }
 .nx-count { margin-left: auto; color: rgb(var(--color-text-dim)); font-size: 0.8rem; }
 
 .nx-tablewrap { overflow-x: auto; }

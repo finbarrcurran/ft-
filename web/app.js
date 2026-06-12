@@ -12596,8 +12596,11 @@ async function renderNexus() {
 
   // Exhaustion as_of date picker (distinct ingested dates available client-side is awkward; use a date input bound to the exhaustion as_of).
   let datePicker = '';
-  if (view === 'exhaustion') {
-    datePicker = `<label class="nx-datepick">as of <input type="date" id="nx-asof" value="${escapeHTML(state.nexusAsOf || exh.asOf || '')}"></label>`;
+  if (view === 'exhaustion' && exh.dates && exh.dates.length) {
+    const cur = state.nexusAsOf || exh.asOf || '';
+    datePicker = `<label class="nx-datepick">as of <select id="nx-asof">` +
+      exh.dates.slice().reverse().map((d) => `<option value="${escapeHTML(d)}"${d === cur ? ' selected' : ''}>${escapeHTML(d)}</option>`).join('') +
+      `</select></label>`;
   }
 
   content.innerHTML = `
