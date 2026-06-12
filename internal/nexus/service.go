@@ -159,6 +159,120 @@ func (s *Service) UploadDates(ctx context.Context, table string) ([]string, erro
 	return s.st.NexusSnapshotDates(ctx, table, "upload")
 }
 
+// RefreshUniverseBars fetches fresh daily OHLC for the universe + SPY/QQQ/SOXX
+// benchmarks (freshness-aware skip). Shared by the W4 daily cron.
+func (s *Service) RefreshUniverseBars(ctx context.Context, rng string, gap time.Duration, freshCutoff string) (refreshed, skipped, failed int) {
+	type job struct{ ticker, kind string }
+	jobs := []job{{"SPY", "benchmark"}, {"QQQ", "benchmark"}, {"SOXX", "benchmark"}}
+	uni, err := s.st.ListNexusUniverse(ctx)
+	if err != nil {
+		return 0, 0, 0
+	}
+	for _, u := range uni {
+		jobs = append(jobs, job{u.Ticker, "stock"})
+	}
+	for _, j := range jobs {
+		if n, _ := s.st.CountDailyBars(ctx, j.ticker, j.kind); n >= 400 {
+			if last, _ := s.st.LastDailyBarDate(ctx, j.ticker, j.kind); last >= freshCutoff {
+				skipped++
+				continue
+			}
+		}
+		bars, ferr := market.FetchYahooDailyBars(ctx, j.ticker, rng)
+		if ferr != nil {
+			failed++
+		} else {
+			rows := make([]store.DailyBarRow, 0, len(bars))
+			for _, b := range bars {
+				rows = append(rows, store.DailyBarRow{Date: b.Date, Open: b.Open, High: b.High, Low: b.Low, Close: b.Close, Volume: b.Volume})
+			}
+			if serr := s.st.BulkInsertDailyBars(ctx, j.ticker, j.kind, rows); serr != nil {
+				failed++
+			} else {
+				refreshed++
+			}
+		}
+		if gap > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(gap):
+			}
+		}
+	}
+	return
+}
+
+// NexusDailyResult summarises a daily cron run + any anomalies for monitoring.
+type NexusDailyResult struct {
+	AsOf       string
+	Trend      int
+	Exhaustion int
+	BarsOK     int
+	BarsFailed int
+	Anomalies  []string
+}
+
+// NexusDaily is the W4 22:30-UTC job: refresh universe bars, compute Trend +
+// Exhaustion for today, and surface anomalies for the bot to relay.
+func (s *Service) NexusDaily(ctx context.Context) (*NexusDailyResult, error) {
+	today := time.Now().UTC().Format("2006-01-02")
+	freshCutoff := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
+	ok, _, failed := s.RefreshUniverseBars(ctx, "1y", 700*time.Millisecond, freshCutoff)
+	tech, exh, err := s.ComputeForDate(ctx, today)
+	res := &NexusDailyResult{AsOf: today, BarsOK: ok, BarsFailed: failed}
+	if err != nil {
+		res.Anomalies = append(res.Anomalies, "compute failed: "+err.Error())
+		return res, err
+	}
+	res.Trend, res.Exhaustion = tech.Computed, exh.Computed
+	res.Anomalies = s.dailyAnomalies(ctx, today, tech, exh, failed)
+	return res, nil
+}
+
+// NexusWeeklyFundamentals is the W4 Sunday job: recompute Forward PEG.
+func (s *Service) NexusWeeklyFundamentals(ctx context.Context) (*ComputeResult, error) {
+	today := time.Now().UTC().Format("2006-01-02")
+	return s.ComputeFundamentals(ctx, today, 700*time.Millisecond)
+}
+
+// dailyAnomalies returns anomaly-only health flags (empty when all-clear):
+// bar fetch failures, >10% of exhaustion rows with missing model weight, a
+// degenerate (collapsed) Trend-score distribution, or a degraded compute.
+func (s *Service) dailyAnomalies(ctx context.Context, asOf string, tech, exh *ComputeResult, barsFailed int) []string {
+	var a []string
+	if barsFailed > 5 {
+		a = append(a, fmt.Sprintf("%d universe bar fetches failed", barsFailed))
+	}
+	if tech.Computed < 90 {
+		a = append(a, fmt.Sprintf("only %d Trend rows computed (degraded %d)", tech.Computed, len(tech.Degraded)))
+	}
+	rows, err := s.st.ListNexusExhaustion(ctx, asOf, "computed")
+	if err == nil && len(rows) > 0 {
+		lowWt := 0
+		for _, r := range rows {
+			if r.DataWtPct != nil && *r.DataWtPct < 100 {
+				lowWt++
+			}
+		}
+		if float64(lowWt)/float64(len(rows)) > 0.10 {
+			a = append(a, fmt.Sprintf("%d/%d exhaustion rows have incomplete model weight", lowWt, len(rows)))
+		}
+	}
+	if t, err := s.st.ListNexusTechnical(ctx, asOf, "computed"); err == nil && len(t) >= 10 {
+		var vals []float64
+		for _, r := range t {
+			if r.TrendScore != nil {
+				vals = append(vals, float64(*r.TrendScore))
+			}
+		}
+		if pstdev(vals) < 5 {
+			a = append(a, "Trend-score distribution collapsed (std-dev < 5) — degenerate input signal")
+		}
+	}
+	return a
+}
+
 // Ingest parses one uploaded xlsx and replaces the matching (as_of, 'upload')
 // snapshot slice. asOfHint supplies the date for Technical sheets (which carry
 // no internal date); Exhaustion/Fundamentals self-date and ignore it.

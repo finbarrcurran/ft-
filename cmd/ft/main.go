@@ -453,6 +453,44 @@ func runServe() {
 		})
 	}()
 
+	// SC-36 W4 — AI Nexus compute crons (pinned UTC per the locked decisions).
+	// Daily 22:30 UTC: refresh universe + benchmark bars, then compute Trend +
+	// Exhaustion for today. Staggered 30 min past the 22:00 sector-rotation job.
+	// Weekly (Sunday) 22:45 UTC: recompute Forward PEG. Anomaly-only health
+	// flags are logged at WARN (relayed to Telegram via the bot's alert poll).
+	go func() {
+		nx := nexus.New(st)
+		scheduleAt(bgCtx, 22, 30, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 30*time.Minute)
+			defer cancel()
+			res, err := nx.NexusDaily(ctx)
+			if err != nil {
+				slog.Error("nexus daily compute", "err", err)
+				return
+			}
+			slog.Info("nexus daily compute", "asOf", res.AsOf,
+				"trend", res.Trend, "exhaustion", res.Exhaustion,
+				"barsOK", res.BarsOK, "barsFailed", res.BarsFailed)
+			for _, an := range res.Anomalies {
+				slog.Warn("nexus anomaly", "asOf", res.AsOf, "detail", an)
+			}
+		})
+		scheduleAt(bgCtx, 22, 45, func() {
+			if time.Now().UTC().Weekday() != time.Sunday {
+				return
+			}
+			ctx, cancel := context.WithTimeout(bgCtx, 30*time.Minute)
+			defer cancel()
+			res, err := nx.NexusWeeklyFundamentals(ctx)
+			if err != nil {
+				slog.Error("nexus weekly fundamentals", "err", err)
+				return
+			}
+			slog.Info("nexus weekly fundamentals", "asOf", res.AsOf,
+				"rows", res.Computed, "degraded", len(res.Degraded))
+		})
+	}()
+
 	// Spec 15 — Thesis Library sync. Periodically `git pull` the
 	// cross_sector_research clone and re-index. No-op if FT_GITHUB_TOKEN
 	// isn't set (graceful degradation in dev).
