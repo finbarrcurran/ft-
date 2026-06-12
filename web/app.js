@@ -12432,55 +12432,111 @@ function nexusSortRows(rows, view) {
   });
 }
 
+// SC-36.1 — plain-language column tooltips (implemented verbatim from the
+// Claude.ai copy doc 2026-06-11). Shared tooltips cover grouped columns.
+const NX_TIP = {
+  trend: '0–100 health check of the trend. Ten yes/no tests (above key moving averages, rising averages, positive returns, healthy RSI, beating the S&P, volume support). Higher = stronger, more established uptrend.',
+  setup: 'What the score means in practice — from "Strong Uptrend / Buyable" down to "Breakdown Risk". "Strong but Extended" = great trend, but stretched right now; don\'t chase.',
+  vs: 'How far price sits above (+) or below (−) its 20-day, 50-day, and 200-day average price. Above all three = trend intact.',
+  slope: 'Whether the average itself is rising or falling. A rising 200-day is a long-term uptrend; price above a falling average is less trustworthy.',
+  ret: 'Price change over the last week, month, and three months.',
+  rsi: 'Momentum gauge 0–100. 50–70 = healthy. Above ~72 = overheated; below ~45 = washed out.',
+  rsSpy: "Last month's return minus the S&P 500's. Positive = beating the market.",
+  rsRank: "Where this name's market-beating strength ranks inside the 100-stock universe (1 = strongest).",
+  volT: "Today's trading volume vs its 20-day average. Above 1.0 = more interest than usual.",
+  atrT: 'Typical daily price swing as a % of price — how jumpy the stock is.',
+  dist52: 'Distance below the highest price of the past year. Near 0% = at the highs.',
+  exh: '1–100 composite of eleven "how stretched is this move?" signals. ≥75 Extreme, 60–74 Elevated, 40–59 Moderate, <40 Low. High = the rally looks tired; not a sell signal by itself, but a poor place to chase.',
+  band: 'The score in words: Extreme / Elevated / Moderate / Low.',
+  rsiE: 'Momentum over 14 days (the standard gauge) and 5 days (the short-fuse version). Both hot at once = a sprint that usually needs a breather.',
+  wr: 'Williams %R: where price closed inside its recent range. Pinned near 0 = closing at the very top of the range day after day.',
+  pos: 'Where price sits in its 20-day high–low range. 100% = at the top of the range.',
+  ext: 'How many "typical daily swings" price is above its 20- and 50-day averages. The further above, the more rubber-band-stretched the move.',
+  retVol: "Last month's gain measured against the stock's normal choppiness. Above ~2× = an unusually fast move for this name.",
+  imp: "The last five days' move in units of typical daily swing — did it just go vertical?",
+  volE: 'Volume vs its 20-day average on an up day. Spikes can mark buying climaxes.',
+  atrExp: 'Whether daily swings themselves are widening vs the last 60 days — late-stage moves often get wilder.',
+  td: 'Streak counters (Tom DeMark-style): how many days in a row price keeps beating its recent self. 9 (setup) or 13 (countdown) = the streak is fully mature and often pauses or reverses. Score blends both to 0–100.',
+  dataWt: 'How much of the model had data available. Below 100% = some inputs missing; treat the score with more caution.',
+  mktcap: 'Total value of the company at today\'s price.',
+  fwdpe: "Today's price ÷ next year's expected earnings per share. Lower = paying less per euro of expected profit.",
+  growth: 'How much earnings per share are expected to grow next fiscal year vs this one.',
+  peg: 'Forward P/E ÷ expected growth. The "growth-adjusted" price tag: under ~1 historically = cheap for the growth on offer. Ranked within each theme — compare against peers, not across themes.',
+  unstable: 'This PEG is built on tiny or swinging earnings, so the ratio is mathematically fragile — read it as indicative only.',
+  status: 'Estimate missing or negative earnings base; ratio not meaningful. Row kept for completeness.',
+};
+const NX_STRAP_TIP = {
+  technical: "Visser-style weekly trend dashboard, computed nightly from FT's own price data.",
+  exhaustion: 'Measures how stretched recent gains are — high scores flag rallies that usually need to cool off.',
+  fundamentals: "Valuation screen: what you pay today for next year's expected earnings, ranked within theme.",
+};
+const nxCls = (v) => (v == null ? '' : (v >= 0 ? 'gain' : 'loss'));
+
 function nexusTechTable(rows) {
-  const cols = [['ticker', 'Ticker'], ['trendScore', 'Score'], ['setupLabel', 'Setup'], ['price', 'Price'], ['ret1m', '1M%'], ['ret3m', '3M%'], ['rsi14', 'RSI'], ['vs50d', 'vs50D'], ['vs200d', 'vs200D'], ['rsRank', 'RS#']];
+  const cols = [['ticker', 'Ticker', ''], ['trendScore', 'Score', NX_TIP.trend], ['setupLabel', 'Setup', NX_TIP.setup], ['ret1w', '1W', NX_TIP.ret], ['ret1m', '1M', NX_TIP.ret], ['ret3m', '3M', NX_TIP.ret], ['rsi14', 'RSI', NX_TIP.rsi], ['vs20d', 'vs20D', NX_TIP.vs], ['vs50d', 'vs50D', NX_TIP.vs], ['vs200d', 'vs200D', NX_TIP.vs], ['slope50d', '50D Slp', NX_TIP.slope], ['slope200d', '200D Slp', NX_TIP.slope], ['rsSpy', 'RS·SPY', NX_TIP.rsSpy], ['rsRank', 'RS#', NX_TIP.rsRank], ['volRatio', 'Vol×', NX_TIP.volT], ['atrPct', 'ATR%', NX_TIP.atrT], ['dist52wHi', '52W Hi', NX_TIP.dist52], ['price', 'Price', '']];
   return nexusTable('technical', cols, rows, (r) => `
     <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
     <td class="num"><span class="nx-score">${nxNum(r.trendScore, 0)}</span></td>
     <td><span class="nx-setup ${nxSetupClass(r.setupLabel)}">${escapeHTML(r.setupLabel || '—')}</span></td>
-    <td class="num">${nxNum(r.price, 2)}</td>
-    <td class="num ${(r.ret1m||0) >= 0 ? 'gain' : 'loss'}">${nxPct(r.ret1m)}</td>
-    <td class="num ${(r.ret3m||0) >= 0 ? 'gain' : 'loss'}">${nxPct(r.ret3m)}</td>
+    <td class="num ${nxCls(r.ret1w)}">${nxPct(r.ret1w)}</td>
+    <td class="num ${nxCls(r.ret1m)}">${nxPct(r.ret1m)}</td>
+    <td class="num ${nxCls(r.ret3m)}">${nxPct(r.ret3m)}</td>
     <td class="num">${nxNum(r.rsi14, 0)}</td>
+    <td class="num">${nxPct(r.vs20d)}</td>
     <td class="num">${nxPct(r.vs50d)}</td>
     <td class="num">${nxPct(r.vs200d)}</td>
-    <td class="num">${r.rsRank == null ? '—' : '#' + r.rsRank}</td>`);
+    <td class="num ${nxCls(r.slope50d)}">${nxPct(r.slope50d)}</td>
+    <td class="num ${nxCls(r.slope200d)}">${nxPct(r.slope200d)}</td>
+    <td class="num ${nxCls(r.rsSpy)}">${nxPct(r.rsSpy)}</td>
+    <td class="num">${r.rsRank == null ? '—' : '#' + r.rsRank}</td>
+    <td class="num">${nxNum(r.volRatio, 2)}</td>
+    <td class="num">${nxNum(r.atrPct, 1)}</td>
+    <td class="num">${nxPct(r.dist52wHi)}</td>
+    <td class="num">${nxNum(r.price, 2)}</td>`);
 }
 
 function nexusExhTable(rows) {
-  const cols = [['ticker', 'Ticker'], ['exhScore', 'Exh'], ['band', 'Band'], ['rsi14', 'RSI14'], ['williamsR', '%R'], ['tdScore', 'TD'], ['ret1m', '1M%'], ['atrPct', 'ATR%'], ['dataWtPct', 'Wt%']];
+  const cols = [['ticker', 'Ticker', ''], ['exhScore', 'Exh', NX_TIP.exh], ['band', 'Band', NX_TIP.band], ['rsi14', 'RSI14', NX_TIP.rsiE], ['rsi5', 'RSI5', NX_TIP.rsiE], ['williamsR', 'W%R', NX_TIP.wr], ['pos20d', '20D Pos', NX_TIP.pos], ['ext20dAtr', '20D Ext', NX_TIP.ext], ['ext50dAtr', '50D Ext', NX_TIP.ext], ['retVol1m', 'Ret/Vol', NX_TIP.retVol], ['imp5dAtr', '5D Imp', NX_TIP.imp], ['volRatio', 'Vol×', NX_TIP.volE], ['atrExpansion', 'ATR Exp', NX_TIP.atrExp], ['tdSetup', 'TD-S', NX_TIP.td], ['tdCountdown', 'TD-C', NX_TIP.td], ['tdScore', 'TD', NX_TIP.td], ['dataWtPct', 'Wt%', NX_TIP.dataWt]];
   return nexusTable('exhaustion', cols, rows, (r) => `
     <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
     <td class="num"><span class="nx-score">${nxNum(r.exhScore, 0)}</span></td>
     <td><span class="nx-band ${nxBandClass(r.band)}">${escapeHTML(r.band || '—')}</span></td>
     <td class="num">${nxNum(r.rsi14, 0)}</td>
+    <td class="num">${nxNum(r.rsi5, 0)}</td>
     <td class="num">${nxNum(r.williamsR, 0)}</td>
+    <td class="num">${nxNum(r.pos20d, 0)}</td>
+    <td class="num">${nxNum(r.ext20dAtr, 1)}</td>
+    <td class="num">${nxNum(r.ext50dAtr, 1)}</td>
+    <td class="num">${nxNum(r.retVol1m, 2)}</td>
+    <td class="num">${nxNum(r.imp5dAtr, 1)}</td>
+    <td class="num">${nxNum(r.volRatio, 2)}</td>
+    <td class="num">${nxNum(r.atrExpansion, 2)}</td>
+    <td class="num">${r.tdSetup == null ? '—' : r.tdSetup}</td>
+    <td class="num">${r.tdCountdown == null ? '—' : r.tdCountdown}</td>
     <td class="num">${nxNum(r.tdScore, 0)}</td>
-    <td class="num ${(r.ret1m||0) >= 0 ? 'gain' : 'loss'}">${nxPct(r.ret1m)}</td>
-    <td class="num">${nxNum(r.atrPct, 1)}</td>
     <td class="num">${r.dataWtPct != null && r.dataWtPct < 100 ? '<span class="nx-lowwt">' + nxNum(r.dataWtPct, 0) + '</span>' : nxNum(r.dataWtPct, 0)}</td>`);
 }
 
 function nexusFundTable(rows) {
-  const cols = [['theme', 'Theme'], ['ticker', 'Ticker'], ['fwdPeg', 'Fwd PEG'], ['fwdPe', 'Fwd P/E'], ['nextFyEpsGrowth', 'Growth'], ['marketCap', 'Mkt Cap'], ['dataStatus', 'Status']];
+  const cols = [['theme', 'Theme', ''], ['ticker', 'Ticker', ''], ['marketCap', 'Mkt Cap', NX_TIP.mktcap], ['fwdPe', 'Fwd P/E', NX_TIP.fwdpe], ['nextFyEpsGrowth', 'NTM Growth', NX_TIP.growth], ['fwdPeg', 'Fwd PEG', NX_TIP.peg], ['dataStatus', 'Status', NX_TIP.status]];
   return nexusTable('fundamentals', cols, rows, (r) => {
     const unstable = r.dataStatus === 'UNSTABLE_BASE';
-    const pegCell = r.fwdPeg == null ? '—' : nxNum(r.fwdPeg, 2) + (unstable ? ' <span class="nx-warn" title="Unstable growth base — PEG hypersensitive">⚠</span>' : '');
+    const pegCell = r.fwdPeg == null ? '—' : nxNum(r.fwdPeg, 2) + (unstable ? ` <span class="nx-warn" title="${escapeHTML(NX_TIP.unstable)}">⚠</span>` : '');
     return `
     <td class="nx-theme-cell">${escapeHTML(r.theme || '—')}</td>
     <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
-    <td class="num">${pegCell}</td>
+    <td class="num">${r.marketCap == null ? '—' : '$' + fmtCompact(r.marketCap)}</td>
     <td class="num">${nxNum(r.fwdPe, 1)}</td>
     <td class="num">${r.nextFyEpsGrowth == null ? '—' : (r.nextFyEpsGrowth * 100).toFixed(0) + '%'}</td>
-    <td class="num">${r.marketCap == null ? '—' : '$' + fmtCompact(r.marketCap)}</td>
+    <td class="num">${pegCell}</td>
     <td><span class="nx-status nx-st-${(r.dataStatus || 'ok').toLowerCase()}">${escapeHTML(r.dataStatus || 'OK')}</span></td>`;
   });
 }
 
 function nexusTable(view, cols, rows, rowFn) {
   const s = state.nexusSort[view];
-  const head = cols.map(([k, label]) =>
-    `<th data-nxsort="${k}" class="nx-th ${s.k === k ? 'sorted' : ''}">${label}${s.k === k ? (s.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('');
+  const head = cols.map(([k, label, tip]) =>
+    `<th data-nxsort="${k}"${tip ? ` title="${escapeHTML(tip)}"` : ''} class="nx-th ${s.k === k ? 'sorted' : ''}">${label}${s.k === k ? (s.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('');
   const body = rows.length
     ? rows.map((r) => `<tr>${rowFn(r)}</tr>`).join('')
     : `<tr><td colspan="${cols.length}" class="empty">no rows</td></tr>`;
@@ -12553,7 +12609,7 @@ async function renderNexus() {
       <div class="nx-themes">${nexusThemeCards(techRows, exhRows)}</div>
       <div class="nx-controls">
         <div class="nx-vtabs">${vtab('technical', 'Technical')}${vtab('exhaustion', 'Exhaustion')}${vtab('fundamentals', 'Fundamentals')}</div>
-        <div class="nx-strap">${escapeHTML(NEXUS_STRAPLINE[view])}${asOfLabel ? ` · ${escapeHTML(asOfLabel)}` : ''}</div>
+        <div class="nx-strap" title="${escapeHTML(NX_STRAP_TIP[view])}">${escapeHTML(NEXUS_STRAPLINE[view])}${asOfLabel ? ` · ${escapeHTML(asOfLabel)}` : ''}</div>
       </div>
       <div class="nx-filters">
         ${pill('all', 'All')}${pill('nexus', 'Nexus')}${pill('holdings', '📌 Holdings')}${pill('watchlist', '👁 Watchlist')}
