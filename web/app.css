@@ -5544,3 +5544,10 @@ body.demo-active [data-tab="nexus"] { display: none; }
 .nx-sum-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem; color: rgb(255 204 64); }
 .nx-sum-items { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .nx-sum-item { font-size: 0.78rem; padding: 0.15rem 0.5rem; border-radius: 4px; border: 1px solid rgb(var(--color-border)); }
+
+/* SC-36.2 — theme-card click filter + thesis column */
+.nx-theme-card { cursor: pointer; transition: border-color .12s, background .12s; }
+.nx-theme-card:hover { border-color: rgb(var(--color-border-strong)); }
+.nx-theme-card.selected { border-color: rgb(var(--color-accent)); background: rgb(var(--color-accent) / 0.08); }
+.nx-themeclear { padding: 0.3rem 0.7rem; border: 1px solid rgb(var(--color-accent) / 0.5); background: rgb(var(--color-accent) / 0.15); color: rgb(var(--color-accent)); border-radius: 999px; cursor: pointer; font-size: 0.8rem; }
+.nx-table td.nx-thesis { color: rgb(var(--color-text-muted)); }
