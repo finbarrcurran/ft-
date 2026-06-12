@@ -80,6 +80,8 @@ func main() {
 		runNexusBackfill(os.Args[2:])
 	case "nexus-compute":
 		runNexusCompute(os.Args[2:])
+	case "nexus-fundamentals":
+		runNexusFundamentals(os.Args[2:])
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
 	default:
@@ -930,4 +932,27 @@ func runNexusCompute(args []string) {
 			d, tech.Computed, len(tech.Degraded), exh.Computed, len(exh.Degraded))
 	}
 	fmt.Printf("nexus-compute done. %d date(s).\n", len(dates))
+}
+
+// runNexusFundamentals fetches Yahoo earningsTrend per universe member and
+// writes computed Forward-PEG snapshot rows. SC-36 W3. Default as_of = today.
+func runNexusFundamentals(args []string) {
+	fs := flag.NewFlagSet("nexus-fundamentals", flag.ExitOnError)
+	asOf := fs.String("as-of", time.Now().Format("2006-01-02"), "snapshot date label (YYYY-MM-DD)")
+	gap := fs.Int("gap-ms", 700, "sleep between Yahoo calls (ms)")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	res, ferr := nexus.New(st).ComputeFundamentals(ctx, *asOf, time.Duration(*gap)*time.Millisecond)
+	must("compute fundamentals", ferr)
+	fmt.Printf("nexus-fundamentals %s: %d rows written, %d degraded (non-OK / fetch fail)\n",
+		res.AsOf, res.Computed, len(res.Degraded))
 }

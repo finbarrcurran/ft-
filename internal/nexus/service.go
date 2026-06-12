@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"ft/internal/domain"
+	"ft/internal/market"
 	"ft/internal/store"
+	"time"
 )
 
 //go:embed seed/nexus_universe.json
@@ -113,6 +115,45 @@ func (s *Service) ComputeForDate(ctx context.Context, asOf string) (*ComputeResu
 	return tech, exh, nil
 }
 
+// ComputeFundamentals fetches Yahoo earningsTrend per universe member, computes
+// Forward PEG, and writes source='computed' rows for asOf. Rows are always
+// written (degraded ones carry a non-OK data_status — never dropped). gap paces
+// the Yahoo calls.
+func (s *Service) ComputeFundamentals(ctx context.Context, asOf string, gap time.Duration) (*ComputeResult, error) {
+	uni, err := s.st.ListNexusUniverse(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res := &ComputeResult{AsOf: asOf}
+	rows := make([]domain.NexusFundamentals, 0, len(uni))
+	for _, u := range uni {
+		f, ferr := market.FetchYahooFundamentals(ctx, u.Ticker)
+		var row *domain.NexusFundamentals
+		if ferr != nil {
+			row = ComputeFundamentals(u.Ticker, asOf, nil)
+			res.Degraded = append(res.Degraded, u.Ticker+": fetch "+ferr.Error())
+		} else {
+			row = ComputeFundamentals(u.Ticker, asOf, f)
+			if row.DataStatus != nil && *row.DataStatus != "OK" {
+				res.Degraded = append(res.Degraded, u.Ticker+": "+*row.DataStatus)
+			}
+		}
+		rows = append(rows, *row)
+		if gap > 0 {
+			select {
+			case <-ctx.Done():
+				return res, ctx.Err()
+			case <-time.After(gap):
+			}
+		}
+	}
+	if err := s.st.ReplaceNexusFundamentals(ctx, asOf, "computed", rows); err != nil {
+		return nil, err
+	}
+	res.Computed = len(rows)
+	return res, nil
+}
+
 // UploadDates returns the distinct upload as_of dates for a snapshot table.
 func (s *Service) UploadDates(ctx context.Context, table string) ([]string, error) {
 	return s.st.NexusSnapshotDates(ctx, table, "upload")
@@ -125,6 +166,26 @@ func (s *Service) Ingest(ctx context.Context, data []byte, asOfHint string) (*do
 	pf, err := Parse(data, asOfHint)
 	if err != nil {
 		return nil, err
+	}
+	// Apply the source→FT symbol bridge so legacy Visser symbols (e.g. SOTL.NS)
+	// land under the canonical universe ticker (STLTECH.NS) and join cleanly
+	// with computed rows. Sparse map; no-op when empty.
+	if tm, merr := s.st.GetNexusTickerMap(ctx); merr == nil && len(tm) > 0 {
+		for i := range pf.Technical {
+			if ft, ok := tm[pf.Technical[i].Ticker]; ok {
+				pf.Technical[i].Ticker = ft
+			}
+		}
+		for i := range pf.Exhaustion {
+			if ft, ok := tm[pf.Exhaustion[i].Ticker]; ok {
+				pf.Exhaustion[i].Ticker = ft
+			}
+		}
+		for i := range pf.Fundamentals {
+			if ft, ok := tm[pf.Fundamentals[i].Ticker]; ok {
+				pf.Fundamentals[i].Ticker = ft
+			}
+		}
 	}
 	switch pf.Kind {
 	case KindTechnical:

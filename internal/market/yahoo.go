@@ -314,7 +314,7 @@ func fetchYahooChartDailyPoints(ctx context.Context, ticker, rng string) ([]Dail
 // OHLCBar is one daily candle from Yahoo. All values in USD (or whatever
 // the ticker's native currency is — yahoo doesn't convert).
 type OHLCBar struct {
-	Date   string  // ISO YYYY-MM-DD
+	Date   string // ISO YYYY-MM-DD
 	Open   float64
 	High   float64
 	Low    float64
@@ -532,11 +532,21 @@ func FetchYahooAnalystTargets(ctx context.Context, ticker string) (out AnalystTa
 		QuoteSummary struct {
 			Result []struct {
 				FinancialData struct {
-					TargetLowPrice          struct{ Raw float64 `json:"raw"` } `json:"targetLowPrice"`
-					TargetMeanPrice         struct{ Raw float64 `json:"raw"` } `json:"targetMeanPrice"`
-					TargetHighPrice         struct{ Raw float64 `json:"raw"` } `json:"targetHighPrice"`
-					TargetMedianPrice       struct{ Raw float64 `json:"raw"` } `json:"targetMedianPrice"`
-					NumberOfAnalystOpinions struct{ Raw int     `json:"raw"` } `json:"numberOfAnalystOpinions"`
+					TargetLowPrice struct {
+						Raw float64 `json:"raw"`
+					} `json:"targetLowPrice"`
+					TargetMeanPrice struct {
+						Raw float64 `json:"raw"`
+					} `json:"targetMeanPrice"`
+					TargetHighPrice struct {
+						Raw float64 `json:"raw"`
+					} `json:"targetHighPrice"`
+					TargetMedianPrice struct {
+						Raw float64 `json:"raw"`
+					} `json:"targetMedianPrice"`
+					NumberOfAnalystOpinions struct {
+						Raw int `json:"raw"`
+					} `json:"numberOfAnalystOpinions"`
 				} `json:"financialData"`
 			} `json:"result"`
 		} `json:"quoteSummary"`
@@ -570,6 +580,83 @@ func FetchYahooAnalystTargets(ctx context.Context, ticker string) (out AnalystTa
 	}
 	if out.Low == nil && out.Mean == nil && out.High == nil {
 		return out, fmt.Errorf("no targets for %s", ticker)
+	}
+	return out, nil
+}
+
+// YahooFundamentals holds the inputs to a Forward-PEG computation: current
+// price + market cap (price module) and the current/next fiscal-year consensus
+// EPS estimates (earningsTrend module). Used by SC-36's Fundamentals engine.
+type YahooFundamentals struct {
+	Price        *float64
+	MarketCap    *float64
+	CurrentFYEPS *float64
+	NextFYEPS    *float64
+}
+
+// FetchYahooFundamentals pulls price + marketCap + current/next-FY consensus EPS
+// in one quoteSummary call (modules=earningsTrend,price). Fields are best-effort.
+func FetchYahooFundamentals(ctx context.Context, ticker string) (out *YahooFundamentals, retErr error) {
+	defer func() { health.Record(ctx, "yahoo", retErr) }()
+	u := fmt.Sprintf("https://query1.finance.yahoo.com/v10/finance/quoteSummary/%s?modules=earningsTrend,price",
+		url.PathEscape(ticker))
+	raw, err := yahoo.yahooGet(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		QuoteSummary struct {
+			Result []struct {
+				Price struct {
+					RegularMarketPrice struct {
+						Raw float64 `json:"raw"`
+					} `json:"regularMarketPrice"`
+					MarketCap struct {
+						Raw float64 `json:"raw"`
+					} `json:"marketCap"`
+				} `json:"price"`
+				EarningsTrend struct {
+					Trend []struct {
+						Period           string `json:"period"`
+						EarningsEstimate struct {
+							Avg struct {
+								Raw float64 `json:"raw"`
+							} `json:"avg"`
+						} `json:"earningsEstimate"`
+					} `json:"trend"`
+				} `json:"earningsTrend"`
+			} `json:"result"`
+		} `json:"quoteSummary"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	if len(env.QuoteSummary.Result) == 0 {
+		return nil, fmt.Errorf("no quoteSummary for %s", ticker)
+	}
+	r := env.QuoteSummary.Result[0]
+	out = &YahooFundamentals{}
+	if r.Price.RegularMarketPrice.Raw > 0 {
+		v := r.Price.RegularMarketPrice.Raw
+		out.Price = &v
+	}
+	if r.Price.MarketCap.Raw > 0 {
+		v := r.Price.MarketCap.Raw
+		out.MarketCap = &v
+	}
+	for _, t := range r.EarningsTrend.Trend {
+		switch t.Period {
+		case "0y":
+			if t.EarningsEstimate.Avg.Raw != 0 {
+				v := t.EarningsEstimate.Avg.Raw
+				out.CurrentFYEPS = &v
+			}
+		case "+1y":
+			if t.EarningsEstimate.Avg.Raw != 0 {
+				v := t.EarningsEstimate.Avg.Raw
+				out.NextFYEPS = &v
+			}
+		}
 	}
 	return out, nil
 }
@@ -636,10 +723,10 @@ func SearchYahooTicker(ctx context.Context, q string) (sym, name string, retErr 
 	}
 	var env struct {
 		Quotes []struct {
-			Symbol    string `json:"symbol"`
-			LongName  string `json:"longname"`
-			ShortName string `json:"shortname"`
-			QuoteType string `json:"quoteType"`
+			Symbol    string  `json:"symbol"`
+			LongName  string  `json:"longname"`
+			ShortName string  `json:"shortname"`
+			QuoteType string  `json:"quoteType"`
 			Score     float64 `json:"score"`
 		} `json:"quotes"`
 	}
