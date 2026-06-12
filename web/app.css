@@ -5511,8 +5511,8 @@ body.demo-active [data-tab="nexus"] { display: none; }
 
 .nx-tablewrap { overflow-x: auto; }
 .nx-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
-.nx-table th, .nx-table td { padding: 0.4rem 0.55rem; text-align: left; border-bottom: 1px solid rgb(var(--color-border)); white-space: nowrap; }
-.nx-table td.num, .nx-table th.num { text-align: right; }
+.nx-table th, .nx-table td { padding: 0.4rem 0.55rem; text-align: center; border-bottom: 1px solid rgb(var(--color-border)); white-space: nowrap; }
+.nx-table td.num, .nx-table th.num { text-align: center; }
 .nx-th { cursor: pointer; color: rgb(var(--color-text-muted)); user-select: none; }
 .nx-th:hover { color: rgb(var(--color-text)); }
 .nx-th.sorted { color: rgb(var(--color-accent)); }
