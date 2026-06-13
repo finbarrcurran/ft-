@@ -535,6 +535,16 @@ func (s *Service) SeedIfEmpty(ctx context.Context) error {
 			IsDoctrine:       false,
 			AppliesTo:        []string{"gics_healthcare"},
 		},
+		{
+			Code:             "grid-storage-integrator",
+			DisplayName:      "Grid-Scale Storage Integrator",
+			ShortDescription: "Utility-scale + behind-the-meter BESS integration, deployment & fleet-optimisation software (FLNC, STEM, Powin, Eos class). 8-Q /16; sub-types util-storage / dc-storage / sw-storage / multi-storage. DRAFT — uncalibrated, pending FLNC + a 2nd lock. Distinct from battery-cell manufacturing (CATL), generation assets (Energy-Power), and OEM equipment (Industrial-Electrical).",
+			File:             "seed/grid-storage-integrator.md",
+			Version:          "1.0",
+			Status:           "draft", // v1 draft, uncalibrated; flips to locked + v1.1 supplement (re-anchoring) after FLNC + a 2nd lock. Parser slug grid_storage_integrator ↔ hyphenated DB code per live convention.
+			IsDoctrine:       false,
+			AppliesTo:        []string{}, // no sector-rotation button until calibrated (draft; no UI behaviour change beyond the list entry)
+		},
 	}
 
 	for _, sd := range seeds {

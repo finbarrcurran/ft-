@@ -220,6 +220,28 @@ var adapterAliases = map[string]string{
 	"health payers":                   "managed_care",
 	"medicare advantage":              "managed_care",
 	"medicaid mco":                    "managed_care",
+	// Grid-Scale Storage Integrator adapter (23rd parser registration; DRAFT,
+	// awaiting FLNC+STEM calibration). Utility-scale + behind-the-meter BESS
+	// integration + fleet-optimisation software (FLNC, STEM, Powin, Eos class).
+	// SLUG RECONCILIATION: canonical parser slug is the UNDERSCORED
+	// "grid_storage_integrator" (folder theses/grid_storage_integrator/); the live
+	// sector_scorecards DB code is the HYPHENATED "grid-storage-integrator" — the
+	// two forms are DELIBERATELY MAPPED (same pattern as managed_care <-> managed-care
+	// and energy_power <-> energy-power). Sub-types (captured free-form, NOT
+	// validated): util-storage, dc-storage, sw-storage, multi-storage. DISTINCT from
+	// battery-CELL manufacturing (CATL, industrial_electrical:battery-cell-
+	// manufacturing) — this adapter is integration/software, not cell fab.
+	"grid-storage-integrator":       "grid_storage_integrator",
+	"grid_storage_integrator":       "grid_storage_integrator",
+	"grid-scale storage integrator": "grid_storage_integrator",
+	"grid scale storage integrator": "grid_storage_integrator",
+	"grid storage integrator":       "grid_storage_integrator",
+	"grid-storage integrator":       "grid_storage_integrator",
+	"grid-scale storage":            "grid_storage_integrator",
+	"grid storage":                  "grid_storage_integrator",
+	"storage integrator":            "grid_storage_integrator",
+	"bess integrator":               "grid_storage_integrator",
+	"bess":                          "grid_storage_integrator",
 }
 
 // NormaliseAdapter maps a free-form adapter name from the MD header to one
@@ -263,6 +285,17 @@ func NormaliseAdapter(raw string) string {
 		{[]string{"frontier"}, "ai_frontier_tech"},          // AI-Frontier-Tech (RGTI quantum-pre-commercial, IonQ, etc.)
 		{[]string{"quantum"}, "ai_frontier_tech"},
 		{[]string{"fusion"}, "ai_frontier_tech"},
+		// Grid-Scale Storage Integrator — BESS integration/software (FLNC, STEM,
+		// Powin). MUST precede the software_saas + utilities + energy routes: a
+		// storage thesis with the sw-storage sub-type says "software", with
+		// util-storage says "utility", and any says "grid"/"storage"/"power" — those
+		// must not be swallowed by software/utilities/energy. Specific needles only;
+		// deliberately NOT bare "battery"/"storage" (battery-CELL manufacturing =
+		// CATL / industrial_electrical). Canonical adapter names route via the alias
+		// map (pass 1) regardless; this is the prose-fallback guard.
+		{[]string{"bess"}, "grid_storage_integrator"},
+		{[]string{"storage", "integrator"}, "grid_storage_integrator"},
+		{[]string{"grid", "storage"}, "grid_storage_integrator"},
 		// Software/SaaS — MUST precede the "semi"/"semiconductor" routes so an
 		// EDA name ("Design Automation", "Semiconductor EDA") routes to software,
 		// not ai_infra_semi. EDA is software tooling, not a chip maker.
