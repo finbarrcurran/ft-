@@ -2299,7 +2299,7 @@ async function renderSummary() {
       state.stocks = null;
       state.crypto = null;
       updateDemoIndicator(next === 'on');
-      renderSummary();
+      loadActiveTab(); // SC-36.3 hardening: re-render current tab (was: always Summary)
     });
   }
 
@@ -12539,6 +12539,17 @@ function nexusFilterMatch(m, f) {
 }
 const nxNum = (v, d = 1) => (v == null || v === '' ? '—' : Number(v).toFixed(d));
 const nxPct = (v) => (v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%');
+const NX_SETUP_TIP = {
+  'Strong Uptrend / Buyable': 'Strongest bucket (score ≥80): price trending firmly higher with broad confirmation.',
+  'Strong but Extended': 'Strong uptrend but RSI >72 — stretched short-term, prone to pullback. Excluded from Entry Candidates.',
+  'Constructive': 'Intact, orderly uptrend (65–79) without the extremes — steady rather than spectacular.',
+  'Pullback Opportunity': 'Uptrend intact above the 200-day, but recently dipped with RSI <45 — the classic reset entry shape.',
+  'Neutral / Watch': 'Mid-range (50–64), no clear edge either way. Watch, don’t chase.',
+  'Early Trend Improvement': 'Weak overall (35–49) but the slope is turning up — possible early recovery, not yet proven.',
+  'Weakening': 'Trend deteriorating (35–49), momentum fading.',
+  'Breakdown Risk': 'Weakest bucket: trend broken or breaking — highest risk of further downside.',
+};
+
 function nxSetupClass(label) {
   if (!label) return '';
   if (label.includes('Buyable')) return 'nx-buy';
@@ -12650,13 +12661,13 @@ function nexusEntryTable(rows, entry, demo) {
     return banner + `<div class="nx-empty-note">No names clear ${dip ? 'all gates' : 'both gates'} today — that's information, not an error.</div>` +
       `<table class="nx-table nx-tally"><thead><tr><th>Ticker</th><th>Trend intact</th><th>Not stretched</th>${dip ? '<th>Dip</th>' : ''}</tr></thead><tbody>${trows}</tbody></table>`;
   }
-  const cols = [['ticker', 'Ticker', ''], ['theme', 'Theme', ''], ['trendScore', 'Trend', NX_TIP.trend], ['setupLabel', 'Setup', NX_TIP.setup], ['exhScore', 'Exh', NX_TIP.exh], ['band', 'Band', NX_TIP.band], ['themeRank', 'Rank', 'Fundamentals rank within theme (1 = cheapest Fwd PEG in-theme among candidates).'], ['fwdPeg', 'Fwd PEG', NX_TIP.peg], ['change5d', '5D %', 'Percent change over the last 5 trading days, from daily closes.'], ['change20d', '20D %', 'Percent change over the last 20 trading days, from daily closes.'], ['priceVsMa50', 'vs MA50', 'Price versus the 50-day moving average (Technical engine value).']];
+  const cols = [['ticker', 'Ticker', ''], ['theme', 'Theme', ''], ['trendScore', 'Trend', NX_TIP.trend], ['setupLabel', 'Setup', NX_TIP.setup], ['exhScore', 'Exh', NX_TIP.exh], ['band', 'Band', NX_TIP.band], ['themeRank', 'Rank', 'Order among names that cleared both gates, cheapest-by-theme first (1 = best Fwd PEG in-theme). A rank is not a buy.'], ['fwdPeg', 'Fwd PEG', NX_TIP.peg], ['change5d', '5D %', 'Price change over the last 5 trading days. Negative = recent dip.'], ['change20d', '20D %', 'Price change over the last 20 trading days — the medium-term move behind the dip.'], ['priceVsMa50', 'vs MA50', 'How far price sits above (+) or below (−) its 50-day average. Context only — no weight in ranking.']];
   if (!demo) cols.push(['_thesisSort', 'Thesis', NX_TIP.thesis]);
   return banner + nexusTable('entry', cols, rows, (r) => `
     <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
     <td class="nx-theme-cell">${escapeHTML(r.theme || '—')}</td>
     <td class="num"><span class="nx-score">${r.trendScore == null ? '—' : r.trendScore}</span></td>
-    <td><span class="nx-setup ${nxSetupClass(r.setupLabel)}">${escapeHTML(r.setupLabel || '—')}</span></td>
+    <td><span class="nx-setup ${nxSetupClass(r.setupLabel)}" title="${escapeHTML(NX_SETUP_TIP[r.setupLabel] || '')}">${escapeHTML(r.setupLabel || '—')}</span></td>
     <td class="num">${r.exhScore == null ? '—' : nxNum(r.exhScore, 0)}</td>
     <td><span class="nx-band ${nxBandClass(r.band)}">${escapeHTML(r.band || '—')}</span></td>
     <td class="num">${r.themeRank || '—'}</td>
@@ -12672,7 +12683,7 @@ function nexusTechTable(rows) {
   return nexusTable('technical', cols, rows, (r) => `
     <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
     <td class="num"><span class="nx-score">${nxNum(r.trendScore, 0)}</span></td>
-    <td><span class="nx-setup ${nxSetupClass(r.setupLabel)}">${escapeHTML(r.setupLabel || '—')}</span></td>
+    <td><span class="nx-setup ${nxSetupClass(r.setupLabel)}" title="${escapeHTML(NX_SETUP_TIP[r.setupLabel] || '')}">${escapeHTML(r.setupLabel || '—')}</span></td>
     <td class="num ${nxCls(r.ret1w)}">${nxPct(r.ret1w)}</td>
     <td class="num ${nxCls(r.ret1m)}">${nxPct(r.ret1m)}</td>
     <td class="num ${nxCls(r.ret3m)}">${nxPct(r.ret3m)}</td>
@@ -12852,7 +12863,7 @@ async function renderNexus() {
       </div>
       <div class="nx-filters">
         ${pill('all', 'All')}${pill('nexus', 'Nexus')}${demo ? '' : `${pill('holdings', '📌 Holdings')}${pill('watchlist', '👁 Watchlist')}`}
-        ${view === 'entry' ? `<button class="nx-pill nx-dip ${state.nexusDip ? 'active' : ''}" data-nxdip="1" title="Pullback-in-uptrend gate: price&gt;MA200 & MA50&gt;MA200 & 5-day change&lt;0 & RSI 35\u201350.">Dip</button>` : ''}
+        ${view === 'entry' ? `<button class="nx-pill nx-dip ${state.nexusDip ? 'active' : ''}" data-nxdip="1" title="Extra filter: intact uptrend that pulled back this week with RSI reset (35–50). Off by default.">Dip</button>` : ''}
         ${state.nexusThemeFilter ? `<button class="nx-themeclear" data-nxthemeclear="1" title="Clear theme filter">${escapeHTML(state.nexusThemeFilter)} ×</button>` : ''}
         ${datePicker}
         <span class="nx-count">${active.length}${view === 'entry' ? ' candidates' : ' names'}</span>
