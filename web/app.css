@@ -5583,3 +5583,7 @@ body.demo-active [data-tab="nexus"] { display: none; }
 .reg-review { color: rgb(var(--color-amber)); border-color: rgb(var(--color-amber) / 0.4); background: rgb(var(--color-amber) / 0.08); }
 .reg-draft { color: rgb(var(--color-text-dim)); border-color: rgb(var(--color-border-strong)); }
 .reg-superseded { color: rgb(var(--color-text-dim)); border-style: dashed; }
+
+
+/* ----- SC-36.3 AI Nexus demo universe-only marker ------------------- */
+.nx-demo-mark { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; color: rgb(var(--color-amber)); border: 1px solid rgb(var(--color-amber) / 0.4); background: rgb(var(--color-amber) / 0.08); vertical-align: middle; cursor: help; }

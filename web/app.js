@@ -12635,7 +12635,7 @@ const NX_STRAP_TIP = {
 const nxCls = (v) => (v == null ? '' : (v >= 0 ? 'gain' : 'loss'));
 
 function nexusTechTable(rows) {
-  const cols = [['ticker', 'Ticker', ''], ['trendScore', 'Score', NX_TIP.trend], ['setupLabel', 'Setup', NX_TIP.setup], ['ret1w', '1W', NX_TIP.ret], ['ret1m', '1M', NX_TIP.ret], ['ret3m', '3M', NX_TIP.ret], ['rsi14', 'RSI', NX_TIP.rsi], ['vs20d', 'vs20D', NX_TIP.vs], ['vs50d', 'vs50D', NX_TIP.vs], ['vs200d', 'vs200D', NX_TIP.vs], ['slope50d', '50D Slp', NX_TIP.slope], ['slope200d', '200D Slp', NX_TIP.slope], ['rsSpy', 'RS·SPY', NX_TIP.rsSpy], ['rsRank', 'RS#', NX_TIP.rsRank], ['volRatio', 'Vol×', NX_TIP.volT], ['atrPct', 'ATR%', NX_TIP.atrT], ['dist52wHi', '52W Hi', NX_TIP.dist52], ['price', 'Price', ''], ['_thesisSort', 'Thesis', NX_TIP.thesis]];
+  const cols = [['ticker', 'Ticker', ''], ['trendScore', 'Score', NX_TIP.trend], ['setupLabel', 'Setup', NX_TIP.setup], ['ret1w', '1W', NX_TIP.ret], ['ret1m', '1M', NX_TIP.ret], ['ret3m', '3M', NX_TIP.ret], ['rsi14', 'RSI', NX_TIP.rsi], ['vs20d', 'vs20D', NX_TIP.vs], ['vs50d', 'vs50D', NX_TIP.vs], ['vs200d', 'vs200D', NX_TIP.vs], ['slope50d', '50D Slp', NX_TIP.slope], ['slope200d', '200D Slp', NX_TIP.slope], ['rsSpy', 'RS·SPY', NX_TIP.rsSpy], ['rsRank', 'RS#', NX_TIP.rsRank], ['volRatio', 'Vol×', NX_TIP.volT], ['atrPct', 'ATR%', NX_TIP.atrT], ['dist52wHi', '52W Hi', NX_TIP.dist52], ['price', 'Price', ''], ['_thesisSort', 'Thesis', NX_TIP.thesis]].filter((c) => !(state.demo && c[0] === '_thesisSort'));
   return nexusTable('technical', cols, rows, (r) => `
     <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
     <td class="num"><span class="nx-score">${nxNum(r.trendScore, 0)}</span></td>
@@ -12655,11 +12655,11 @@ function nexusTechTable(rows) {
     <td class="num">${nxNum(r.atrPct, 1)}</td>
     <td class="num">${nxPct(r.dist52wHi)}</td>
     <td class="num">${nxNum(r.price, 2)}</td>
-    <td class="nx-thesis">${r._thesisStr || '—'}</td>`);
+    ${state.demo ? '' : `<td class="nx-thesis">${r._thesisStr || '—'}</td>`}`);
 }
 
 function nexusExhTable(rows) {
-  const cols = [['ticker', 'Ticker', ''], ['exhScore', 'Exh', NX_TIP.exh], ['band', 'Band', NX_TIP.band], ['rsi14', 'RSI14', NX_TIP.rsiE], ['rsi5', 'RSI5', NX_TIP.rsiE], ['williamsR', 'W%R', NX_TIP.wr], ['pos20d', '20D Pos', NX_TIP.pos], ['ext20dAtr', '20D Ext', NX_TIP.ext], ['ext50dAtr', '50D Ext', NX_TIP.ext], ['retVol1m', 'Ret/Vol', NX_TIP.retVol], ['imp5dAtr', '5D Imp', NX_TIP.imp], ['volRatio', 'Vol×', NX_TIP.volE], ['atrExpansion', 'ATR Exp', NX_TIP.atrExp], ['tdSetup', 'TD-S', NX_TIP.td], ['tdCountdown', 'TD-C', NX_TIP.td], ['tdScore', 'TD', NX_TIP.td], ['dataWtPct', 'Wt%', NX_TIP.dataWt], ['_thesisSort', 'Thesis', NX_TIP.thesis]];
+  const cols = [['ticker', 'Ticker', ''], ['exhScore', 'Exh', NX_TIP.exh], ['band', 'Band', NX_TIP.band], ['rsi14', 'RSI14', NX_TIP.rsiE], ['rsi5', 'RSI5', NX_TIP.rsiE], ['williamsR', 'W%R', NX_TIP.wr], ['pos20d', '20D Pos', NX_TIP.pos], ['ext20dAtr', '20D Ext', NX_TIP.ext], ['ext50dAtr', '50D Ext', NX_TIP.ext], ['retVol1m', 'Ret/Vol', NX_TIP.retVol], ['imp5dAtr', '5D Imp', NX_TIP.imp], ['volRatio', 'Vol×', NX_TIP.volE], ['atrExpansion', 'ATR Exp', NX_TIP.atrExp], ['tdSetup', 'TD-S', NX_TIP.td], ['tdCountdown', 'TD-C', NX_TIP.td], ['tdScore', 'TD', NX_TIP.td], ['dataWtPct', 'Wt%', NX_TIP.dataWt], ['_thesisSort', 'Thesis', NX_TIP.thesis]].filter((c) => !(state.demo && c[0] === '_thesisSort'));
   return nexusTable('exhaustion', cols, rows, (r) => `
     <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
     <td class="num"><span class="nx-score">${nxNum(r.exhScore, 0)}</span></td>
@@ -12678,11 +12678,11 @@ function nexusExhTable(rows) {
     <td class="num">${r.tdCountdown == null ? '—' : r.tdCountdown}</td>
     <td class="num">${nxNum(r.tdScore, 0)}</td>
     <td class="num">${r.dataWtPct != null && r.dataWtPct < 100 ? '<span class="nx-lowwt">' + nxNum(r.dataWtPct, 0) + '</span>' : nxNum(r.dataWtPct, 0)}</td>
-    <td class="nx-thesis">${r._thesisStr || '—'}</td>`);
+    ${state.demo ? '' : `<td class="nx-thesis">${r._thesisStr || '—'}</td>`}`);
 }
 
 function nexusFundTable(rows) {
-  const cols = [['theme', 'Theme', ''], ['ticker', 'Ticker', ''], ['marketCap', 'Mkt Cap', NX_TIP.mktcap], ['fwdPe', 'Fwd P/E', NX_TIP.fwdpe], ['nextFyEpsGrowth', 'NTM Growth', NX_TIP.growth], ['fwdPeg', 'Fwd PEG', NX_TIP.peg], ['dataStatus', 'Status', NX_TIP.status], ['_thesisSort', 'Thesis', NX_TIP.thesis]];
+  const cols = [['theme', 'Theme', ''], ['ticker', 'Ticker', ''], ['marketCap', 'Mkt Cap', NX_TIP.mktcap], ['fwdPe', 'Fwd P/E', NX_TIP.fwdpe], ['nextFyEpsGrowth', 'NTM Growth', NX_TIP.growth], ['fwdPeg', 'Fwd PEG', NX_TIP.peg], ['dataStatus', 'Status', NX_TIP.status], ['_thesisSort', 'Thesis', NX_TIP.thesis]].filter((c) => !(state.demo && c[0] === '_thesisSort'));
   return nexusTable('fundamentals', cols, rows, (r) => {
     const unstable = r.dataStatus === 'UNSTABLE_BASE';
     const pegCell = r.fwdPeg == null ? '—' : nxNum(r.fwdPeg, 2) + (unstable ? ` <span class="nx-warn" title="${escapeHTML(NX_TIP.unstable)}">⚠</span>` : '');
@@ -12694,7 +12694,7 @@ function nexusFundTable(rows) {
     <td class="num">${r.nextFyEpsGrowth == null ? '—' : (r.nextFyEpsGrowth * 100).toFixed(0) + '%'}</td>
     <td class="num">${pegCell}</td>
     <td><span class="nx-status nx-st-${(r.dataStatus || 'ok').toLowerCase()}">${escapeHTML(r.dataStatus || 'OK')}</span></td>
-    <td class="nx-thesis">${r._thesisStr || '—'}</td>`;
+    ${state.demo ? '' : `<td class="nx-thesis">${r._thesisStr || '—'}</td>`}`;
   });
 }
 
@@ -12718,14 +12718,20 @@ function fmtCompact(n) {
 
 async function renderNexus() {
   const content = $('#content');
-  if (state.demo) {
-    content.innerHTML = '<div class="empty">🔒 AI Nexus is hidden in Demo Mode.</div>';
-    return;
-  }
   content.innerHTML = '<div class="empty">loading…</div>';
 
+  // SC-36.3 — demo renders the Nexus tab UNIVERSE-ONLY: portfolio-linked signals
+  // (held/watchlist membership, thesis scores) are neither fetched nor joined, so
+  // no research footprint reaches the browser (D22.7). Pills + Thesis col dropped below.
+  const demo = !!state.demo;
+  if (demo && (state.nexusFilter === 'holdings' || state.nexusFilter === 'watchlist')) state.nexusFilter = 'all';
+
   // Membership + locked-thesis-score join (client-side, like the badges).
-  if (!state.nexusData) {
+  if (!state.nexusData || state.nexusData.demo !== demo) {
+    if (demo) {
+      const uni = await api('/api/nexus/universe');
+      state.nexusData = { universe: uni.universe || [], owned: new Set(), watch: new Set(), thesis: {}, demo: true };
+    } else {
     const [uni, stocks, watch, theses] = await Promise.all([
       api('/api/nexus/universe'),
       api('/api/holdings/stocks').catch(() => ({ holdings: [] })),
@@ -12745,7 +12751,8 @@ async function renderNexus() {
         thesis[tk] = { version: t.version || 0, str: `${t.score}/${t.maxScore}`, sort: t.score / (t.maxScore || 1) };
       }
     }
-    state.nexusData = { universe: uni.universe || [], owned, watch: watchset, thesis };
+    state.nexusData = { universe: uni.universe || [], owned, watch: watchset, thesis, demo: false };
+    }
   }
 
   const view = state.nexusView;
@@ -12786,7 +12793,7 @@ async function renderNexus() {
   content.innerHTML = `
     <div class="nx-wrap">
       <div class="nx-head">
-        <h2>AI Nexus <span class="nx-sub">— Visser replication (personal use)</span></h2>
+        <h2>AI Nexus <span class="nx-sub">— Visser replication (personal use)</span>${demo ? ' <span class="nx-demo-mark" title="Holdings, watchlist, and thesis data are hidden in demo mode.">Demo — universe view only.</span>' : ''}</h2>
         ${nexusBenchStrip(tech.benchmarks)}
       </div>
       <div class="nx-themes">${nexusThemeCards(techRows, exhRows)}</div>
@@ -12795,7 +12802,7 @@ async function renderNexus() {
         <div class="nx-strap" title="${escapeHTML(NX_STRAP_TIP[view])}">${escapeHTML(NEXUS_STRAPLINE[view])}${asOfLabel ? ` · ${escapeHTML(asOfLabel)}` : ''}</div>
       </div>
       <div class="nx-filters">
-        ${pill('all', 'All')}${pill('nexus', 'Nexus')}${pill('holdings', '📌 Holdings')}${pill('watchlist', '👁 Watchlist')}
+        ${pill('all', 'All')}${pill('nexus', 'Nexus')}${demo ? '' : `${pill('holdings', '📌 Holdings')}${pill('watchlist', '👁 Watchlist')}`}
         ${state.nexusThemeFilter ? `<button class="nx-themeclear" data-nxthemeclear="1" title="Clear theme filter">${escapeHTML(state.nexusThemeFilter)} ×</button>` : ''}
         ${datePicker}
         <span class="nx-count">${active.length} names</span>
