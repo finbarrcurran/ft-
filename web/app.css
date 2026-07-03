@@ -5479,7 +5479,7 @@ a.score-badge { display: inline-block; }
 .tabbar { overflow-x: auto; scrollbar-width: thin; }
 .tab { flex: 0 0 auto; white-space: nowrap; }
 .tab-nexus.active { color: rgb(var(--color-accent)); }
-body.demo-active [data-tab="nexus"] { display: none; }
+/* SC-36.3: nexus tab is VISIBLE in demo (universe-only); the SC-36 W5 hide rule (body.demo-active [data-tab="nexus"] display:none) removed. */
 
 .nx-wrap { padding: 1.25rem 1.5rem; }
 .nx-head { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; justify-content: space-between; }
