@@ -4,6 +4,7 @@ import (
 	"context"
 	"ft/internal/store"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 )
@@ -84,10 +85,12 @@ func Refresh(ctx context.Context, st *store.Store, ticker, kind string, currentP
 // persisted weekly_bars + sr_candidates for this ticker. Holding-ID-keyed
 // because it writes stock_holdings columns.
 //
-//	Levels (W2): support_1/2 = the two highest-scored supports BELOW price;
-//	resistance_1/2 = the two highest-scored resistances ABOVE price. Classic
-//	weekly-pivot fallback (off the last completed weekly bar) fills a side that
-//	has no candidate. SetStockLevels enforces the manual-wins guard, so this
+//	Levels (W2 + SC-35.1): support_1/2 = the two NEAREST qualifying supports
+//	BELOW price (closest first); resistance_1/2 = the two nearest qualifying
+//	resistances ABOVE price (closest first). Qualification = presence in
+//	sr_candidates; score DESC breaks ties on equal price. Classic weekly-pivot
+//	fallback (off the last completed weekly bar) fills a side that has no
+//	candidate. SetStockLevels enforces the manual-wins guard, so this
 //	no-ops on rows the user pinned (levels_source='manual').
 //	MAs (W1): always written (measurements, not chosen levels) — NULL when
 //	history is too thin (<50 weekly / <200 daily bars).
@@ -125,44 +128,76 @@ func AutoFillHoldingLevels(ctx context.Context, st *store.Store, holdingID int64
 	if err != nil {
 		return err
 	}
-	var sup, res []float64
-	for _, c := range cands { // already ordered by level_type, score DESC
+	// SC-35.1: numbered levels select the NEAREST qualifying candidate to price
+	// (support_1 = closest support below, resistance_1 = closest above) rather
+	// than the highest-scored on each side. Qualification = presence in
+	// sr_candidates; score DESC breaks ties on equal price.
+	type lvl struct {
+		price float64
+		score float64
+	}
+	var sup, res []lvl
+	for _, c := range cands {
 		switch c.LevelType {
 		case "support":
 			if currentPrice <= 0 || c.Price < currentPrice {
-				sup = append(sup, c.Price)
+				sup = append(sup, lvl{c.Price, c.Score})
 			}
 		case "resistance":
 			if currentPrice <= 0 || c.Price > currentPrice {
-				res = append(res, c.Price)
+				res = append(res, lvl{c.Price, c.Score})
 			}
 		}
 	}
 
-	// Classic weekly-pivot fallback when a side is empty.
+	// Classic weekly-pivot fallback when a side is empty (score 0 — deterministic).
 	if len(sup) == 0 || len(res) == 0 {
 		if s1p, s2p, r1p, r2p, ok := classicWeeklyPivots(ctx, st, up, kind); ok {
 			if len(sup) == 0 {
 				if currentPrice <= 0 || s1p < currentPrice {
-					sup = append(sup, s1p)
+					sup = append(sup, lvl{s1p, 0})
 				}
 				if currentPrice <= 0 || s2p < currentPrice {
-					sup = append(sup, s2p)
+					sup = append(sup, lvl{s2p, 0})
 				}
 			}
 			if len(res) == 0 {
 				if currentPrice <= 0 || r1p > currentPrice {
-					res = append(res, r1p)
+					res = append(res, lvl{r1p, 0})
 				}
 				if currentPrice <= 0 || r2p > currentPrice {
-					res = append(res, r2p)
+					res = append(res, lvl{r2p, 0})
 				}
 			}
 		}
 	}
 
-	s1, s2 := pickTwo(sup)
-	r1, r2 := pickTwo(res)
+	// Nearest-first ordering: supports by price DESC (closest below = highest
+	// price), resistances by price ASC (closest above = lowest price); score DESC
+	// on equal price. Stable sort preserves score-DESC candidate order on ties.
+	sort.SliceStable(sup, func(i, j int) bool {
+		if sup[i].price != sup[j].price {
+			return sup[i].price > sup[j].price
+		}
+		return sup[i].score > sup[j].score
+	})
+	sort.SliceStable(res, func(i, j int) bool {
+		if res[i].price != res[j].price {
+			return res[i].price < res[j].price
+		}
+		return res[i].score > res[j].score
+	})
+
+	supP := make([]float64, len(sup))
+	for i, l := range sup {
+		supP[i] = l.price
+	}
+	resP := make([]float64, len(res))
+	for i, l := range res {
+		resP[i] = l.price
+	}
+	s1, s2 := pickTwo(supP)
+	r1, r2 := pickTwo(resP)
 	return st.SetStockLevels(ctx, holdingID, s1, s2, r1, r2)
 }
 
@@ -182,7 +217,7 @@ func classicWeeklyPivots(ctx context.Context, st *store.Store, ticker, kind stri
 }
 
 // pickTwo returns pointers to the first two elements of xs (or nil), preserving
-// the caller's ordering (highest-scored first for the sr_candidates path).
+// the caller's ordering (nearest-to-price first for the sr_candidates path).
 func pickTwo(xs []float64) (first, second *float64) {
 	if len(xs) >= 1 {
 		v := xs[0]
