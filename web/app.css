@@ -5587,3 +5587,11 @@ body.demo-active [data-tab="nexus"] { display: none; }
 
 /* ----- SC-36.3 AI Nexus demo universe-only marker ------------------- */
 .nx-demo-mark { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; color: rgb(var(--color-amber)); border: 1px solid rgb(var(--color-amber) / 0.4); background: rgb(var(--color-amber) / 0.08); vertical-align: middle; cursor: help; }
+
+
+/* ----- SC-39 Entry Candidates ---------------------------------------- */
+.nx-entry-banner { margin: 8px 0 10px; padding: 7px 12px; border-radius: 8px; font-size: 0.8rem; color: rgb(var(--color-text-dim)); border: 1px solid rgb(var(--color-border)); background: rgb(var(--color-surface) / 0.5); }
+.nx-empty-note { margin: 10px 0; padding: 10px 14px; border-radius: 8px; font-size: 0.85rem; color: rgb(var(--color-amber)); border: 1px solid rgb(var(--color-amber) / 0.35); background: rgb(var(--color-amber) / 0.06); }
+.nx-pill.nx-dip { font-weight: 600; }
+.nx-pill.nx-dip.active { border-color: rgb(var(--color-gain) / 0.5); background: rgb(var(--color-gain) / 0.1); color: rgb(var(--color-gain)); }
+.nx-table.nx-tally { width: auto; min-width: 280px; }
