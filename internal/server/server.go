@@ -300,6 +300,7 @@ func (s *Server) routes() {
 
 	// Spec 9g: Scorecard Repository.
 	s.mux.HandleFunc("GET /api/scorecards", s.requireUserOrToken(s.handleScorecardsList))
+	s.mux.HandleFunc("GET /api/registry", s.requireUser(s.handleRegistry)) // SC-28 Registry / Document-Control
 	s.mux.HandleFunc("GET /api/scorecards/{code}", s.requireUserOrToken(s.handleScorecardGet))
 	s.mux.HandleFunc("PUT /api/scorecards/{code}", s.requireUser(s.handleScorecardUpdate))
 	s.mux.HandleFunc("POST /api/scorecards/preview", s.requireUser(s.handleScorecardPreview))

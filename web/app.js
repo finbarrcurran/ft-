@@ -708,6 +708,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'heatmap' ? 'active' : ''}" data-tab="heatmap">Heatmap</button>
         <button class="tab ${state.tab === 'news' ? 'active' : ''}" data-tab="news">News</button>
         <button class="tab ${state.tab === 'crypto-news' ? 'active' : ''}" data-tab="crypto-news">Crypto News</button>
+        <button class="tab ${state.tab === 'registry' ? 'active' : ''}" data-tab="registry">Registry</button>
         <button class="tab ${state.tab === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>
       </div>
       <div class="content" id="content"></div>
@@ -1953,6 +1954,8 @@ async function loadActiveTab() {
       await renderNews('market');
     } else if (state.tab === 'crypto-news') {
       await renderNews('crypto');
+    } else if (state.tab === 'registry') {
+      await renderRegistry();
     } else if (state.tab === 'settings') {
       await renderSettings();
     }
@@ -1964,6 +1967,163 @@ async function loadActiveTab() {
 }
 
 // ---------- summary -----------------------------------------------------
+
+// ---------- SC-28 Registry / Document-Control --------------------------
+// Read-only index over the four live source tables (/api/registry). One pull
+// per tab open; all grouping, sort, filter and search happen here in the
+// browser (D28.12). Re-fetched on every open so a source edit shows on the
+// next load with no sync step. Never mutates any source.
+
+let _registryData = null;
+const _regGroupMeta = [
+  { key: 'theses', label: 'Theses' },
+  { key: 'scorecards_adapters', label: 'Scorecards & Adapters' },
+  { key: 'framework', label: 'Framework & Governance' },
+];
+const _regFilter = { assetClass: 'all', status: 'all', hideSuperseded: false, search: '' };
+const _regSort = {};
+
+function regBadge(status) {
+  const map = {
+    locked:         { cls: 'reg-badge reg-locked',     icon: '\u{1F512}', label: 'Locked' },
+    draft:          { cls: 'reg-badge reg-draft',      icon: '⚠',    label: 'Draft' },
+    'needs-review': { cls: 'reg-badge reg-review',     icon: '\u{1F504}', label: 'Needs-review' },
+    superseded:     { cls: 'reg-badge reg-superseded', icon: '↩',    label: 'Superseded' },
+  };
+  const m = map[status] || { cls: 'reg-badge', icon: '', label: status || '—' };
+  return `<span class="${m.cls}">${m.icon} ${escapeHTML(m.label)}</span>`;
+}
+
+function regFmt(v) { return (v === null || v === undefined || v === '') ? '<span class="dim">—</span>' : escapeHTML(String(v)); }
+
+async function renderRegistry() {
+  const content = $('#content');
+  content.innerHTML = '<div class="empty">loading…</div>';
+  const r = await api('/api/registry');
+  _registryData = r.artifacts || [];
+  content.innerHTML = `
+    <div class="registry-tab">
+      <div class="reg-header">
+        <h2 class="reg-title">Registry <span class="dim reg-sub">· Document Control</span></h2>
+        <p class="reg-note">Read-only index of every controlled artifact, read live from source at load — never a copy. Edit at source; it reflects here on the next load.</p>
+      </div>
+      <div id="reg-strip" class="reg-strip"></div>
+      <div class="reg-toolbar">
+        <label class="reg-ctl">Asset class
+          <select id="reg-asset">
+            <option value="all">All</option><option value="stock">Stock</option>
+            <option value="crypto">Crypto</option><option value="cross-asset">Cross-asset</option>
+          </select>
+        </label>
+        <label class="reg-ctl">Status
+          <select id="reg-status">
+            <option value="all">All</option><option value="locked">Locked</option>
+            <option value="needs-review">Needs-review</option><option value="draft">Draft</option>
+            <option value="superseded">Superseded</option>
+          </select>
+        </label>
+        <label class="reg-ctl reg-check"><input type="checkbox" id="reg-hide-sup"> Hide superseded</label>
+        <input type="search" id="reg-search" class="reg-search" placeholder="Search artifact…">
+      </div>
+      <div id="reg-groups"></div>
+    </div>`;
+  $('#reg-asset').addEventListener('change', e => { _regFilter.assetClass = e.target.value; regRender(); });
+  $('#reg-status').addEventListener('change', e => { _regFilter.status = e.target.value; regRender(); });
+  $('#reg-hide-sup').addEventListener('change', e => { _regFilter.hideSuperseded = e.target.checked; regRender(); });
+  $('#reg-search').addEventListener('input', e => { _regFilter.search = e.target.value.trim().toLowerCase(); regRender(); });
+  $('#reg-groups').addEventListener('click', e => {
+    const th = e.target.closest('[data-sortkey]');
+    if (!th) return;
+    const grp = th.closest('[data-group]').getAttribute('data-group');
+    const key = th.getAttribute('data-sortkey');
+    const cur = _regSort[grp] || { key: 'lastUpdated', dir: 'desc' };
+    _regSort[grp] = { key, dir: (cur.key === key && cur.dir === 'desc') ? 'asc' : 'desc' };
+    regRender();
+  });
+  regRender();
+}
+
+function regFilteredRows() {
+  const f = _regFilter;
+  return _registryData.filter(a => {
+    if (f.hideSuperseded && a.status === 'superseded') return false;
+    if (f.assetClass !== 'all' && a.assetClass !== f.assetClass) return false;
+    if (f.status !== 'all' && a.status !== f.status) return false;
+    if (f.search) {
+      const hay = (a.artifact + ' ' + (a.name || '')).toLowerCase();
+      if (!hay.includes(f.search)) return false;
+    }
+    return true;
+  });
+}
+
+function regSortRows(rows, grp) {
+  const s = _regSort[grp] || { key: 'lastUpdated', dir: 'desc' };
+  const dir = s.dir === 'asc' ? 1 : -1;
+  const val = (a) => {
+    switch (s.key) {
+      case 'artifact': return (a.artifact || '').toLowerCase();
+      case 'assetClass': return a.assetClass || '';
+      case 'version': return a.version || '';
+      case 'status': return a.status || '';
+      case 'score': return a.score == null ? -1 : a.score;
+      default: return a.lastUpdated || '';
+    }
+  };
+  return rows.slice().sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (va < vb) return -1 * dir;
+    if (va > vb) return 1 * dir;
+    return (a.artifact || '').localeCompare(b.artifact || '');
+  });
+}
+
+function regRender() {
+  const all = _registryData || [];
+  const byStatus = {};
+  for (const a of all) byStatus[a.status] = (byStatus[a.status] || 0) + 1;
+  const stripParts = [`<strong>${all.length}</strong> artifacts`];
+  for (const st of ['locked', 'needs-review', 'draft', 'superseded']) {
+    if (byStatus[st]) stripParts.push(`${regBadge(st)} ${byStatus[st]}`);
+  }
+  const strip = $('#reg-strip');
+  if (strip) strip.innerHTML = stripParts.join('<span class="reg-dot">·</span>');
+
+  const rows = regFilteredRows();
+  let html = '';
+  for (const g of _regGroupMeta) {
+    const grows = regSortRows(rows.filter(a => a.group === g.key), g.key);
+    const total = all.filter(a => a.group === g.key).length;
+    html += regGroupTable(g, grows, total);
+  }
+  const groupsEl = $('#reg-groups');
+  if (groupsEl) groupsEl.innerHTML = html || '<div class="empty dim">No artifacts match the current filters.</div>';
+}
+
+function regGroupTable(g, rows, total) {
+  const s = _regSort[g.key] || { key: 'lastUpdated', dir: 'desc' };
+  const arrow = (k) => s.key === k ? (s.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const th = (k, label) => `<th data-sortkey="${k}" class="reg-th reg-th-sort">${label}${arrow(k)}</th>`;
+  let extraHead = '';
+  if (g.key === 'theses') extraHead = th('score', 'Score') + '<th class="reg-th">Band</th><th class="reg-th">Next review</th><th class="reg-th">GitHub</th>';
+  else if (g.key === 'scorecards_adapters') extraHead = '<th class="reg-th">Scorecard type</th>';
+  const head = `<tr>${th('artifact', 'Artifact')}${th('assetClass', 'Asset class')}${th('version', 'Version')}${th('status', 'Status')}${th('lastUpdated', 'Last updated')}<th class="reg-th">Source</th>${extraHead}</tr>`;
+  const colspan = g.key === 'theses' ? 10 : (g.key === 'scorecards_adapters' ? 7 : 6);
+  const body = rows.map(a => {
+    const rowCls = a.status === 'superseded' ? ' class="reg-row-superseded"' : '';
+    let extra = '';
+    if (g.key === 'theses') {
+      const score = a.score == null ? '<span class="dim">—</span>' : `${a.score}/${a.maxScore}`;
+      const gh = a.githubUrl ? `<a href="${escapeHTML(a.githubUrl)}" target="_blank" rel="noopener">link ↗</a>` : '<span class="dim">—</span>';
+      extra = `<td>${score}</td><td>${a.band ? escapeHTML(a.band) : '<span class="dim">—</span>'}</td><td>${regFmt(a.nextReview)}</td><td>${gh}</td>`;
+    } else if (g.key === 'scorecards_adapters') {
+      extra = `<td>${regFmt(a.scorecardType)}</td>`;
+    }
+    return `<tr${rowCls}><td class="reg-artifact">${escapeHTML(a.artifact)}${a.name ? ` <span class="dim">${escapeHTML(a.name)}</span>` : ''}</td><td>${escapeHTML(a.assetClass)}</td><td>${regFmt(a.version)}</td><td>${regBadge(a.status)}</td><td>${regFmt(a.lastUpdated)}</td><td><code class="reg-src">${escapeHTML(a.source)}</code></td>${extra}</tr>`;
+  }).join('');
+  const count = rows.length === total ? `${total}` : `${rows.length} / ${total}`;
+  return `<section class="reg-group" data-group="${g.key}"><h3 class="reg-group-h">${escapeHTML(g.label)} <span class="dim reg-count">${count}</span></h3><div class="reg-table-wrap"><table class="reg-table"><thead>${head}</thead><tbody>${body || `<tr><td colspan="${colspan}" class="dim" style="text-align:center">— none —</td></tr>`}</tbody></table></div></section>`;
+}
 
 async function renderSummary() {
   const content = $('#content');

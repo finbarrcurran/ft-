@@ -5551,3 +5551,35 @@ body.demo-active [data-tab="nexus"] { display: none; }
 .nx-theme-card.selected { border-color: rgb(var(--color-accent)); background: rgb(var(--color-accent) / 0.08); }
 .nx-themeclear { padding: 0.3rem 0.7rem; border: 1px solid rgb(var(--color-accent) / 0.5); background: rgb(var(--color-accent) / 0.15); color: rgb(var(--color-accent)); border-radius: 999px; cursor: pointer; font-size: 0.8rem; }
 .nx-table td.nx-thesis { color: rgb(var(--color-text-muted)); }
+
+
+/* ----- SC-28 Registry / Document-Control ---------------------------- */
+.registry-tab { padding: 4px 2px 40px; }
+.reg-header { margin-bottom: 12px; }
+.reg-title { font-size: 1.15rem; margin: 0 0 2px; }
+.reg-sub { font-weight: normal; font-size: 0.9rem; }
+.reg-note { color: rgb(var(--color-text-dim)); font-size: 0.82rem; margin: 0; max-width: 70ch; }
+.reg-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; margin: 10px 0; border: 1px solid rgb(var(--color-border)); border-radius: 8px; background: rgb(var(--color-surface) / 0.5); font-size: 0.85rem; }
+.reg-dot { color: rgb(var(--color-text-dim)); margin: 0 2px; }
+.reg-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 10px 0 16px; }
+.reg-ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: rgb(var(--color-text-dim)); }
+.reg-ctl select { padding: 4px 8px; }
+.reg-check { cursor: pointer; }
+.reg-search { padding: 5px 10px; min-width: 200px; }
+.reg-group { margin-bottom: 24px; }
+.reg-group-h { font-size: 0.98rem; margin: 0 0 8px; padding-bottom: 4px; border-bottom: 1px solid rgb(var(--color-border)); }
+.reg-count { font-weight: normal; font-size: 0.82rem; }
+.reg-table-wrap { overflow-x: auto; }
+.reg-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.reg-table th, .reg-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid rgb(var(--color-border) / 0.6); white-space: nowrap; }
+.reg-th { color: rgb(var(--color-text-dim)); font-weight: 600; }
+.reg-th-sort { cursor: pointer; user-select: none; }
+.reg-th-sort:hover { color: rgb(var(--color-text)); }
+.reg-artifact { font-weight: 600; }
+.reg-src { font-size: 0.74rem; color: rgb(var(--color-text-dim)); }
+.reg-row-superseded { opacity: 0.5; }
+.reg-badge { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 10px; font-size: 0.72rem; border: 1px solid rgb(var(--color-border)); }
+.reg-locked { color: rgb(var(--color-gain)); border-color: rgb(var(--color-gain) / 0.4); background: rgb(var(--color-gain) / 0.08); }
+.reg-review { color: rgb(var(--color-amber)); border-color: rgb(var(--color-amber) / 0.4); background: rgb(var(--color-amber) / 0.08); }
+.reg-draft { color: rgb(var(--color-text-dim)); border-color: rgb(var(--color-border-strong)); }
+.reg-superseded { color: rgb(var(--color-text-dim)); border-style: dashed; }
