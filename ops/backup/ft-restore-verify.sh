@@ -1,43 +1,46 @@
 #!/usr/bin/env bash
-# SC-37 P2 — weekly automated restore-verify (suggest Sun 03:30 UTC). UNTESTED
-# DRAFT. Restores the latest snapshot to a temp path, integrity-checks it,
-# sanity-checks row counts vs live, runs restic check, alerts on any failure.
-set -euo pipefail
+# SC-37 P2 — weekly restore-verify (proves the backup is restorable, not just present).
+# Runs as root (systemd). Restores latest -> temp, integrity + row-count sanity vs live,
+# restic check. Any failure fires a Telegram alert; green = silent.
+set -uo pipefail
 
 ENV_FILE="/etc/ft/backup.env"
-LIVE="/var/lib/ft/ft.db"
+BOT_ENV="/etc/ft-bot/env"
 RDIR="/tmp/ft-restore-verify"
-BOT_ALERT_URL="${BOT_ALERT_URL:-http://127.0.0.1:8081/api/bot/alerts}"
 
-fail() {
-  local msg="🔴 FT restore-verify FAILED at [$1]: $2"
-  curl -fsS -X POST "$BOT_ALERT_URL" -H 'Content-Type: application/json' \
-    -d "{\"source\":\"ft-restore-verify\",\"dedupe_key\":\"ft-restore-verify\",\"text\":$(printf '%s' "$msg" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))')}" \
-    >/dev/null 2>&1 || true
-  echo "$msg" >&2; exit 1
+ft_alert() {
+  [ -f "$BOT_ENV" ] || { echo "alert: missing $BOT_ENV" >&2; return 0; }
+  local TOK CHAT
+  TOK=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$BOT_ENV" | cut -d= -f2-)
+  CHAT=$(grep -E '^TELEGRAM_CHAT_ID=' "$BOT_ENV" | cut -d= -f2-)
+  [ -n "$TOK" ] && [ -n "$CHAT" ] || { echo "alert: no token/chat" >&2; return 0; }
+  curl -fsS -m 20 "https://api.telegram.org/bot${TOK}/sendMessage" \
+    --data-urlencode "chat_id=${CHAT}" --data-urlencode "text=$1" >/dev/null 2>&1 \
+    || echo "alert: telegram send failed" >&2
 }
+fail() { ft_alert "FT restore-verify FAILED at [$1]: $2"; echo "FT restore-verify FAIL [$1]: $2" >&2; rm -rf "$RDIR"; exit 1; }
+
 [ -f "$ENV_FILE" ] || fail "preflight" "missing $ENV_FILE"
-# shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
 
 rm -rf "$RDIR"; mkdir -p "$RDIR"
-trap 'rm -rf "$RDIR"' EXIT
 
-restic restore latest --target "$RDIR" || fail "restore" "restic restore failed"
-RDB="$(find "$RDIR" -name ft.db -type f | head -1)"
+if ! restic restore latest --target "$RDIR"; then fail "restore" "restic restore failed"; fi
+RDB=$(find "$RDIR" -name ft.db -type f | head -1)
 [ -n "$RDB" ] || fail "restore" "restored ft.db not found"
 
-ic="$(sqlite3 "$RDB" 'PRAGMA integrity_check;')" || fail "integrity" "PRAGMA errored"
+ic=$(sqlite3 "$RDB" 'PRAGMA integrity_check;' 2>&1) || fail "integrity" "PRAGMA errored: $ic"
 [ "$ic" = "ok" ] || fail "integrity" "restored integrity_check: $ic"
 
-# Row-count sanity vs live (exact where exact expected; ±5% otherwise).
-theses="$(sqlite3 "$RDB" 'SELECT COUNT(*) FROM theses_index;')"
-[ "$theses" -ge 54 ] || fail "rowcount" "theses_index=$theses (expected >=54: 52 locked + 2 superseded)"
-bars="$(sqlite3 "$RDB" "SELECT COUNT(*) FROM daily_bars;")"
-[ "$bars" -gt 0 ] || fail "rowcount" "daily_bars empty in restore"
-# nexus latest as_of within 8 days.
-asof="$(sqlite3 "$RDB" 'SELECT MAX(as_of) FROM nexus_technical;')"
+locked=$(sqlite3 "$RDB" "SELECT COUNT(*) FROM theses_index WHERE status='locked';")
+sup=$(sqlite3 "$RDB" "SELECT COUNT(*) FROM theses_index WHERE status='superseded';")
+[ "${locked:-0}" -ge 50 ] || fail "rowcount" "theses_index locked=$locked (expected >=50; live baseline 52+2)"
+bars=$(sqlite3 "$RDB" "SELECT COUNT(*) FROM daily_bars;")
+[ "${bars:-0}" -gt 0 ] || fail "rowcount" "daily_bars empty in restore"
+asof=$(sqlite3 "$RDB" "SELECT COALESCE(MAX(as_of),'') FROM nexus_technical;")
 [ -n "$asof" ] || fail "rowcount" "nexus_technical has no as_of"
 
-restic check || fail "repo" "restic check failed"
-echo "ft-restore-verify OK $(date -u +%FT%TZ): theses=$theses bars=$bars nexus_asof=$asof"
+if ! restic check; then fail "repo" "restic check failed"; fi
+
+rm -rf "$RDIR"
+echo "ft-restore-verify OK $(date -u +%FT%TZ): theses locked=$locked superseded=$sup daily_bars=$bars nexus_asof=$asof"

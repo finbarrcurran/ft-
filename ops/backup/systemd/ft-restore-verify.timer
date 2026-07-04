@@ -1,0 +1,7 @@
+[Unit]
+Description=FT DB weekly restore-verify timer — Sun 03:30 UTC (SC-37 P2)
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00 UTC
+Persistent=true
+[Install]
+WantedBy=timers.target

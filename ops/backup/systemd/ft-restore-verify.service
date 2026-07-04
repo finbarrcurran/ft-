@@ -1,0 +1,7 @@
+[Unit]
+Description=FT DB weekly restore-verify (SC-37 P2)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/opt/ft/src/ops/backup/ft-restore-verify.sh

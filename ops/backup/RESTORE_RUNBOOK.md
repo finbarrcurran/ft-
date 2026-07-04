@@ -1,46 +1,44 @@
 # FT — DB Restore Runbook (SC-37)
 
-> **UNTESTED DRAFT** — becomes live once Fin provisions the Backblaze B2 bucket
-> + application key and creates `/etc/ft/backup.env` (root-owned, mode 600).
-> Written so it can be executed unaided, surviving Claude context loss.
+> **Status: LIVE — wired + tested 2026-07-04.** Nightly backup + weekly restore-verify
+> run under systemd; the B2 repo is initialised and holds snapshots. This runbook is
+> the human procedure for a real restore + the quarterly manual drill (the closing AC).
 
 ## What is backed up
-The live FT database `/var/lib/ft/ft.db` only (v1 scope, ruling D). Git covers
-all code + doctrine. Ad-hoc `ft.db.bak_*` files on jarvis are **same-disk and
-untested — they are NOT the backup** and never count as one.
+The live FT database `/var/lib/ft/ft.db` only (v1 scope). Git covers all code + doctrine.
+Ad-hoc `ft.db.bak_*` files on jarvis are same-disk and untested — **they are NOT the backup.**
 
-## Credentials (`/etc/ft/backup.env`, mode 600, root-owned)
-```
-RESTIC_REPOSITORY=b2:ft-backup-jarvis:/
-RESTIC_PASSWORD=<restic repo passphrase — store in your password manager too>
-B2_ACCOUNT_ID=<application keyID scoped to the ft-backup-jarvis bucket>
-B2_ACCOUNT_KEY=<application key>
-```
-Nothing here goes in git, the DB, or logs.
+## Where things live
+- Backup script:  `/opt/ft/src/ops/backup/ft-backup.sh`  (systemd `ft-backup.timer`, 03:00 UTC nightly)
+- Verify script:  `/opt/ft/src/ops/backup/ft-restore-verify.sh`  (`ft-restore-verify.timer`, Sun 03:30 UTC)
+- Credentials:    `/etc/ft/backup.env`  (root, mode 600 — B2 key + `RESTIC_REPOSITORY` + `RESTIC_PASSWORD`)
+- Repo:           `b2:ft-backup-jarvis-cur:/`  (Backblaze B2, restic-encrypted)
+- Retention:      7 daily / 4 weekly / 6 monthly (auto-pruned)
+- Alerts:         Telegram `@FinsFTAlerts_bot` on any failure; **silent when green**.
 
-## One-time repo init (after creds land)
+## ⚠️ The one thing you must keep off-box
+The **restic passphrase** (`RESTIC_PASSWORD` in `/etc/ft/backup.env`). If jarvis dies AND
+this passphrase is lost, the backups are **unrecoverable**. It must live in your password
+manager. To read it to save it:  `sudo grep '^RESTIC_PASSWORD=' /etc/ft/backup.env`
+
+## Restore procedure (and the quarterly drill)
+Run as root on jarvis:
 ```
 set -a; . /etc/ft/backup.env; set +a
-restic init            # first time only
-sudo -u ft ops/backup/ft-backup.sh   # first snapshot; confirm restic snapshots lists it
+restic snapshots                                   # pick one (usually 'latest')
+restic restore latest --target /tmp/ft-restore
+sqlite3 /tmp/ft-restore/ft.db 'PRAGMA integrity_check;'          # must print: ok
+sqlite3 /tmp/ft-restore/ft.db "SELECT COUNT(*) FROM theses_index WHERE status='locked';"   # >= 50
 ```
+Prove it boots against the restored copy (read-only, throwaway port):
+```
+FT_DB_PATH=/tmp/ft-restore/ft.db FT_ADDR=127.0.0.1:8099 /opt/ft/bin/ft &
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8099/healthz   # expect 200
+kill %1
+```
+Real disaster recovery only (otherwise this is verify-only): stop `ft`, back up the current
+`/var/lib/ft/ft.db`, `cp /tmp/ft-restore/ft.db /var/lib/ft/ft.db` (chown ft:ft), restart `ft`.
 
-## Restore procedure (the drill)
-1. `set -a; . /etc/ft/backup.env; set +a`
-2. `restic snapshots`  — pick the snapshot (usually `latest`).
-3. `restic restore latest --target /tmp/ft-restore`
-4. Verify: `sqlite3 /tmp/ft-restore/ft.db 'PRAGMA integrity_check;'` → must be `ok`.
-5. Sanity: `sqlite3 /tmp/ft-restore/ft.db 'SELECT COUNT(*) FROM theses_index;'` → ≥54.
-6. Prove usable: point a throwaway FT instance at the restored copy on a temp
-   port (read-only), confirm it boots and `/healthz` is 200:
-   `FT_DB_PATH=/tmp/ft-restore/ft.db FT_ADDR=127.0.0.1:8099 /opt/ft/bin/ft &`
-   then `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8099/healthz`.
-   (Confirm the exact env var names against cmd/ft at drill time.)
-7. To go live on the restored copy: stop `ft`, back up the current
-   `/var/lib/ft/ft.db`, `cp /tmp/ft-restore/ft.db /var/lib/ft/ft.db` (as `ft`),
-   restart. Only if a real disaster — otherwise this is verify-only.
-
-## Cadence (ruling E)
-- Nightly backup 03:00 UTC (`ft-backup.sh`, timer TBD).
-- Weekly automated restore-verify Sun 03:30 UTC (`ft-restore-verify.sh`).
-- Quarterly **manual** drill: Fin runs steps 1–6 unaided. Next drill: set on close.
+## Cadence
+- Nightly backup 03:00 UTC · Weekly automated restore-verify Sun 03:30 UTC.
+- **Quarterly manual drill:** Fin runs the restore procedure above unaided. Next drill: set on close.

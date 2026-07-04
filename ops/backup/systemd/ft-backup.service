@@ -1,0 +1,7 @@
+[Unit]
+Description=FT DB nightly backup to Backblaze B2 (SC-37 P1)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/opt/ft/src/ops/backup/ft-backup.sh
