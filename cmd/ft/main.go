@@ -557,6 +557,7 @@ func runBackfillBars(args []string) {
 	userID := fs.Int64("user-id", 1, "user id whose holdings to backfill")
 	rng := fs.String("range", "2y", "Yahoo range string: 1y, 2y, 5y, max")
 	gap := fs.Int("gap-ms", 1500, "sleep between tickers (ms) to avoid rate limits")
+	tickersFlag := fs.String("tickers", "", "SC-38: comma-separated tickers to backfill (bars only); when set, holdings are skipped")
 	_ = fs.Parse(args)
 
 	cfg, err := config.Load()
@@ -568,6 +569,42 @@ func runBackfillBars(args []string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+
+	// SC-38 P1 — targeted bars-only back-fill for arbitrary tickers (e.g. locked
+	// theses not in holdings/watchlist, + SPY for the excess baseline). No
+	// technicals/SR pipeline (these aren't holdings); SC-38 only needs the bars.
+	if strings.TrimSpace(*tickersFlag) != "" {
+		list := strings.Split(*tickersFlag, ",")
+		ok, fail := 0, 0
+		for i, raw := range list {
+			ticker := strings.TrimSpace(raw)
+			if ticker == "" {
+				continue
+			}
+			bars, ferr := market.FetchYahooDailyBars(ctx, ticker, *rng)
+			if ferr != nil {
+				fmt.Printf("  [%d/%d] %-10s  fetch failed: %s\n", i+1, len(list), ticker, ferr.Error())
+				fail++
+				time.Sleep(time.Duration(*gap) * time.Millisecond)
+				continue
+			}
+			rows := make([]store.DailyBarRow, 0, len(bars))
+			for _, b := range bars {
+				rows = append(rows, store.DailyBarRow{Date: b.Date, Open: b.Open, High: b.High, Low: b.Low, Close: b.Close, Volume: b.Volume})
+			}
+			if serr := st.BulkInsertDailyBars(ctx, ticker, "stock", rows); serr != nil {
+				fmt.Printf("  [%d/%d] %-10s  store failed: %s\n", i+1, len(list), ticker, serr.Error())
+				fail++
+				time.Sleep(time.Duration(*gap) * time.Millisecond)
+				continue
+			}
+			fmt.Printf("  [%d/%d] %-10s  %d bars\n", i+1, len(list), ticker, len(rows))
+			ok++
+			time.Sleep(time.Duration(*gap) * time.Millisecond)
+		}
+		fmt.Printf("done (tickers mode). ok=%d failed=%d\n", ok, fail)
+		return
+	}
 
 	stocks, err := st.ListStockHoldings(ctx, *userID)
 	must("list stocks", err)

@@ -9996,16 +9996,78 @@ function fmtUSDShort(v) {
   return String(Math.round(v));
 }
 
+// SC-38 — Thesis Calibration (forward · price-return-since-lock · thesis-level).
+// Read-only over /api/calibration/theses; never adjusts a band/weight/pillar.
+function renderThesisCalibrationPanel(tc) {
+  if (!tc || !tc.summary) return '';
+  const s = tc.summary;
+  const rows = tc.rows || [];
+  const no = tc.noOutcomeData || [];
+  const W = 540, H = 300, ml = 56, mr = 16, mt = 14, mb = 40;
+  const pw = W - ml - mr, ph = H - mt - mb;
+  const xmin = 0, xmax = 16;
+  let ymin = 0, ymax = 0;
+  for (const p of rows) { ymin = Math.min(ymin, p.excessReturn); ymax = Math.max(ymax, p.excessReturn); }
+  ymin = Math.min(ymin, -0.05); ymax = Math.max(ymax, 0.05);
+  const yp = (ymax - ymin) * 0.1 || 0.05; ymin -= yp; ymax += yp;
+  const sx = (v) => ml + (v - xmin) / (xmax - xmin) * pw;
+  const sy = (v) => mt + (ymax - v) / (ymax - ymin) * ph;
+  const xticks = [0, 4, 8, 12, 16].map(v =>
+    `<line x1="${sx(v)}" y1="${mt}" x2="${sx(v)}" y2="${H - mb}" class="tc-grid"/><text x="${sx(v)}" y="${H - mb + 15}" class="tc-axl" text-anchor="middle">${v}</text>`).join('');
+  const yticks = [ymax, (ymax + ymin) / 2, ymin].map(v =>
+    `<text x="${ml - 8}" y="${sy(v) + 3}" class="tc-axl" text-anchor="end">${(v * 100).toFixed(0)}%</text>`).join('');
+  const dots = rows.map(p => {
+    const cls = p.tooFresh ? 'tc-dot tc-fresh' : 'tc-dot';
+    const title = `${p.ticker} · score ${p.score}/${p.maxScore} · ${p.holdingPeriodTradingDays}td · abs ${(p.absoluteReturn * 100).toFixed(1)}% · excess ${(p.excessReturn * 100).toFixed(1)}%${p.tooFresh ? ' · too fresh (<20td)' : ''}`;
+    return `<circle cx="${sx(p.score).toFixed(1)}" cy="${sy(p.excessReturn).toFixed(1)}" r="4" class="${cls}"><title>${escapeHTML(title)}</title></circle>`;
+  }).join('');
+  const svg = `<svg viewBox="0 0 ${W} ${H}" class="tc-svg" role="img" aria-label="Thesis calibration scatter: score vs excess return">
+    ${xticks}${yticks}
+    <line x1="${ml}" y1="${sy(0)}" x2="${W - mr}" y2="${sy(0)}" class="tc-zero"/>
+    ${dots}
+    <text x="${ml + pw / 2}" y="${H - 2}" class="tc-axl" text-anchor="middle">Thesis score</text>
+    <text transform="translate(13 ${mt + ph / 2}) rotate(-90)" class="tc-axl" text-anchor="middle">Excess return vs SPY</text>
+  </svg>`;
+  const statLine = (s.correlationEligible && s.spearmanRho != null)
+    ? `Spearman &rho; = <strong>${s.spearmanRho.toFixed(2)}</strong> <span class="dim">(n=${s.spearmanN}, horizon: median ${s.medianHoldingDays} trading days since lock)</span>`
+    : `<span class="dim">Sample insufficient for a correlation stat (n=${s.nSettled}, need 30).</span>`;
+  let verdictLine;
+  if (s.verdictEligible && s.spearmanRho != null) {
+    if (s.spearmanRho > 0) verdictLine = `Framework <strong class="gain">appears calibrated</strong> (positive rank correlation). No auto-adjustment.`;
+    else if (s.spearmanRho < 0) verdictLine = `Framework <strong class="loss">appears miscalibrated</strong> (flat/negative) — flag for human review. No auto-adjustment.`;
+    else verdictLine = `Neutral — no clear rank relationship. No auto-adjustment.`;
+  } else {
+    verdictLine = `<span class="dim">Sample insufficient for a calibration verdict (n=${s.nSettled}, need 50).</span>`;
+  }
+  const noFoot = no.length
+    ? `<div class="tc-foot dim">No outcome data (excluded, never zero-filled): ${no.map(n => `${escapeHTML(n.ticker)} (${escapeHTML(n.reason)})`).join(', ')}.</div>`
+    : '';
+  return `
+    <h4 class="rh-side" style="margin-top:1.4rem">Thesis Calibration <span class="dim" style="font-size:0.78rem; font-weight:normal">(forward · price-return-since-lock · thesis-level)</span></h4>
+    <div class="tc-contrast dim">Forward, thesis-level, n=${s.n} (excess vs SPY = headline). Distinct from the realised trade-level calibration above (dormant until trades close). Grey points are too fresh (&lt;20 trading days) and excluded from the stat.</div>
+    <div class="tc-panel">
+      <div class="tc-svgwrap">${svg}</div>
+      <div class="tc-stats">
+        <div class="tc-stat">${statLine}</div>
+        <div class="tc-verdict">${verdictLine}</div>
+        <div class="tc-median dim">Median excess ${(s.medianExcess * 100).toFixed(1)}% · mean ${(s.meanExcess * 100).toFixed(1)}% · ${s.tooFreshCount} too-fresh of ${s.n}.</div>
+      </div>
+    </div>
+    <div class="tc-disclosure">Descriptive only. All theses were locked within one ~2-month regime, so cross-thesis returns partly reflect lock-timing, not score quality. This view is watched forward — it grows more reliable as sample and horizon grow. It never adjusts any band or weight.</div>
+    ${noFoot}`;
+}
+
 async function renderPerformance() {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading performance…</div>';
 
-  let overview, cohorts, calib;
+  let overview, cohorts, calib, thesisCalib;
   try {
-    [overview, cohorts, calib] = await Promise.all([
+    [overview, cohorts, calib, thesisCalib] = await Promise.all([
       api(`/api/performance/overview?window=${state.perfWindow}`),
       api(`/api/performance/cohorts?window=${state.perfWindow}`),
       api('/api/performance/calibration'),
+      api('/api/calibration/theses').catch(() => null),
     ]);
   } catch (err) {
     content.innerHTML = `<div class="empty"><div class="loss">performance failed: ${escapeHTML(err.message)}</div></div>`;
@@ -10197,6 +10259,7 @@ async function renderPerformance() {
       ${equityHTML}
       <h4 class="rh-side" style="margin-top:1.2rem">Methodology calibration <span class="dim" style="font-size:0.78rem; font-weight:normal">(does scoring trades higher produce better outcomes?)</span></h4>
       <div class="calib-row">${calibBlocks}</div>
+      ${renderThesisCalibrationPanel(thesisCalib)}
       <h4 class="rh-side" style="margin-top:1.2rem">Cohort breakdown</h4>
       ${cohortSections || '<div class="dim">No cohort data yet.</div>'}
     </div>

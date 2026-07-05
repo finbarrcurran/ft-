@@ -5595,3 +5595,22 @@ a.score-badge { display: inline-block; }
 .nx-pill.nx-dip { font-weight: 600; }
 .nx-pill.nx-dip.active { border-color: rgb(var(--color-gain) / 0.5); background: rgb(var(--color-gain) / 0.1); color: rgb(var(--color-gain)); }
 .nx-table.nx-tally { width: auto; min-width: 280px; }
+
+
+/* ----- SC-38 Thesis Calibration panel ------------------------------- */
+.tc-contrast { font-size: 0.8rem; margin: 4px 0 10px; max-width: 78ch; }
+.tc-panel { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+.tc-svgwrap { flex: 1 1 420px; min-width: 320px; max-width: 560px; }
+.tc-svg { width: 100%; height: auto; }
+.tc-grid { stroke: rgb(var(--color-border) / 0.5); stroke-width: 1; }
+.tc-zero { stroke: rgb(var(--color-border-strong)); stroke-width: 1; stroke-dasharray: 3 3; }
+.tc-axl { fill: rgb(var(--color-text-dim)); font-size: 10px; }
+.tc-dot { fill: rgb(var(--color-accent)); opacity: 0.85; }
+.tc-dot:hover { fill: rgb(var(--color-gain)); opacity: 1; }
+.tc-fresh { fill: rgb(var(--color-text-dim)); opacity: 0.35; }
+.tc-stats { flex: 1 1 220px; min-width: 200px; font-size: 0.85rem; }
+.tc-stat { margin-bottom: 6px; }
+.tc-verdict { margin-bottom: 6px; }
+.tc-median { font-size: 0.78rem; }
+.tc-disclosure { margin: 12px 0 6px; padding: 8px 12px; border-radius: 8px; font-size: 0.78rem; color: rgb(var(--color-text-dim)); border: 1px solid rgb(var(--color-amber) / 0.35); background: rgb(var(--color-amber) / 0.06); max-width: 90ch; }
+.tc-foot { font-size: 0.76rem; margin-bottom: 8px; }
