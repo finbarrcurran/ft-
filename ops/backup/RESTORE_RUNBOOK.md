@@ -22,22 +22,25 @@ this passphrase is lost, the backups are **unrecoverable**. It must live in your
 manager. To read it to save it:  `sudo grep '^RESTIC_PASSWORD=' /etc/ft/backup.env`
 
 ## Restore procedure (and the quarterly drill)
-Run as root on jarvis:
+Run as root on jarvis. **NOTE:** `restic restore --target DIR` recreates the file at its
+*original* absolute path under DIR (i.e. `DIR/tmp/ft-backup/ft.db`) — so we use `restic dump`
+to extract the single DB to a flat path instead. (Verified 2026-07-05.)
 ```
 set -a; . /etc/ft/backup.env; set +a
-restic snapshots                                   # pick one (usually 'latest')
-restic restore latest --target /tmp/ft-restore
-sqlite3 /tmp/ft-restore/ft.db 'PRAGMA integrity_check;'          # must print: ok
-sqlite3 /tmp/ft-restore/ft.db "SELECT COUNT(*) FROM theses_index WHERE status='locked';"   # >= 50
+restic snapshots                                               # pick one (usually 'latest')
+restic dump latest /tmp/ft-backup/ft.db > /tmp/ft-restore.db   # extract the DB to a flat file
+sqlite3 /tmp/ft-restore.db 'PRAGMA integrity_check;'           # must print: ok
+sqlite3 /tmp/ft-restore.db "SELECT COUNT(*) FROM theses_index WHERE status='locked';"   # >= 50
 ```
 Prove it boots against the restored copy (read-only, throwaway port):
 ```
-FT_DB_PATH=/tmp/ft-restore/ft.db FT_ADDR=127.0.0.1:8099 /opt/ft/bin/ft &
+FT_DB_PATH=/tmp/ft-restore.db FT_ADDR=127.0.0.1:8099 /opt/ft/bin/ft &
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8099/healthz   # expect 200
-kill %1
+kill %1; rm -f /tmp/ft-restore.db
 ```
 Real disaster recovery only (otherwise this is verify-only): stop `ft`, back up the current
-`/var/lib/ft/ft.db`, `cp /tmp/ft-restore/ft.db /var/lib/ft/ft.db` (chown ft:ft), restart `ft`.
+`/var/lib/ft/ft.db`, then `restic dump latest /tmp/ft-backup/ft.db > /var/lib/ft/ft.db`
+(chown ft:ft), restart `ft`.
 
 ## Cadence
 - Nightly backup 03:00 UTC · Weekly automated restore-verify Sun 03:30 UTC.
