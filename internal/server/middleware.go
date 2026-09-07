@@ -53,11 +53,68 @@ func (s *Server) requireUserOrToken(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "invalid token")
 			return
 		}
+		// SC-41: a token that declares a scope set is held to it — a scoped,
+		// non-"write" token (e.g. an ft_mcp_ read-only token minted for the
+		// MCP connector) cannot reach a non-GET route, even outside /mcp.
+		// Every token minted before SC-41 (incl. OpenClaw's) has an EMPTY
+		// scope list — CreateServiceToken was historically called with a nil
+		// scopes slice — so len(st.Scopes)==0 and this is a no-op for all of
+		// them. Deliberate: no behavior change for anything already in use.
+		if len(st.Scopes) > 0 && r.Method != http.MethodGet && !hasScope(st.Scopes, "write") {
+			writeError(w, http.StatusForbidden, "token scope does not permit write access")
+			return
+		}
 		s.store.TouchServiceTokenLastUsed(r.Context(), st.ID)
 
 		ctx := context.WithValue(r.Context(), ctxUserID, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	}
+}
+
+// requireReadToken gates the SC-41 /mcp surface. Deliberately separate from
+// requireUserOrToken: bearer-only (no cookie fallback — an MCP client never
+// holds an ft_session cookie) and requires the token's scopes to actually
+// contain "read". This is one layer of the read-only guarantee; the other
+// is that no mutating store method is ever wired into the six /mcp tools
+// (see mcp_handlers.go) — so even a bug here can't reach a write, and no
+// HTTP-method check is applied (MCP's Streamable HTTP transport is
+// JSON-RPC over POST, not a REST verb per tool).
+func (s *Server) requireReadToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		hdr := r.Header.Get("Authorization")
+		if !strings.HasPrefix(hdr, "Bearer ") {
+			writeError(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+		token := strings.TrimSpace(strings.TrimPrefix(hdr, "Bearer "))
+		if token == "" {
+			writeError(w, http.StatusUnauthorized, "empty bearer token")
+			return
+		}
+		hash := auth.HashServiceToken(token)
+		st, userID, err := s.store.FindServiceTokenByHash(r.Context(), hash)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "invalid token")
+			return
+		}
+		if !hasScope(st.Scopes, "read") {
+			writeError(w, http.StatusForbidden, "token lacks 'read' scope")
+			return
+		}
+		s.store.TouchServiceTokenLastUsed(r.Context(), st.ID)
+
+		ctx := context.WithValue(r.Context(), ctxUserID, userID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	}
+}
+
+func hasScope(scopes []string, want string) bool {
+	for _, sc := range scopes {
+		if sc == want {
+			return true
+		}
+	}
+	return false
 }
 
 // userFromCookie resolves a session cookie to a user id. Returns ok=false on

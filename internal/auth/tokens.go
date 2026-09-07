@@ -18,11 +18,24 @@ func NewSessionToken() (string, error) {
 // Only the hash is persisted; the plaintext is shown once to the human.
 // Prefix matches the project: ft_st_ → "FT service token".
 func NewServiceToken() (plaintext, hashHex string, err error) {
+	return newPrefixedToken("ft_st_")
+}
+
+// NewReadOnlyToken returns a fresh ft_mcp_-prefixed token plaintext and its
+// sha256 hash (SC-41). Mint it with scopes=["read"] via CreateServiceToken —
+// the prefix is a grep-friendly label, not enforcement; the actual read-only
+// guarantee comes from requireReadToken (server/middleware.go) checking the
+// scope, plus /mcp never wiring in a mutating store call.
+func NewReadOnlyToken() (plaintext, hashHex string, err error) {
+	return newPrefixedToken("ft_mcp_")
+}
+
+func newPrefixedToken(prefix string) (plaintext, hashHex string, err error) {
 	p, err := randomHex(32)
 	if err != nil {
 		return "", "", err
 	}
-	p = "ft_st_" + p // grep-friendly prefix
+	p = prefix + p // grep-friendly prefix
 	sum := sha256.Sum256([]byte(p))
 	return p, hex.EncodeToString(sum[:]), nil
 }

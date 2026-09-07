@@ -362,6 +362,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/bot/refresh", s.requireUserOrToken(s.handleRefresh))
 	s.mux.HandleFunc("GET /api/bot/refresh-status", s.requireUserOrToken(s.handleRefreshStatus))
 
+	// SC-41 — Claude â FT MCP connector (read-only). Gated by requireReadToken,
+	// not requireUserOrToken â see middleware.go.
+	s.mountMCP()
+
 	// Static frontend (catch-all; must be registered last).
 	s.mux.Handle("/", web.Handler())
 }

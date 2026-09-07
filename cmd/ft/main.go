@@ -775,6 +775,38 @@ func runToken(args []string) {
 		fmt.Println()
 		fmt.Println("  " + plain)
 		fmt.Println()
+	case "create-mcp":
+		// SC-41 — mints an ft_mcp_-prefixed token with scopes=["read"], for
+		// Claude.ai's MCP connector config. Distinct from "create": this is
+		// the only path that produces a token requireReadToken will accept
+		// on /mcp, and (per the SC-41 fix to requireUserOrToken) the only
+		// kind of token that is actually blocked from non-GET routes
+		// elsewhere in the app.
+		fs := flag.NewFlagSet("token create-mcp", flag.ExitOnError)
+		userID := fs.Int64("user-id", 1, "user id who owns the token")
+		name := fs.String("name", "", "human-readable label, e.g. claude-mcp")
+		_ = fs.Parse(args)
+		if *name == "" {
+			fmt.Fprintln(os.Stderr, "--name is required (e.g. --name claude-mcp)")
+			os.Exit(2)
+		}
+		plain, hash, err := auth.NewReadOnlyToken()
+		must("generate token", err)
+		id, err := st.CreateServiceToken(context.Background(), *userID, *name, []string{"read"}, hash)
+		must("persist token", err)
+		fmt.Printf("token id   : %d\n", id)
+		fmt.Printf("token name : %s\n", *name)
+		fmt.Printf("user_id    : %d\n", *userID)
+		fmt.Printf("scopes     : read\n")
+		fmt.Println()
+		fmt.Println("Save this — it is shown ONCE and only the hash is stored:")
+		fmt.Println()
+		fmt.Println("  " + plain)
+		fmt.Println()
+		fmt.Println("Enter this as the bearer credential in Claude.ai's MCP connector config,")
+		fmt.Println("pointed at https://ft.curranhouse.dev/mcp — it can reach ONLY /mcp's six")
+		fmt.Println("read tools, and is rejected with 403 on any write route elsewhere in FT.")
+		fmt.Println()
 	case "list":
 		fs := flag.NewFlagSet("token list", flag.ExitOnError)
 		userID := fs.Int64("user-id", 1, "user id")
@@ -797,6 +829,7 @@ func runToken(args []string) {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown token subcommand: %s\n", sub)
 		fmt.Fprintln(os.Stderr, "  ft token create --user-id N --name NAME")
+		fmt.Fprintln(os.Stderr, "  ft token create-mcp --user-id N --name NAME  (SC-41, scopes=[read])")
 		fmt.Fprintln(os.Stderr, "  ft token list [--user-id N]")
 		os.Exit(2)
 	}
