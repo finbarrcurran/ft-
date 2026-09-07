@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"ft/internal/auth"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -81,26 +82,38 @@ func (s *Server) requireUserOrToken(next http.HandlerFunc) http.HandlerFunc {
 // JSON-RPC over POST, not a REST verb per tool).
 func (s *Server) requireReadToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// SC-41 ops visibility: every hit on /mcp is logged here, regardless
+		// of outcome — this middleware is the ONLY thing standing between a
+		// raw request and a 401/403/handler call, so this is the one place
+		// that can answer "did a request even reach FT" for any connector
+		// debugging (a rejected request previously left zero trace; only a
+		// successful tool call logged anything, deep inside mcp_handlers.go).
+		log := slog.With("path", r.URL.Path, "method", r.Method, "remote", r.RemoteAddr, "ua", r.Header.Get("User-Agent"))
 		hdr := r.Header.Get("Authorization")
 		if !strings.HasPrefix(hdr, "Bearer ") {
+			log.Info("mcp request rejected", "reason", "no bearer header")
 			writeError(w, http.StatusUnauthorized, "not authenticated")
 			return
 		}
 		token := strings.TrimSpace(strings.TrimPrefix(hdr, "Bearer "))
 		if token == "" {
+			log.Info("mcp request rejected", "reason", "empty bearer token")
 			writeError(w, http.StatusUnauthorized, "empty bearer token")
 			return
 		}
 		hash := auth.HashServiceToken(token)
 		st, userID, err := s.store.FindServiceTokenByHash(r.Context(), hash)
 		if err != nil {
+			log.Info("mcp request rejected", "reason", "invalid token")
 			writeError(w, http.StatusUnauthorized, "invalid token")
 			return
 		}
 		if !hasScope(st.Scopes, "read") {
+			log.Info("mcp request rejected", "reason", "missing read scope", "token_id", st.ID)
 			writeError(w, http.StatusForbidden, "token lacks 'read' scope")
 			return
 		}
+		log.Info("mcp request accepted", "token_id", st.ID)
 		s.store.TouchServiceTokenLastUsed(r.Context(), st.ID)
 
 		ctx := context.WithValue(r.Context(), ctxUserID, userID)
