@@ -105,8 +105,11 @@ func logVideoDigestSweep(trigger string, vd *videodigest.Service, ctx context.Co
 		}
 		ingested++
 		slog.Info("video digest ingested", "trigger", trigger, "source", r.Source, "video", r.VideoID,
-			"published", r.PublishedAt, "mentions", r.Mentions, "quotes", r.Quotes,
-			"quotesRejected", r.QuotesRejected, "frames", r.Frames, "costUsd", r.CostUSD)
+			"published", r.PublishedAt, "mentions", r.Mentions, "mentionsUngrounded", r.Ungrounded,
+			"quotes", r.Quotes, "quotesRejected", r.QuotesRejected, "frames", r.Frames, "costUsd", r.CostUSD)
+		for _, q := range r.RejectedQuotes {
+			slog.Info("video digest quote rejected (not verbatim)", "video", r.VideoID, "quote", q)
+		}
 	}
 	slog.Info("video digest sweep", "trigger", trigger, "ingested", ingested, "failed", failed, "costUsd", cost)
 }

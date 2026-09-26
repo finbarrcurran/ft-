@@ -35,6 +35,7 @@ import (
 	"ft/internal/store"
 	"ft/internal/technicals"
 	"ft/internal/theses"
+	"ft/internal/videodigest"
 	"log/slog"
 	"net/http"
 	"os"
@@ -80,6 +81,9 @@ func main() {
 		runNexusBackfill(os.Args[2:])
 	case "nexus-compute":
 		runNexusCompute(os.Args[2:])
+	case "video-digest-reground":
+		runVideoDigestReground()
+		return
 	case "nexus-fundamentals":
 		runNexusFundamentals(os.Args[2:])
 	case "help", "-h", "--help":
@@ -1082,4 +1086,20 @@ func runNexusFundamentals(args []string) {
 	must("compute fundamentals", ferr)
 	fmt.Printf("nexus-fundamentals %s: %d rows written, %d degraded (non-OK / fetch fail)\n",
 		res.AsOf, res.Computed, len(res.Degraded))
+}
+
+// runVideoDigestReground re-anchors stored video-digest mention/quote timestamps
+// to where they are actually spoken in each package transcript (SC-43 P1). No
+// LLM call; idempotent. Run as ft with FT_DB_PATH set.
+func runVideoDigestReground() {
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	res, err := videodigest.New(st.DB, nil, os.Getenv("FT_VIDEO_DIGEST_ROOT")).Reground(context.Background())
+	must("reground", err)
+	fmt.Printf("digests %d | mentions %d (moved %d, no timestamp %d) | quotes %d (moved %d)\n",
+		res.Digests, res.Mentions, res.MentionsMoved, res.MentionsUngrounded, res.Quotes, res.QuotesMoved)
 }

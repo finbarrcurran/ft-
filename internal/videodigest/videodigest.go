@@ -33,7 +33,7 @@ const DefaultRoot = "/var/lib/video_digest"
 const FeatureID = "video_digest"
 
 const (
-	maxOutputTokens = 2000 // governor default cap (llm_max_output_tokens_per_call)
+	maxOutputTokens = 4000 // needs llm_max_output_tokens_per_call >= 4000 (raised from 2000, Fin 2026-09-26)
 	markerEverySec  = 30   // timestamp marker spacing in the compact transcript
 	maxMentions     = 20
 	maxQuotes       = 2
@@ -327,7 +327,9 @@ type rawExtraction struct {
 // Extraction is the sanitised result that gets stored.
 type Extraction struct {
 	rawExtraction
-	QuotesRejected int
+	QuotesRejected     int
+	RejectedQuotes     []string // logged, not stored — for tuning the prompt
+	MentionsUngrounded int      // name never found in the transcript → no timestamp
 }
 
 func enum(v *string, allowed ...string) *string {
@@ -361,14 +363,141 @@ func clampTs(v *float64, dur int) *int {
 
 var nonWordRe = regexp.MustCompile(`[^a-z0-9]+`)
 
+// Filler words are dropped before matching: the verbatim (en-orig) captions keep
+// every "uh"/"um", and the model tidies them out of quotes.
+var fillers = map[string]bool{"uh": true, "um": true, "uhm": true, "erm": true, "er": true, "ah": true, "hmm": true, "mm": true}
+
 func normalise(s string) string {
-	return strings.TrimSpace(nonWordRe.ReplaceAllString(strings.ToLower(s), " "))
+	words := strings.Fields(nonWordRe.ReplaceAllString(strings.ToLower(s), " "))
+	out := words[:0]
+	for _, w := range words {
+		if !fillers[w] {
+			out = append(out, w)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// ---------------------------------------------------------------------------
+// Grounding: timestamps come from where things are actually said in the
+// transcript, not from the model's guess (which drifts by minutes).
+
+type segment struct {
+	start int
+	text  string // normalised
+}
+
+var markerLineRe = regexp.MustCompile(`^\[(\d+)s\] (.*)$`)
+
+func segments(compact string) []segment {
+	var out []segment
+	for _, line := range strings.Split(compact, "\n") {
+		if m := markerLineRe.FindStringSubmatch(line); m != nil {
+			var t int
+			fmt.Sscanf(m[1], "%d", &t)
+			out = append(out, segment{start: t, text: normalise(m[2])})
+		}
+	}
+	return out
+}
+
+var nameStopwords = map[string]bool{"the": true, "and": true, "of": true, "a": true, "an": true, "us": true,
+	"u": true, "s": true, "in": true, "on": true, "for": true, "to": true, "vs": true, "inc": true, "corp": true}
+
+func nameTokens(name string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, w := range strings.Fields(normalise(name)) {
+		if nameStopwords[w] || seen[w] || (len(w) < 2 && !strings.ContainsAny(w, "0123456789")) {
+			continue
+		}
+		seen[w] = true
+		out = append(out, w)
+	}
+	return out
+}
+
+// groundMention returns the start of the transcript segment, nearest to the
+// model's guess, where the mention's name is actually spoken (a segment plus the
+// next one, to catch names split across a marker). Multi-word names need at
+// least two of their words to match. nil if the name never appears — better no
+// link than a wrong one.
+func groundMention(name string, guess *float64, segs []segment) *int {
+	toks := nameTokens(name)
+	if len(toks) == 0 {
+		return nil
+	}
+	need := 1
+	if len(toks) > 2 {
+		need = 2
+	}
+	g := 0.0
+	if guess != nil {
+		g = *guess
+	}
+	best, bestDist := -1, math.MaxFloat64
+	for i, sg := range segs {
+		win := " " + sg.text + " "
+		if i+1 < len(segs) {
+			win += segs[i+1].text + " "
+		}
+		own := " " + sg.text + " "
+		hits, ownHits := 0, 0
+		for _, t := range toks {
+			if strings.Contains(win, " "+t+" ") {
+				hits++
+				if strings.Contains(own, " "+t+" ") {
+					ownHits++
+				}
+			}
+		}
+		// The look-ahead only completes a name split across a marker; the segment
+		// itself must contain part of it, or an earlier segment would claim it.
+		if hits < need || ownHits == 0 {
+			continue
+		}
+		if d := math.Abs(float64(sg.start) - g); d < bestDist {
+			best, bestDist = i, d
+		}
+	}
+	if best < 0 {
+		return nil
+	}
+	return &segs[best].start
+}
+
+// quoteTs finds a quote verbatim (ignoring case, punctuation and filler words)
+// anywhere in the transcript and returns the start of the segment it begins in.
+func quoteTs(quote string, segs []segment) (int, bool) {
+	q := normalise(quote)
+	if q == "" {
+		return 0, false
+	}
+	var b strings.Builder
+	offs := make([]int, len(segs))
+	for i, sg := range segs {
+		offs[i] = b.Len()
+		b.WriteString(" " + sg.text)
+	}
+	b.WriteString(" ")
+	idx := strings.Index(b.String(), " "+q+" ")
+	if idx < 0 {
+		return 0, false
+	}
+	at := 0
+	for i := range segs {
+		if offs[i] <= idx {
+			at = segs[i].start
+		}
+	}
+	return at, true
 }
 
 // ParseExtraction decodes the model's JSON and enforces the schema: enum values,
-// caps on list lengths, ts_sec within the video, and quotes that actually occur
-// in the transcript (a hallucinated quote is dropped, not stored).
-func ParseExtraction(raw, plainTranscript string, source string) (Extraction, error) {
+// caps on list lengths, and grounding against the timed transcript — quotes must
+// occur verbatim (filler words aside) and take the timestamp where they occur;
+// mention timestamps are re-anchored to where the name is actually spoken.
+func ParseExtraction(raw, compactTranscript string, source string) (Extraction, error) {
 	s := strings.TrimSpace(raw)
 	i, j := strings.Index(s, "{"), strings.LastIndex(s, "}")
 	if i < 0 || j <= i {
@@ -394,29 +523,40 @@ func ParseExtraction(raw, plainTranscript string, source string) (Extraction, er
 			}
 		}
 	}
+	segs := segments(compactTranscript)
 	for _, m := range r.Mentions {
 		if strings.TrimSpace(m.Name) == "" || len(ex.Mentions) >= maxMentions {
 			continue
 		}
+		name := strings.TrimSpace(m.Name)
+		var ts *float64
+		if g := groundMention(name, m.TsSec, segs); g != nil {
+			f := float64(*g)
+			ts = &f
+		} else {
+			ex.MentionsUngrounded++
+		}
 		ex.Mentions = append(ex.Mentions, rawMention{
-			Name:    strings.TrimSpace(m.Name),
+			Name:    name,
 			Type:    enum(m.Type, "stock", "etf", "crypto", "index", "macro"),
 			Context: text(m.Context),
 			Stance:  enum(m.Stance, "bullish", "bearish", "neutral", "watching"),
-			TsSec:   m.TsSec,
+			TsSec:   ts,
 		})
 	}
-	hay := " " + normalise(plainTranscript) + " "
 	for _, q := range r.NotableQuotes {
 		qt := strings.TrimSpace(strings.Trim(q.QuoteText, `"“”`))
 		if qt == "" || len(ex.NotableQuotes) >= maxQuotes {
 			continue
 		}
-		if n := normalise(qt); n == "" || !strings.Contains(hay, " "+n+" ") {
+		at, ok := quoteTs(qt, segs)
+		if !ok {
 			ex.QuotesRejected++
+			ex.RejectedQuotes = append(ex.RejectedQuotes, qt)
 			continue
 		}
-		ex.NotableQuotes = append(ex.NotableQuotes, rawQuote{QuoteText: qt, TsSec: q.TsSec})
+		f := float64(at)
+		ex.NotableQuotes = append(ex.NotableQuotes, rawQuote{QuoteText: qt, TsSec: &f})
 	}
 	if source == "cowen" {
 		sn := rawSnapshot{}
@@ -446,19 +586,21 @@ func ParseExtraction(raw, plainTranscript string, source string) (Extraction, er
 
 // Result reports one package's ingest outcome.
 type Result struct {
-	VideoID        string  `json:"videoId"`
-	Source         string  `json:"source"`
-	PublishedAt    string  `json:"publishedAt"`
-	Status         string  `json:"status"` // ingested | skipped | failed
-	DigestID       int64   `json:"digestId,omitempty"`
-	Mentions       int     `json:"mentions,omitempty"`
-	Quotes         int     `json:"quotes,omitempty"`
-	QuotesRejected int     `json:"quotesRejected,omitempty"`
-	Frames         int     `json:"frames,omitempty"`
-	PriorDigestID  int64   `json:"priorDigestId,omitempty"`
-	CostUSD        float64 `json:"costUsd,omitempty"`
-	InputTokens    int     `json:"inputTokens,omitempty"`
-	Error          string  `json:"error,omitempty"`
+	VideoID        string   `json:"videoId"`
+	Source         string   `json:"source"`
+	PublishedAt    string   `json:"publishedAt"`
+	Status         string   `json:"status"` // ingested | skipped | failed
+	DigestID       int64    `json:"digestId,omitempty"`
+	Mentions       int      `json:"mentions,omitempty"`
+	Quotes         int      `json:"quotes,omitempty"`
+	QuotesRejected int      `json:"quotesRejected,omitempty"`
+	RejectedQuotes []string `json:"rejectedQuotes,omitempty"`
+	Ungrounded     int      `json:"mentionsUngrounded,omitempty"`
+	Frames         int      `json:"frames,omitempty"`
+	PriorDigestID  int64    `json:"priorDigestId,omitempty"`
+	CostUSD        float64  `json:"costUsd,omitempty"`
+	InputTokens    int      `json:"inputTokens,omitempty"`
+	Error          string   `json:"error,omitempty"`
 }
 
 func (s *Service) existingID(ctx context.Context, videoID string) (int64, error) {
@@ -527,10 +669,6 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 	if err != nil {
 		return fail(err)
 	}
-	plain, err := os.ReadFile(filepath.Join(p.Dir, "transcript.txt"))
-	if err != nil {
-		return fail(err)
-	}
 	compact := CompactTranscript(string(vtt))
 	if compact == "" {
 		return fail(fmt.Errorf("transcript.vtt produced no text"))
@@ -546,21 +684,32 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 	if s.LLM == nil {
 		return fail(fmt.Errorf("llm service not configured"))
 	}
+	// Ask for maxOutputTokens, but never more than the governor's per-call cap:
+	// a lowered cap then shortens output rather than failing every ingest.
+	maxOut := maxOutputTokens
+	if v, _ := s.LLM.Store.GetPreference(ctx, "llm_max_output_tokens_per_call"); v != "" {
+		var c int
+		if _, err := fmt.Sscanf(v, "%d", &c); err == nil && c > 0 && c < maxOut {
+			maxOut = c
+		}
+	} else if maxOut > 2000 {
+		maxOut = 2000 // governor default when the preference is unset
+	}
 	resp, err := s.LLM.Call(ctx, llm.CallRequest{
 		FeatureID:       FeatureID,
 		FeatureContext:  m.Source + ":" + m.VideoID + " " + m.PublishedAt,
 		SystemPrompt:    systemPrompt(m.Source),
 		UserPrompt:      userPrompt(m, compact, pr),
-		MaxOutputTokens: maxOutputTokens,
+		MaxOutputTokens: maxOut,
 	})
 	if err != nil {
 		return fail(fmt.Errorf("llm: %w", err))
 	}
 	res.CostUSD, res.InputTokens = resp.CostUSD, resp.InputTokens
 	if resp.Outcome == "truncated" {
-		return fail(fmt.Errorf("llm output truncated at %d tokens", maxOutputTokens))
+		return fail(fmt.Errorf("llm output truncated at %d tokens", maxOut))
 	}
-	ex, err := ParseExtraction(resp.Text, string(plain), m.Source)
+	ex, err := ParseExtraction(resp.Text, compact, m.Source)
 	if err != nil {
 		return fail(err)
 	}
@@ -655,7 +804,111 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 	}
 	res.Status, res.DigestID = "ingested", id
 	res.Mentions, res.Quotes, res.QuotesRejected, res.Frames = len(ex.Mentions), len(ex.NotableQuotes), ex.QuotesRejected, len(m.Frames)
+	res.RejectedQuotes, res.Ungrounded = ex.RejectedQuotes, ex.MentionsUngrounded
 	return res
+}
+
+// ReGroundResult summarises a Reground pass.
+type ReGroundResult struct {
+	Digests, Mentions, MentionsMoved, MentionsUngrounded, Quotes, QuotesMoved int
+}
+
+// Reground re-anchors the timestamps of already-stored mentions and quotes to
+// where they are actually spoken, using each digest's package transcript. No LLM
+// call. Used once for digests ingested before grounding existed; idempotent.
+func (s *Service) Reground(ctx context.Context) (ReGroundResult, error) {
+	var out ReGroundResult
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, package_path FROM video_digests`)
+	if err != nil {
+		return out, err
+	}
+	type dg struct {
+		id   int64
+		path string
+	}
+	var ds []dg
+	for rows.Next() {
+		var d dg
+		if err := rows.Scan(&d.id, &d.path); err != nil {
+			rows.Close()
+			return out, err
+		}
+		ds = append(ds, d)
+	}
+	rows.Close()
+
+	for _, d := range ds {
+		vtt, err := os.ReadFile(filepath.Join(d.path, "transcript.vtt"))
+		if err != nil {
+			return out, fmt.Errorf("digest %d: %w", d.id, err)
+		}
+		segs := segments(CompactTranscript(string(vtt)))
+		out.Digests++
+
+		type row struct {
+			id   int64
+			text string
+			ts   sql.NullInt64
+		}
+		load := func(q string) ([]row, error) {
+			rs, err := s.DB.QueryContext(ctx, q, d.id)
+			if err != nil {
+				return nil, err
+			}
+			defer rs.Close()
+			var got []row
+			for rs.Next() {
+				var r row
+				if err := rs.Scan(&r.id, &r.text, &r.ts); err != nil {
+					return nil, err
+				}
+				got = append(got, r)
+			}
+			return got, rs.Err()
+		}
+		ms, err := load(`SELECT id, name, ts_sec FROM video_mentions WHERE digest_id = ?`)
+		if err != nil {
+			return out, err
+		}
+		for _, m := range ms {
+			out.Mentions++
+			var guess *float64
+			if m.ts.Valid {
+				f := float64(m.ts.Int64)
+				guess = &f
+			}
+			g := groundMention(m.text, guess, segs)
+			var val any
+			if g == nil {
+				out.MentionsUngrounded++
+			} else {
+				val = *g
+			}
+			if g == nil && !m.ts.Valid || g != nil && m.ts.Valid && int64(*g) == m.ts.Int64 {
+				continue
+			}
+			out.MentionsMoved++
+			if _, err := s.DB.ExecContext(ctx, `UPDATE video_mentions SET ts_sec = ? WHERE id = ?`, val, m.id); err != nil {
+				return out, err
+			}
+		}
+		qs, err := load(`SELECT id, quote_text, ts_sec FROM video_quotes WHERE digest_id = ?`)
+		if err != nil {
+			return out, err
+		}
+		for _, q := range qs {
+			out.Quotes++
+			at, ok := quoteTs(q.text, segs)
+			if !ok || q.ts.Valid && int64(at) == q.ts.Int64 {
+				continue
+			}
+			out.QuotesMoved++
+			if _, err := s.DB.ExecContext(ctx, `UPDATE video_quotes SET ts_sec = ? WHERE id = ?`, at, q.id); err != nil {
+				return out, err
+			}
+		}
+	}
+	return out, nil
 }
 
 // IngestVideo ingests one package by YouTube video id (manual / force path).

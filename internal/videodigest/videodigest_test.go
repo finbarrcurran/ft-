@@ -66,7 +66,7 @@ func TestParseExtractionSanitises(t *testing.T) {
 	 "mentions":[{"name":"BTC","type":"CRYPTO","stance":"very bullish","context":"c","ts_sec":999999}],
 	 "notable_quotes":[{"quote_text":"“liquidity is the whole story”","ts_sec":40},{"quote_text":"never said this at all","ts_sec":1}],
 	 "suggested_regime":"shifting","snapshot":{"btc_vs_200dma":"sideways","btc_dominance_level":"high"}}` + "\n```"
-	ex, err := ParseExtraction(raw, "and liquidity is the whole story this week", "cowen")
+	ex, err := ParseExtraction(raw, CompactTranscript(sampleVTT), "cowen")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,11 +77,44 @@ func TestParseExtractionSanitises(t *testing.T) {
 	if *m.Type != "crypto" || m.Stance != nil || clampTs(m.TsSec, 600) != nil {
 		t.Errorf("mention not sanitised: type=%v stance=%v ts=%v", *m.Type, m.Stance, clampTs(m.TsSec, 600))
 	}
-	if len(ex.NotableQuotes) != 1 || ex.QuotesRejected != 1 {
-		t.Errorf("quotes: kept %d rejected %d, want 1/1", len(ex.NotableQuotes), ex.QuotesRejected)
+	if len(ex.NotableQuotes) != 1 || ex.QuotesRejected != 1 || ex.RejectedQuotes[0] != "never said this at all" {
+		t.Errorf("quotes: kept %d rejected %d %v, want 1/1", len(ex.NotableQuotes), ex.QuotesRejected, ex.RejectedQuotes)
+	}
+	if ts := ex.NotableQuotes[0].TsSec; ts == nil || *ts != 31 {
+		t.Errorf("quote ts should come from where it occurs (31s), got %v", ts)
 	}
 	if *ex.SuggestedRegime != "Shifting" || ex.Snapshot.BTCvs200DMA != nil || *ex.Snapshot.Confidence != "unstated" {
 		t.Errorf("enums: regime=%v dma=%v conf=%v", *ex.SuggestedRegime, ex.Snapshot.BTCvs200DMA, *ex.Snapshot.Confidence)
+	}
+}
+
+func TestGroundingAndFillers(t *testing.T) {
+	segs := segments("[0s] welcome back everyone\n[30s] so bitcoin is uh above the two hundred day\n" +
+		"[60s] now the ten year treasury yield is at five percent\n[90s] bitcoin again here")
+	at := func(name string, guess *float64) any {
+		if g := groundMention(name, guess, segs); g != nil {
+			return *g
+		}
+		return nil
+	}
+	late, early := 85.0, 5.0
+	if got := at("Bitcoin", &late); got != 90 {
+		t.Errorf("Bitcoin near 85s grounded to %v, want 90 (nearest occurrence)", got)
+	}
+	if got := at("Bitcoin", &early); got != 30 {
+		t.Errorf("Bitcoin near 5s grounded to %v, want 30", got)
+	}
+	if got := at("U.S. 10-year Treasury yield", nil); got != 60 {
+		t.Errorf("multi-word name grounded to %v, want 60", got)
+	}
+	if got := at("Ethereum", &early); got != nil {
+		t.Errorf("unspoken name must get no timestamp, got %v", got)
+	}
+	if ts, ok := quoteTs("Bitcoin is above the two hundred day", segs); !ok || ts != 30 {
+		t.Errorf("quote with filler removed: ok=%v ts=%d, want true/30", ok, ts)
+	}
+	if _, ok := quoteTs("bitcoin is below the two hundred day", segs); ok {
+		t.Error("altered quote must not verify")
 	}
 }
 
@@ -236,6 +269,18 @@ func TestIngestEndToEnd(t *testing.T) {
 	}
 	if r := svc.IngestVideo(ctx, "../../etc", false); r.Status != "failed" {
 		t.Error("path-like video id must be rejected")
+	}
+
+	// Reground: a drifted timestamp is re-anchored; a second pass changes nothing.
+	st.DB.Exec(`UPDATE video_mentions SET ts_sec = 2 WHERE name = 'Bitcoin'`)
+	rg, err := svc.Reground(ctx)
+	var bad int
+	st.DB.QueryRow(`SELECT count(*) FROM video_mentions WHERE name = 'Bitcoin' AND ts_sec != 31`).Scan(&bad)
+	if err != nil || rg.MentionsMoved != 3 || bad != 0 {
+		t.Errorf("reground: err=%v moved=%d (want 3) still-wrong=%d", err, rg.MentionsMoved, bad)
+	}
+	if rg2, _ := svc.Reground(ctx); rg2.MentionsMoved != 0 || rg2.QuotesMoved != 0 {
+		t.Errorf("reground not idempotent: %+v", rg2)
 	}
 
 	ds, err := svc.List(ctx, "all")
