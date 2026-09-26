@@ -29,7 +29,8 @@ type Tool struct {
 // else is optional with documented defaults.
 type CallRequest struct {
 	// FeatureID tags this call in usage logs. Required.
-	// Recognised: "sunday_digest", "rescoring", "alert_text", "jarvis_query".
+	// Recognised: "sunday_digest", "rescoring", "alert_text", "jarvis_query",
+	// "video_digest" (SC-43 P1).
 	// New features should add their own ID + a kill switch in user_preferences.
 	FeatureID string
 
@@ -277,6 +278,8 @@ func (s *Service) featureEnabled(ctx context.Context, featureID string) bool {
 		return s.boolPref(ctx, "llm_feature_alert_text", true)
 	case "jarvis_query":
 		return s.boolPref(ctx, "llm_feature_jarvis_query", true)
+	case "video_digest": // SC-43 P1
+		return s.boolPref(ctx, "llm_feature_video_digest", true)
 	}
 	return true
 }

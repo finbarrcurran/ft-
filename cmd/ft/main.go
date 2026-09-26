@@ -491,6 +491,25 @@ func runServe() {
 		})
 	}()
 
+	// SC-43 P1 — video digest sweep: ingest any complete Jarvis package not yet
+	// in FT (one governor-routed LLM call per new video). Once ~2 min after boot,
+	// then daily 09:15 UTC — after the Jarvis Mon 08:00 Dublin catch-up run.
+	// Idempotent: packages already ingested cost nothing.
+	go func() {
+		run := func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 45*time.Minute)
+			defer cancel()
+			srv.RunVideoDigestSweep(ctx)
+		}
+		select {
+		case <-bgCtx.Done():
+			return
+		case <-time.After(2 * time.Minute):
+			run()
+		}
+		scheduleAt(bgCtx, 9, 15, run)
+	}()
+
 	// Spec 15 — Thesis Library sync. Periodically `git pull` the
 	// cross_sector_research clone and re-index. No-op if FT_GITHUB_TOKEN
 	// isn't set (graceful degradation in dev).

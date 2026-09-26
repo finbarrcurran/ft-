@@ -22,9 +22,11 @@ import (
 	"ft/internal/signals"
 	"ft/internal/store"
 	"ft/internal/theses"
+	"ft/internal/videodigest"
 	"ft/internal/web"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +50,7 @@ type Server struct {
 	macroRegime      *macroregime.Service             // Spec 9p
 	cryptoScreener   *cryptoscreener.Service          // SC-21 crypto market screener
 	nexus            *nexus.Service                   // SC-36 AI Nexus tab
+	videoDigest      *videodigest.Service             // SC-43 P1 video digest
 	mux              *http.ServeMux
 }
 
@@ -73,6 +76,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		mux:              http.NewServeMux(),
 	}
 	s.cryptoWrite = cryptotheses.NewThesisWriteService(st.DB, s.cryptoAdapters, s.cryptoCascade)
+	s.videoDigest = videodigest.New(st.DB, llmSvc, os.Getenv("FT_VIDEO_DIGEST_ROOT")) // SC-43 P1
 	s.routes()
 	return s
 }
@@ -303,6 +307,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/registry", s.requireUser(s.handleRegistry))                           // SC-28 Registry / Document-Control
 	s.mux.HandleFunc("GET /api/nexus/entry-candidates", s.requireUser(s.handleNexusEntryCandidates)) // SC-39
 	s.mux.HandleFunc("GET /api/calibration/theses", s.requireUser(s.handleCalibrationTheses))        // SC-38
+	s.mux.HandleFunc("GET /api/video-digest", s.requireUser(s.handleVideoDigestList))                // SC-43 P1
+	s.mux.HandleFunc("POST /api/video-digest/ingest", s.requireUser(s.handleVideoDigestIngest))      // SC-43 P1
 	s.mux.HandleFunc("GET /api/scorecards/{code}", s.requireUserOrToken(s.handleScorecardGet))
 	s.mux.HandleFunc("PUT /api/scorecards/{code}", s.requireUser(s.handleScorecardUpdate))
 	s.mux.HandleFunc("POST /api/scorecards/preview", s.requireUser(s.handleScorecardPreview))

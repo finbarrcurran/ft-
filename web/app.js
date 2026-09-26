@@ -703,6 +703,7 @@ function renderDashboard(user) {
         <button class="tab ${state.tab === 'screener' ? 'active' : ''}" data-tab="screener">Screener</button>
         <button class="tab ${state.tab === 'sector-rotation' ? 'active' : ''}" data-tab="sector-rotation">Macro Regime &amp; Sector Rotation</button>
         <button class="tab tab-nexus ${state.tab === 'nexus' ? 'active' : ''}" data-tab="nexus">AI Nexus</button>
+        <button class="tab ${state.tab === 'video-digest' ? 'active' : ''}" data-tab="video-digest">Video Digest</button>
         <button class="tab ${state.tab === 'scorecards' ? 'active' : ''}" data-tab="scorecards">Scorecards</button>
         <button class="tab ${state.tab === 'theses' ? 'active' : ''}" data-tab="theses">Stock Theses${state.thesesRevisionCount > 0 ? ` <span class="tab-badge warn">⚠ ${state.thesesRevisionCount}</span>` : ''}</button>
         <button class="tab ${state.tab === 'watchlist' ? 'active' : ''}" data-tab="watchlist">Watchlist</button>
@@ -1955,6 +1956,8 @@ async function loadActiveTab() {
       await renderNews('market');
     } else if (state.tab === 'crypto-news') {
       await renderNews('crypto');
+    } else if (state.tab === 'video-digest') {
+      await renderVideoDigest();
     } else if (state.tab === 'registry') {
       await renderRegistry();
     } else if (state.tab === 'settings') {
@@ -1996,6 +1999,129 @@ function regBadge(status) {
 }
 
 function regFmt(v) { return (v === null || v === undefined || v === '') ? '<span class="dim">—</span>' : escapeHTML(String(v)); }
+
+// ---------------------------------------------------------------------------
+// SC-43 P1 — Video Digest tab (text-only; frame gallery is P2).
+// Digests of Jordi Visser + Benjamin Cowen weekly videos, extracted from the
+// transcript via the internal/llm governor. Context only — never a scoring input
+// (D6). suggested_regime / regime_read are not in the API response and are not
+// rendered (P3, D7). Demo mode: universe-only, enforced server-side.
+
+let _vdSource = 'all';
+
+function vdClock(t) {
+  const s = Math.max(0, Math.round(t));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + `:${String(sec).padStart(2, '0')}`;
+}
+
+function vdTsLink(d, t) {
+  if (t == null) return '';
+  const href = `https://www.youtube.com/watch?v=${encodeURIComponent(d.videoId)}&t=${t}s`;
+  return `<a class="vd-ts" href="${href}" target="_blank" rel="noopener" title="Open at ${vdClock(t)}">${vdClock(t)}</a>`;
+}
+
+const VD_STANCE = { bullish: 'gain', bearish: 'loss', watching: 'vd-watching', neutral: 'dim' };
+
+const VD_SNAPSHOT_LABELS = [
+  ['riskIndicatorBand', 'Risk indicator'],
+  ['btcVs200dma', 'BTC vs 200DMA'],
+  ['mvrvZBand', 'MVRV-Z'],
+  ['cyclePhase', 'Cycle phase'],
+  ['macroCpiPrint', 'CPI'],
+  ['macroFedPosture', 'Fed posture'],
+  ['macroRecessionFlag', 'Recession'],
+];
+
+function vdSnapshot(sn) {
+  if (!sn) return '';
+  // Only non-null fields — the P2 frame-OCR fields are legitimately empty until then.
+  const rows = VD_SNAPSHOT_LABELS
+    .filter(([k]) => sn[k] !== null && sn[k] !== undefined)
+    .map(([k, label]) => {
+      let v = sn[k];
+      if (typeof v === 'boolean') v = v ? 'likely / under way' : 'not expected';
+      return `<div class="vd-snap-row"><span class="dim">${label}</span><span>${escapeHTML(String(v))}</span></div>`;
+    });
+  if (!rows.length) return '';
+  const conf = sn.confidence ? ` <span class="dim">· confidence: ${escapeHTML(sn.confidence)}</span>` : '';
+  return `<div class="vd-section"><div class="vd-h">Weekly snapshot${conf}</div><div class="vd-snap">${rows.join('')}</div></div>`;
+}
+
+function vdCard(d) {
+  const mins = d.durationSec ? `${Math.round(d.durationSec / 60)} min` : '';
+  const flag = d.source === 'cowen' && d.isFlagship ? '<span class="vd-badge">flagship</span>' : '';
+  const themes = (d.themes || []).map((t) => `<span class="vd-theme">${escapeHTML(t)}</span>`).join('');
+  const changes = (d.themeChanges || []).length
+    ? `<div class="vd-section"><div class="vd-h">Changes vs prior week${d.priorTitle ? ` <span class="dim">· vs “${escapeHTML(d.priorTitle)}”</span>` : ''}</div>
+         <ul class="vd-list">${d.themeChanges.map((c) => `<li>${escapeHTML(c)}</li>`).join('')}</ul></div>`
+    : '';
+  const mentions = (d.mentions || []).length
+    ? `<div class="vd-section"><div class="vd-h">Mentions</div><div class="vd-table-wrap"><table class="vd-table">
+         <thead><tr><th>Name</th><th>Type</th><th>Stance</th><th>Context</th><th>At</th></tr></thead><tbody>
+         ${d.mentions.map((m) => `<tr>
+             <td class="vd-name">${escapeHTML(m.name)}</td>
+             <td class="dim">${escapeHTML(m.type || '—')}</td>
+             <td class="${VD_STANCE[m.stance] || 'dim'}">${escapeHTML(m.stance || '—')}</td>
+             <td>${escapeHTML(m.context || '')}</td>
+             <td>${vdTsLink(d, m.tsSec)}</td></tr>`).join('')}
+         </tbody></table></div></div>`
+    : '';
+  const quotes = (d.quotes || []).length
+    ? `<div class="vd-section"><div class="vd-h">Notable quotes</div>
+         ${d.quotes.map((q) => `<blockquote class="vd-quote">“${escapeHTML(q.text)}” ${vdTsLink(d, q.tsSec)}</blockquote>`).join('')}</div>`
+    : '';
+  return `<article class="vd-card">
+    <div class="vd-card-head">
+      <span class="vd-src vd-src-${d.source}">${escapeHTML(d.sourceName)}</span>
+      <a class="vd-title" href="https://www.youtube.com/watch?v=${encodeURIComponent(d.videoId)}" target="_blank" rel="noopener">${escapeHTML(d.title)}</a>
+      ${flag}
+      <span class="dim vd-meta">${escapeHTML(d.publishedAt)}${mins ? ' · ' + mins : ''}${d.frameCount ? ` · ${d.frameCount} frames` : ''}</span>
+    </div>
+    ${d.executiveSummary ? `<p class="vd-summary">${escapeHTML(d.executiveSummary)}</p>` : '<p class="dim">No summary extracted.</p>'}
+    ${themes ? `<div class="vd-themes">${themes}</div>` : ''}
+    ${changes}
+    ${d.source === 'cowen' ? vdSnapshot(d.snapshot) : ''}
+    ${mentions}
+    ${quotes}
+  </article>`;
+}
+
+async function renderVideoDigest() {
+  const content = $('#content');
+  content.innerHTML = '<div class="empty">loading…</div>';
+  const r = await api('/api/video-digest?source=' + encodeURIComponent(_vdSource));
+  const ds = r.digests || [];
+  const chips = [['all', 'Both'], ['jordi', 'Jordi Visser'], ['cowen', 'Benjamin Cowen']]
+    .map(([k, label]) => `<button class="vd-chip ${_vdSource === k ? 'active' : ''}" data-vdsrc="${k}">${label}</button>`).join('');
+  content.innerHTML = `
+    <div class="vd-tab">
+      <div class="vd-header">
+        <h2 class="vd-heading">Video Digest <span class="dim">· Jordi Visser + Benjamin Cowen</span></h2>
+        <p class="dim vd-note">One LLM digest per weekly video, extracted from the transcript only. Context — never a scoring input. Personal use; not investment advice.</p>
+      </div>
+      <div class="vd-toolbar">
+        <div class="vd-chips">${chips}</div>
+        ${state.demo ? '' : `<button class="vd-ingest" id="vd-ingest" ${r.sweepRunning ? 'disabled' : ''}>${r.sweepRunning ? 'Ingest running…' : 'Ingest new packages'}</button>`}
+      </div>
+      ${ds.length ? ds.map(vdCard).join('') : '<div class="empty">No digests yet. New packages are ingested daily at 09:15 UTC.</div>'}
+    </div>`;
+  content.querySelectorAll('[data-vdsrc]').forEach((b) => b.addEventListener('click', () => {
+    _vdSource = b.dataset.vdsrc;
+    renderVideoDigest();
+  }));
+  const btn = $('#vd-ingest');
+  if (btn) btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Starting…';
+    try {
+      const res = await api('/api/video-digest/ingest', { method: 'POST', body: '{}' });
+      btn.textContent = res.started ? 'Ingest running — refresh in a few minutes' : (res.reason || 'Already running');
+    } catch (err) {
+      btn.textContent = 'Failed: ' + err.message;
+    }
+  });
+}
 
 async function renderRegistry() {
   const content = $('#content');
