@@ -495,6 +495,33 @@ func runServe() {
 		})
 	}()
 
+	// SC-42 — eToro direct sync: holdings + broker SL/TP every 30 min, around the
+	// clock (Fin decision). One portfolio call per run against a 60/min limit.
+	// No-op until FT_ETORO_API_KEY / FT_ETORO_USER_KEY are set.
+	go func() {
+		run := func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 2*time.Minute)
+			defer cancel()
+			srv.RunEtoroSync(ctx)
+		}
+		select {
+		case <-bgCtx.Done():
+			return
+		case <-time.After(time.Minute):
+			run()
+		}
+		t := time.NewTicker(30 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-t.C:
+				run()
+			}
+		}
+	}()
+
 	// SC-43 P1 — video digest sweep: ingest any complete Jarvis package not yet
 	// in FT (one governor-routed LLM call per new video). Once ~2 min after boot,
 	// then daily 09:15 UTC — after the Jarvis Mon 08:00 Dublin catch-up run.

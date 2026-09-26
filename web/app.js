@@ -3845,8 +3845,46 @@ function tileColor(changePct) {
 
 // ---------- stocks table --------------------------------------------------
 
+// SC-42 — eToro broker levels, shown alongside FT's own stop/TP in the Stocks
+// tab. FT's manual stop and alert logic are unchanged; this is a read-only
+// second line. Cached ~60 s; empty in demo mode (server-side).
+let _etoroLevels = { at: 0, byTicker: null };
+
+async function getEtoroLevels() {
+  if (state.demo) return null;
+  if (_etoroLevels.byTicker && Date.now() - _etoroLevels.at < 60000) return _etoroLevels.byTicker;
+  try {
+    const r = await api('/api/etoro/sync');
+    const m = {};
+    for (const e of r.effective || []) {
+      // Prefer the long leg if a ticker is held both ways.
+      if (!m[e.ticker] || e.direction === 'long') m[e.ticker] = e;
+    }
+    _etoroLevels = { at: Date.now(), byTicker: r.configured ? m : null };
+  } catch (_) {
+    _etoroLevels = { at: Date.now(), byTicker: null };
+  }
+  return _etoroLevels.byTicker;
+}
+
+// One small line under FT's SL/TP cell. Levels are in the instrument's own
+// currency, so no currency symbol.
+function etoroLevelLine(levels, ticker, kind) {
+  if (!levels || !ticker) return '';
+  const e = levels[String(ticker).toUpperCase()];
+  if (!e) return '';
+  if (kind === 'sl') {
+    if (e.hasNoSl) return '<div class="etoro-level warn" title="No stop-loss is set on any eToro lot for this holding">⚠ no eToro SL</div>';
+    const partial = e.lotsWithoutSl > 0 ? ` <span title="${e.lotsWithoutSl} of ${e.lotCount} lots have no stop">(${e.lotCount - e.lotsWithoutSl}/${e.lotCount} lots)</span>` : '';
+    return `<div class="etoro-level" title="Highest stop-loss across your eToro lots">eToro ${fmtNum2.format(e.slEffective)}${partial}</div>`;
+  }
+  if (e.hasNoTp) return '<div class="etoro-level dim" title="No take-profit set at eToro">no eToro TP</div>';
+  return `<div class="etoro-level" title="Lowest take-profit across your eToro lots">eToro ${fmtNum2.format(e.tpEffective)}</div>`;
+}
+
 async function renderStocks() {
   const rows = state.stocks;
+  const etoroLevels = await getEtoroLevels(); // SC-42
   // Spec 9f D6 — fetch sector tag map (5-min cache).
   const sectorTagMap = await getSectorTagMap();
   // Spec 12 D5g — P&L currency toggle. Load preference once; fall back to USD.
@@ -3963,8 +4001,8 @@ async function renderStocks() {
         <td class="num" data-flash-id="stock-${r.id}-pnl" data-flash-value="${m.pnlUsd ?? ''}">${pnlCurrencyCell(m.pnlUsd, state.pnlCurrency, fxEURUSD)}</td>
         <td class="num">${pct(m.pnlPct, 2)}</td>
         <td class="num">${dash(r.rsi14, fmtNum2)}</td>
-        <td class="num">${proposedSL}${needsLevelsMark(m)}<div class="sl-method-row">${slMethodToggle(r, m)}</div></td>
-        <td class="num">${proposedTP}</td>
+        <td class="num">${proposedSL}${needsLevelsMark(m)}${etoroLevelLine(etoroLevels, r.ticker, 'sl')}<div class="sl-method-row">${slMethodToggle(r, m)}</div></td>
+        <td class="num">${proposedTP}${etoroLevelLine(etoroLevels, r.ticker, 'tp')}</td>
         <td class="num">${distToSlCell(m.distanceToSlPct)}</td>
         <td class="num">${distToTpCell(m.distanceToTpPct)}</td>
         ${vol12mCell}
