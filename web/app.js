@@ -3113,6 +3113,7 @@ function renderEtoroReconBody() {
         <input type="file" id="recon-file" accept=".xlsx" hidden />
         <p>Drop an eToro <strong>.xlsx</strong> statement here, or <button class="link-btn" id="recon-pick">choose a file</button>.</p>
       </div>
+      <p class="dim recon-range-hint">The statement must cover your whole open portfolio: set the <strong>start date to your account's opening date</strong> and the <strong>end date to today</strong>. A shorter range misses positions opened outside it.</p>
       ${st.error ? `<div class="error">${escapeHTML(st.error)}</div>` : ''}`;
     foot.innerHTML = `<button class="btn-secondary" id="recon-cancel">Cancel</button>`;
     const input = $('#recon-file');
@@ -3164,9 +3165,14 @@ function renderEtoroReconBody() {
   const closes = rows.filter((r) => r.action === 'close');
   const insyncs = rows.filter((r) => r.action === 'insync');
   const warns = (p.warnings || []).map((w) => `<li>${escapeHTML(w)}</li>`).join('');
+  const cov = p.coverage || {};
+  const covBanner = cov.complete === false
+    ? `<div class="recon-incomplete"><strong>Incomplete statement.</strong> ${escapeHTML(cov.reason || '')}. Closures and drift updates are withheld; only new positions can be added. Download a statement from your account's opening date to today.</div>`
+    : '';
 
   body.innerHTML = `
-    <p class="dim" style="font-size:0.82rem">${escapeHTML(p.fileName)} — ${rows.length} instruments reconstructed. ISIN-matched rows are pre-checked; confirm the rest. Closures are never auto-checked.</p>
+    ${covBanner}
+    <p class="dim" style="font-size:0.82rem">${escapeHTML(p.fileName)}${cov.startDate ? ` (${escapeHTML(cov.startDate)} → ${escapeHTML(cov.endDate || '?')})` : ''} — ${rows.length} instruments reconstructed. ISIN-matched rows are pre-checked; confirm the rest. Closures are never auto-checked.</p>
     ${reconSectionHTML('Add to FT', 'new open positions not in FT', adds, ccy)}
     ${reconSectionHTML('Update (drift)', 'quantity/cost basis differs from eToro', drifts, ccy)}
     ${reconSectionHTML('Possible closures', 'in FT but not open in eToro — tick to soft-delete', closes, ccy)}

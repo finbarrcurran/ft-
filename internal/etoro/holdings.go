@@ -55,9 +55,11 @@ type Holding struct {
 
 // HoldingsResult is the reconstruction output for one upload.
 type HoldingsResult struct {
-	FileName string    `json:"fileName"`
-	Holdings []Holding `json:"holdings"`
-	Warnings []string  `json:"warnings"`
+	FileName  string    `json:"fileName"`
+	StartDate string    `json:"startDate"` // statement range from Account Summary, YYYY-MM-DD ("" if unreadable)
+	EndDate   string    `json:"endDate"`
+	Holdings  []Holding `json:"holdings"`
+	Warnings  []string  `json:"warnings"`
 }
 
 // cryptoTickers are the underlyings that route to the Crypto tab even when the
@@ -97,6 +99,7 @@ func ParseHoldings(r io.Reader, fileName string) (*HoldingsResult, error) {
 	}
 
 	res := &HoldingsResult{FileName: fileName, Warnings: []string{}}
+	res.StartDate, res.EndDate = readDateRange(f)
 
 	// --- Closed Positions: closed-id set + ticker→ISIN map. ---
 	cp, err := f.GetRows(sheetClosedPos)
@@ -148,8 +151,8 @@ func ParseHoldings(r io.Reader, fileName string) (*HoldingsResult, error) {
 
 	type agg struct {
 		ticker, currency, assetType string
-		units, invested            float64
-		lots                       int
+		units, invested             float64
+		lots                        int
 	}
 	byInstrument := map[string]*agg{}
 	skippedNoTicker := 0
@@ -273,3 +276,29 @@ func wrapperOf(assetType string) string {
 
 func round4(f float64) float64 { return float64(int64(f*1e4+sign(f)*0.5)) / 1e4 }
 func round6(f float64) float64 { return float64(int64(f*1e6+sign(f)*0.5)) / 1e6 }
+
+// Coverage reports whether this statement can stand in for the whole current
+// portfolio. Holdings are rebuilt from the Open Position rows inside the
+// statement's date range, so a statement that starts after the oldest still-
+// open position (or ends before the newest) silently misses holdings — and
+// every missed holding would look like a closure. oldestOpen / newestOpen are
+// the open dates (YYYY-MM-DD) of the account's own open lots as last seen by
+// the SC-42 API sync; "" when unknown, in which case only the empty-rebuild
+// check applies.
+func (r *HoldingsResult) Coverage(oldestOpen, newestOpen string) (complete bool, reason string) {
+	if len(r.Holdings) == 0 {
+		return false, "no open positions could be rebuilt from this statement — it probably doesn't start from your account's opening date"
+	}
+	if oldestOpen != "" {
+		if r.StartDate == "" {
+			return false, "couldn't read this statement's date range, so it can't be checked against your open positions"
+		}
+		if r.StartDate > oldestOpen {
+			return false, fmt.Sprintf("statement starts %s, but your oldest open eToro position was opened %s — positions opened before the start date are missing", r.StartDate, oldestOpen)
+		}
+	}
+	if newestOpen != "" && r.EndDate != "" && r.EndDate < newestOpen {
+		return false, fmt.Sprintf("statement ends %s, but you opened a position on %s — positions opened after the end date are missing", r.EndDate, newestOpen)
+	}
+	return true, ""
+}

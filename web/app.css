@@ -5444,6 +5444,15 @@ a.score-badge { display: inline-block; }
 }
 
 /* SC-17 Phase 2 — holdings reconciliation modal. */
+.recon-range-hint { font-size: 0.78rem; margin: 0.5rem 0 0; }
+.recon-incomplete {
+  margin: 0 0 0.6rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8rem;
+  border-radius: var(--radius1);
+  background: rgb(var(--color-loss) / 0.1);
+  color: rgb(var(--color-loss));
+}
 .etoro-recon-btn { white-space: nowrap; }
 .recon-section { margin: 0.6rem 0 0.9rem; }
 .recon-section-head {

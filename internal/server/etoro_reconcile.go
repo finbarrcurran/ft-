@@ -21,6 +21,7 @@
 package server
 
 import (
+	"database/sql"
 	"ft/internal/domain"
 	"ft/internal/etoro"
 	"math"
@@ -134,6 +135,28 @@ func (s *Server) handleEtoroReconcilePreview(w http.ResponseWriter, r *http.Requ
 
 	rows := reconcile(hr.Holdings, stocks, cryptos)
 
+	// A statement that doesn't cover the whole life of the open portfolio
+	// rebuilds only some holdings: everything it misses would be proposed as
+	// a closure, and matched units would show false drift. In that case only
+	// "add" rows are staged — closures and drift are withheld, not just
+	// unchecked, so apply can't act on them.
+	oldest, newest := s.etoroOpenLotRange(r)
+	complete, reason := hr.Coverage(oldest, newest)
+	if !complete {
+		kept := rows[:0]
+		withheld := 0
+		for _, rw := range rows {
+			if rw.Action == "add" {
+				kept = append(kept, rw)
+			} else if rw.Action == "close" || rw.Action == "drift" {
+				withheld++
+			}
+		}
+		rows = kept
+		hr.Warnings = append(hr.Warnings, "Incomplete statement: "+reason+". "+
+			itoa(int64(withheld))+" closure/drift proposals withheld. Download a statement whose start date is your account's opening date and whose end date is today.")
+	}
+
 	storePendingRecon(userID, &pendingRecon{Rows: rows, FileName: hr.FileName, Stored: time.Now()})
 
 	counts := map[string]int{}
@@ -141,12 +164,27 @@ func (s *Server) handleEtoroReconcilePreview(w http.ResponseWriter, r *http.Requ
 		counts[rw.Action]++
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"fileName":   hr.FileName,
-		"rows":       rows,
-		"counts":     counts,
-		"warnings":   hr.Warnings,
+		"fileName": hr.FileName,
+		"rows":     rows,
+		"counts":   counts,
+		"warnings": hr.Warnings,
+		"coverage": map[string]any{
+			"complete": complete, "reason": reason,
+			"startDate": hr.StartDate, "endDate": hr.EndDate,
+			"oldestOpen": oldest, "newestOpen": newest,
+		},
 		"ttlSeconds": int(pendingEtoroTTL.Seconds()),
 	})
+}
+
+// etoroOpenLotRange returns the open dates (YYYY-MM-DD) of the oldest and newest
+// own eToro lots currently open, from the SC-42 API sync; "" if unknown.
+func (s *Server) etoroOpenLotRange(r *http.Request) (oldest, newest string) {
+	var o, n sql.NullString
+	_ = s.store.DB.QueryRowContext(r.Context(), `SELECT min(substr(open_date,1,10)), max(substr(open_date,1,10))
+		FROM etoro_holdings_lots WHERE mirror_id = 0 AND superseded_at IS NULL AND closed_at IS NULL
+		AND coalesce(open_date,'') != ''`).Scan(&o, &n)
+	return o.String, n.String
 }
 
 // reconcile diffs reconstructed eToro holdings against live FT holdings.
@@ -373,8 +411,8 @@ func (s *Server) handleEtoroReconcileApply(w http.ResponseWriter, r *http.Reques
 
 	var (
 		added, updated, closed, skipped int
-		protected []string
-		errs      []string
+		protected                       []string
+		errs                            []string
 	)
 	ctx := r.Context()
 
