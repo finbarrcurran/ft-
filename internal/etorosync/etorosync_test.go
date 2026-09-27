@@ -57,6 +57,21 @@ func TestComputeEffective(t *testing.T) {
 	if x == nil || *x.SLEffective != 55 || *x.TPEffective != 45 {
 		t.Errorf("XOM short should take the LOWEST stop (55) and HIGHEST TP (45): %+v", x)
 	}
+
+	// Seen live: eToro reports a stop as ENABLED at a meaningless price (SLV
+	// 0.0001, 4063.T 0.01). It must count as no stop, not become the effective SL.
+	nz := ComputeEffective([]lot{
+		normalise(pos(20, 40, true, 1, 0.0001, 90, false, false), 0, "SLV"),
+		normalise(pos(21, 40, true, 1, 0.0001, 0, true, true), 0, "SLV"),
+		normalise(pos(22, 50, true, 1, 0.01, 8500, false, false), 0, "4063.T"),
+		normalise(pos(23, 50, true, 1, 80, 8600, false, false), 0, "4063.T"), // real stop (open 123)
+	}, 1000)
+	if s := find(nz, "SLV", "long"); s == nil || !s.HasNoSL || s.SLEffective != nil || s.LotsWithoutSL != 2 {
+		t.Errorf("near-zero enabled stop must count as no stop: %+v", s)
+	}
+	if j := find(nz, "4063.T", "long"); j == nil || j.HasNoSL || *j.SLEffective != 80 || j.LotsWithoutSL != 1 {
+		t.Errorf("4063.T: real stop 80 wins, near-zero lot counted as unprotected: %+v", j)
+	}
 }
 
 type fakeEtoro struct {

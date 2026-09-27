@@ -220,10 +220,28 @@ type Effective struct {
 	LastSyncedAt          int64    `json:"lastSyncedAt"`
 }
 
+// minMeaningfulStop: a long's stop below this fraction of its open price protects
+// nothing. eToro reports such stops as ENABLED (isNoStopLoss=false) — seen live:
+// SLV at 0.0001, 4063.T at 0.01 — so the flag alone can't be trusted. The raw
+// value is still stored in the lot history; it just doesn't count as a stop.
+const minMeaningfulStop = 0.05
+
+// effectiveStop returns the lot's stop if it's a real one, else nil.
+func effectiveStop(l lot) *float64 {
+	if l.StopLoss == nil {
+		return nil
+	}
+	if l.IsBuy && l.OpenRate > 0 && *l.StopLoss < minMeaningfulStop*l.OpenRate {
+		return nil
+	}
+	return l.StopLoss
+}
+
 // ComputeEffective applies the SC-42 §2 rule. Longs: highest stop-loss, lowest
 // take-profit across lots. Shorts: the mirror image (a short's stop sits above
 // price, so its most conservative stop is the LOWEST; its nearest TP the
-// HIGHEST). Copy-trade lots are excluded from the levels but counted.
+// HIGHEST). Copy-trade lots are excluded from the levels but counted. A
+// near-zero stop counts as no stop (see minMeaningfulStop).
 func ComputeEffective(lots []lot, syncedAt int64) []Effective {
 	type key struct {
 		ticker string
@@ -250,10 +268,10 @@ func ComputeEffective(lots []lot, syncedAt int64) []Effective {
 		e.LotCount++
 		e.TotalUnits += l.Units
 		cost[k] += l.Units * l.OpenRate
-		if l.StopLoss == nil {
+		if sl := effectiveStop(l); sl == nil {
 			e.LotsWithoutSL++
-		} else if e.SLEffective == nil || (l.IsBuy && *l.StopLoss > *e.SLEffective) || (!l.IsBuy && *l.StopLoss < *e.SLEffective) {
-			v, id := *l.StopLoss, l.PositionID
+		} else if e.SLEffective == nil || (l.IsBuy && *sl > *e.SLEffective) || (!l.IsBuy && *sl < *e.SLEffective) {
+			v, id := *sl, l.PositionID
 			e.SLEffective, e.SLEffectivePositionID = &v, &id
 		}
 		if l.TakeProfit != nil && (e.TPEffective == nil || (l.IsBuy && *l.TakeProfit < *e.TPEffective) || (!l.IsBuy && *l.TakeProfit > *e.TPEffective)) {
