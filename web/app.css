@@ -5423,6 +5423,26 @@ a.score-badge { display: inline-block; }
   color: rgb(var(--color-loss));
 }
 
+/* SC-44 — eToro reconcile approval panel (top of Stocks tab). */
+.etoro-proposals {
+  margin: 0 0 0.9rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid rgb(var(--color-border));
+  border-radius: var(--radius1);
+}
+.etoro-proposals-head { font-weight: 600; font-size: 0.9rem; }
+.etoro-proposals-head .dim { font-weight: 400; font-size: 0.76rem; }
+.etoro-prop-row { cursor: default; grid-template-columns: 1.4rem 5.5rem 1fr auto auto; }
+.etoro-prop-act { font-weight: 700; text-align: center; }
+.etoro-prop-act.add { color: rgb(var(--color-gain)); }
+.etoro-prop-act.remove { color: rgb(var(--color-loss)); }
+.etoro-prop-btns { display: flex; gap: 0.3rem; }
+.etoro-prop-msg { font-size: 0.76rem; min-height: 1em; margin-top: 0.3rem; }
+@media (max-width: 640px) {
+  .etoro-prop-row { grid-template-columns: 1.4rem 4.5rem 1fr; }
+  .etoro-prop-row .recon-dt, .etoro-prop-row .etoro-prop-btns { grid-column: 2 / -1; text-align: left; }
+}
+
 /* SC-17 Phase 2 — holdings reconciliation modal. */
 .etoro-recon-btn { white-space: nowrap; }
 .recon-section { margin: 0.6rem 0 0.9rem; }

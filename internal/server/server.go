@@ -79,7 +79,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 	}
 	s.cryptoWrite = cryptotheses.NewThesisWriteService(st.DB, s.cryptoAdapters, s.cryptoCascade)
 	s.videoDigest = videodigest.New(st.DB, llmSvc, os.Getenv("FT_VIDEO_DIGEST_ROOT")) // SC-43 P1
-	s.etoroSync = etorosync.New(st.DB, os.Getenv("FT_ETORO_API_BASE"),
+	s.etoroSync = etorosync.New(st, os.Getenv("FT_ETORO_API_BASE"),
 		os.Getenv("FT_ETORO_API_KEY"), os.Getenv("FT_ETORO_USER_KEY")) // SC-42
 	s.routes()
 	return s
@@ -204,8 +204,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/etoro/import/preview", s.requireUser(s.handleEtoroImportPreview))
 	s.mux.HandleFunc("POST /api/etoro/import/apply", s.requireUser(s.handleEtoroImportApply))
 	s.mux.HandleFunc("GET /api/etoro/performance", s.requireUser(s.handleEtoroPerformance))
-	s.mux.HandleFunc("GET /api/etoro/sync", s.requireUser(s.handleEtoroSyncStatus)) // SC-42
-	s.mux.HandleFunc("POST /api/etoro/sync", s.requireUser(s.handleEtoroSyncRun))   // SC-42
+	s.mux.HandleFunc("GET /api/etoro/sync", s.requireUser(s.handleEtoroSyncStatus))                                          // SC-42
+	s.mux.HandleFunc("POST /api/etoro/sync", s.requireUser(s.handleEtoroSyncRun))                                            // SC-42
+	s.mux.HandleFunc("GET /api/etoro/reconcile/proposals", s.requireUser(s.handleEtoroProposals))                            // SC-44
+	s.mux.HandleFunc("POST /api/etoro/reconcile/proposals/{id}/approve", s.requireUser(s.handleEtoroProposalDecision(true))) // SC-44
+	s.mux.HandleFunc("POST /api/etoro/reconcile/proposals/{id}/dismiss", s.requireUser(s.handleEtoroProposalDecision(false)))
 	s.mux.HandleFunc("POST /api/etoro/reconcile/preview", s.requireUser(s.handleEtoroReconcilePreview))
 	s.mux.HandleFunc("POST /api/etoro/reconcile/apply", s.requireUser(s.handleEtoroReconcileApply))
 

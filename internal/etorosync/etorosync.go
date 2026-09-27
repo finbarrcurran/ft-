@@ -3,8 +3,10 @@
 // "effective" stop-loss / take-profit. Deterministic and scheduled — it makes
 // no LLM calls and does not import internal/llm.
 //
-// eToro's levels are stored alongside FT's own stop/TP; stock_holdings and FT's
-// alert logic are untouched (Fin decision 2026-09-26).
+// eToro's levels are stored alongside FT's own stop/TP; FT's alert logic is
+// untouched (Fin decision 2026-09-26). Since SC-44 each successful sync is
+// followed by a holdings reconcile (reconcile.go): value fields eToro owns are
+// kept in step silently, existence changes are queued for approval.
 package etorosync
 
 import (
@@ -24,6 +26,7 @@ import (
 	"time"
 
 	"ft/internal/etoro"
+	"ft/internal/store"
 )
 
 // DefaultBaseURL is eToro's Public API host (verified 2026-09-26: unauthenticated
@@ -37,6 +40,7 @@ var ErrNotConfigured = errors.New("etoro sync: FT_ETORO_API_KEY / FT_ETORO_USER_
 // the account's user key (x-user-key). Both come from /etc/ft/env.
 type Service struct {
 	DB      *sql.DB
+	Store   *store.Store // for approved holding inserts / soft-deletes (SC-44)
 	BaseURL string
 	APIKey  string
 	UserKey string
@@ -45,11 +49,11 @@ type Service struct {
 }
 
 // New returns a Service; an empty baseURL means DefaultBaseURL.
-func New(db *sql.DB, baseURL, apiKey, userKey string) *Service {
+func New(st *store.Store, baseURL, apiKey, userKey string) *Service {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
-	return &Service{DB: db, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, UserKey: userKey,
+	return &Service{DB: st.DB, Store: st, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, UserKey: userKey,
 		HTTP: &http.Client{Timeout: 30 * time.Second}, Now: time.Now}
 }
 
@@ -65,6 +69,7 @@ type position struct {
 	InstrumentID   int     `json:"instrumentID"`
 	OpenDateTime   string  `json:"openDateTime"`
 	OpenRate       float64 `json:"openRate"`
+	Amount         float64 `json:"amount"` // USD currently invested (eToro-resolved FX; shrinks on partial close)
 	IsBuy          bool    `json:"isBuy"`
 	TakeProfitRate float64 `json:"takeProfitRate"`
 	StopLossRate   float64 `json:"stopLossRate"`
@@ -160,7 +165,12 @@ type Result struct {
 	LotsNew    int    `json:"lotsNew"`
 	LotsClosed int    `json:"lotsClosed"`
 	Tickers    int    `json:"tickers"`
-	Error      string `json:"error,omitempty"`
+	// SC-44 reconcile
+	ValuesUpdated    int    `json:"valuesUpdated"`
+	ProposalsPending int    `json:"proposalsPending"`
+	ProposalsNew     int    `json:"proposalsNew"`
+	ReconcileError   string `json:"reconcileError,omitempty"`
+	Error            string `json:"error,omitempty"`
 }
 
 // lot is one position, normalised for storage.
@@ -171,6 +181,7 @@ type lot struct {
 	IsBuy        bool
 	Units        float64
 	OpenRate     float64
+	AmountUSD    float64 // eToro's own USD figure for this lot
 	OpenDate     string
 	Leverage     float64
 	StopLoss     *float64 // nil = disabled at eToro
@@ -185,7 +196,7 @@ type lot struct {
 // 0) when a level is disabled, and those must never enter the min/max rule.
 func normalise(p position, mirrorID int64, ticker string) lot {
 	l := lot{PositionID: p.PositionID, InstrumentID: p.InstrumentID, Ticker: ticker, IsBuy: p.IsBuy,
-		Units: p.Units, OpenRate: p.OpenRate, OpenDate: p.OpenDateTime, Leverage: p.Leverage,
+		Units: p.Units, OpenRate: p.OpenRate, AmountUSD: p.Amount, OpenDate: p.OpenDateTime, Leverage: p.Leverage,
 		IsTSL: p.IsTslEnabled, MirrorID: mirrorID, Settlement: p.SettlementType}
 	if l.MirrorID == 0 {
 		l.MirrorID = p.MirrorID
@@ -207,6 +218,7 @@ type Effective struct {
 	Direction             string   `json:"direction"`
 	InstrumentID          int      `json:"instrumentId"`
 	TotalUnits            float64  `json:"totalUnits"`
+	InvestedUSD           float64  `json:"investedUsd"` // sum of eToro's USD amounts (SC-44)
 	AvgOpenPrice          *float64 `json:"avgOpenPrice"`
 	LotCount              int      `json:"lotCount"`
 	SLEffective           *float64 `json:"slEffective"`
@@ -267,6 +279,7 @@ func ComputeEffective(lots []lot, syncedAt int64) []Effective {
 		}
 		e.LotCount++
 		e.TotalUnits += l.Units
+		e.InvestedUSD += l.AmountUSD
 		cost[k] += l.Units * l.OpenRate
 		if sl := effectiveStop(l); sl == nil {
 			e.LotsWithoutSL++
@@ -316,8 +329,9 @@ func (s *Service) Sync(ctx context.Context) Result {
 	res.RunID, _ = r.LastInsertId()
 	finish := func() Result {
 		_, _ = s.DB.ExecContext(context.Background(), `UPDATE etoro_sync_runs SET finished_at=?, status=?, positions=?,
-			lots_new=?, lots_closed=?, error=? WHERE id=?`, s.Now().Unix(), res.Status, res.Positions,
-			res.LotsNew, res.LotsClosed, nullIfEmpty(res.Error), res.RunID)
+			lots_new=?, lots_closed=?, values_updated=?, proposals_pending=?, error=? WHERE id=?`, s.Now().Unix(),
+			res.Status, res.Positions, res.LotsNew, res.LotsClosed, res.ValuesUpdated, res.ProposalsPending,
+			nullIfEmpty(firstNonEmpty(res.Error, res.ReconcileError)), res.RunID)
 		return res
 	}
 	if !s.Configured() {
@@ -380,7 +394,10 @@ func (s *Service) Sync(ctx context.Context) Result {
 	for _, l := range lots {
 		seen[l.PositionID] = true
 		if c, ok := current[l.PositionID]; ok && sameState(c, l) {
-			if _, err := tx.ExecContext(ctx, `UPDATE etoro_holdings_lots SET last_seen_at=?, ticker=? WHERE id=?`, now, l.Ticker, c.rowID); err != nil {
+			// amount_usd arrived with SC-44: backfill it in place on pre-existing
+			// rows rather than treating its first appearance as a state change.
+			if _, err := tx.ExecContext(ctx, `UPDATE etoro_holdings_lots SET last_seen_at=?, ticker=?,
+				amount_usd=coalesce(amount_usd, ?) WHERE id=?`, now, l.Ticker, l.AmountUSD, c.rowID); err != nil {
 				return fail(err)
 			}
 			continue
@@ -390,9 +407,9 @@ func (s *Service) Sync(ctx context.Context) Result {
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO etoro_holdings_lots (position_id, instrument_id, ticker, is_buy,
-			units, open_rate, open_date, leverage, stop_loss, take_profit, is_tsl, mirror_id, settlement_type,
-			first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			l.PositionID, l.InstrumentID, l.Ticker, b2i(l.IsBuy), l.Units, l.OpenRate, l.OpenDate, l.Leverage,
+			units, open_rate, amount_usd, open_date, leverage, stop_loss, take_profit, is_tsl, mirror_id, settlement_type,
+			first_seen_at, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			l.PositionID, l.InstrumentID, l.Ticker, b2i(l.IsBuy), l.Units, l.OpenRate, l.AmountUSD, l.OpenDate, l.Leverage,
 			l.StopLoss, l.TakeProfit, b2i(l.IsTSL), l.MirrorID, l.Settlement, now, now); err != nil {
 			return fail(err)
 		}
@@ -413,9 +430,9 @@ func (s *Service) Sync(ctx context.Context) Result {
 	}
 	for _, e := range eff {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO etoro_holdings_effective (ticker, direction, instrument_id,
-			total_units, avg_open_price, lot_count, sl_effective, tp_effective, sl_effective_position_id,
+			total_units, invested_usd, avg_open_price, lot_count, sl_effective, tp_effective, sl_effective_position_id,
 			tp_effective_position_id, has_no_sl, lots_without_sl, has_no_tp, copy_lot_count, last_synced_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, e.Ticker, e.Direction, e.InstrumentID, e.TotalUnits,
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, e.Ticker, e.Direction, e.InstrumentID, e.TotalUnits, e.InvestedUSD,
 			e.AvgOpenPrice, e.LotCount, e.SLEffective, e.TPEffective, e.SLEffectivePositionID,
 			e.TPEffectivePositionID, b2i(e.HasNoSL), e.LotsWithoutSL, b2i(e.HasNoTP), e.CopyLotCount, now); err != nil {
 			return fail(err)
@@ -425,12 +442,20 @@ func (s *Service) Sync(ctx context.Context) Result {
 		return fail(err)
 	}
 	res.Status, res.Tickers = "ok", len(eff)
+	// SC-44: reconcile FT holdings against the fresh effective table. A
+	// reconcile failure doesn't fail the sync (the eToro data is committed).
+	if ro, err := s.reconcile(ctx, eff); err != nil {
+		res.ReconcileError = "reconcile: " + err.Error()
+	} else {
+		res.ValuesUpdated, res.ProposalsPending, res.ProposalsNew = ro.valuesUpdated, ro.pending, ro.created
+	}
 	return finish()
 }
 
 type openLot struct {
 	rowID      int64
 	units      float64
+	amountUSD  sql.NullFloat64
 	stopLoss   sql.NullFloat64
 	takeProfit sql.NullFloat64
 	isTSL      int
@@ -438,7 +463,7 @@ type openLot struct {
 }
 
 func openLots(ctx context.Context, tx *sql.Tx) (map[int64]openLot, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id, position_id, units, stop_loss, take_profit, is_tsl, leverage
+	rows, err := tx.QueryContext(ctx, `SELECT id, position_id, units, amount_usd, stop_loss, take_profit, is_tsl, leverage
 		FROM etoro_holdings_lots WHERE superseded_at IS NULL AND closed_at IS NULL`)
 	if err != nil {
 		return nil, err
@@ -448,7 +473,7 @@ func openLots(ctx context.Context, tx *sql.Tx) (map[int64]openLot, error) {
 	for rows.Next() {
 		var o openLot
 		var pid int64
-		if err := rows.Scan(&o.rowID, &pid, &o.units, &o.stopLoss, &o.takeProfit, &o.isTSL, &o.leverage); err != nil {
+		if err := rows.Scan(&o.rowID, &pid, &o.units, &o.amountUSD, &o.stopLoss, &o.takeProfit, &o.isTSL, &o.leverage); err != nil {
 			return nil, err
 		}
 		out[pid] = o
@@ -468,8 +493,9 @@ func sameOpt(n sql.NullFloat64, v *float64) bool {
 }
 
 // sameState: has any tracked field of this position changed since the stored row?
+// A NULL stored amount (row written before SC-44) is not a change.
 func sameState(c openLot, l lot) bool {
-	return near(c.units, l.Units) && sameOpt(c.stopLoss, l.StopLoss) && sameOpt(c.takeProfit, l.TakeProfit) &&
+	return near(c.units, l.Units) && (!c.amountUSD.Valid || near(c.amountUSD.Float64, l.AmountUSD)) && sameOpt(c.stopLoss, l.StopLoss) && sameOpt(c.takeProfit, l.TakeProfit) &&
 		c.isTSL == b2i(l.IsTSL) && (!c.leverage.Valid || near(c.leverage.Float64, l.Leverage))
 }
 
@@ -540,6 +566,13 @@ func b2i(b bool) int {
 	return 0
 }
 
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 func nullIfEmpty(s string) any {
 	if s == "" {
 		return nil
@@ -594,7 +627,7 @@ func (s *Service) Current(ctx context.Context) (Status, error) {
 	if st.LastOK, err = s.run(ctx, "WHERE status = 'ok'"); err != nil {
 		return st, err
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT ticker, direction, instrument_id, total_units, avg_open_price,
+	rows, err := s.DB.QueryContext(ctx, `SELECT ticker, direction, instrument_id, total_units, coalesce(invested_usd, 0), avg_open_price,
 		lot_count, sl_effective, tp_effective, sl_effective_position_id, tp_effective_position_id, has_no_sl,
 		lots_without_sl, has_no_tp, copy_lot_count, last_synced_at FROM etoro_holdings_effective ORDER BY ticker, direction`)
 	if err != nil {
@@ -606,7 +639,7 @@ func (s *Service) Current(ctx context.Context) (Status, error) {
 		var avg, sl, tp sql.NullFloat64
 		var slID, tpID sql.NullInt64
 		var noSL, noTP int
-		if err := rows.Scan(&e.Ticker, &e.Direction, &e.InstrumentID, &e.TotalUnits, &avg, &e.LotCount, &sl, &tp,
+		if err := rows.Scan(&e.Ticker, &e.Direction, &e.InstrumentID, &e.TotalUnits, &e.InvestedUSD, &avg, &e.LotCount, &sl, &tp,
 			&slID, &tpID, &noSL, &e.LotsWithoutSL, &noTP, &e.CopyLotCount, &e.LastSyncedAt); err != nil {
 			return st, err
 		}

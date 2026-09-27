@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"ft/internal/etorosync"
 )
@@ -56,5 +59,63 @@ func logEtoroSync(trigger string, r etorosync.Result) {
 		return
 	}
 	slog.Info("etoro sync", "trigger", trigger, "run", r.RunID, "status", r.Status, "positions", r.Positions,
-		"ownLots", r.OwnLots, "copyLots", r.CopyLots, "lotsNew", r.LotsNew, "lotsClosed", r.LotsClosed, "tickers", r.Tickers)
+		"ownLots", r.OwnLots, "copyLots", r.CopyLots, "lotsNew", r.LotsNew, "lotsClosed", r.LotsClosed, "tickers", r.Tickers,
+		"valuesUpdated", r.ValuesUpdated, "proposalsPending", r.ProposalsPending, "proposalsNew", r.ProposalsNew)
+	if r.ReconcileError != "" {
+		slog.Warn("etoro reconcile failed", "trigger", trigger, "run", r.RunID, "err", r.ReconcileError)
+	}
+}
+
+// SC-44 — holdings reconcile approval queue.
+//
+//	GET  /api/etoro/reconcile/proposals?status=pending|dismissed|approved|resolved
+//	POST /api/etoro/reconcile/proposals/{id}/approve
+//	POST /api/etoro/reconcile/proposals/{id}/dismiss
+//
+// Value changes on matched holdings apply silently inside the sync; only
+// changes to WHICH holdings exist come through here.
+
+func (s *Server) handleEtoroProposals(w http.ResponseWriter, r *http.Request) {
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{"demo": true, "proposals": []any{}})
+		return
+	}
+	ps, err := s.etoroSync.Proposals(r.Context(), r.URL.Query().Get("status"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"proposals": ps})
+}
+
+func (s *Server) handleEtoroProposalDecision(approve bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.demoModeOn(r.Context()) {
+			writeError(w, http.StatusForbidden, "not available in demo mode")
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad proposal id")
+			return
+		}
+		var msg string
+		if approve {
+			msg, err = s.etoroSync.Approve(r.Context(), id)
+		} else {
+			err = s.etoroSync.Dismiss(r.Context(), id)
+			msg = "dismissed"
+		}
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			writeError(w, http.StatusNotFound, "proposal not found")
+		case errors.Is(err, etorosync.ErrProposalNotPending):
+			writeError(w, http.StatusConflict, err.Error())
+		case err != nil:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		default:
+			slog.Info("etoro proposal decided", "id", id, "approve", approve, "result", msg)
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": msg})
+		}
+	}
 }

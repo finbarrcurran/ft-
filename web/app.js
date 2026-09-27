@@ -3882,6 +3882,79 @@ function etoroLevelLine(levels, ticker, kind) {
   return `<div class="etoro-level" title="Lowest take-profit across your eToro lots">eToro ${fmtNum2.format(e.tpEffective)}</div>`;
 }
 
+// SC-44 — eToro holdings reconcile approval queue. Value changes on matched
+// holdings sync silently server-side; adds/removals wait here for approval.
+// Rendered at the top of the Stocks tab (stock and crypto proposals both).
+async function renderEtoroProposals() {
+  const host = $('#etoro-proposals');
+  if (!host || state.demo) return;
+  let ps = [];
+  try {
+    const r = await api('/api/etoro/reconcile/proposals');
+    ps = r.proposals || [];
+  } catch (_) { return; }
+  if (!ps.length) { host.innerHTML = ''; return; }
+  const row = (p) => {
+    const kind = p.kind === 'crypto' ? '<span class="recon-cfd" title="Routes to the Crypto tab (eToro wallet)">crypto</span>' : '';
+    let detail;
+    if (p.action === 'add') {
+      detail = `eToro ${reconUnits(p.etoroUnits)} units · ${fmtUSD.format(p.etoroInvestedUsd || 0)} invested${p.etoroLots > 1 ? ` · ${p.etoroLots} lots` : ''}`;
+    } else {
+      detail = `no longer at eToro · FT shows ${fmtUSD.format(p.ftInvestedUsd || 0)} invested`;
+    }
+    const warn = p.action === 'remove' && p.hasThesisLink
+      ? '<span class="recon-badge confirm" title="This holding has a thesis. Removing soft-deletes it; the thesis and history are kept.">thesis</span>'
+      : '';
+    const verb = p.action === 'add' ? 'Add' : 'Remove';
+    return `<div class="recon-row etoro-prop-row" data-id="${p.id}">
+      <span class="etoro-prop-act ${p.action}">${p.action === 'add' ? '+' : '−'}</span>
+      <span class="recon-tk">${escapeHTML(p.ticker)}</span>
+      <span class="recon-nm">${escapeHTML(p.name || '')} ${kind} ${warn}</span>
+      <span class="recon-dt dim">${detail}</span>
+      <span class="etoro-prop-btns">
+        <button class="btn-ghost etoro-prop-approve" data-id="${p.id}">${verb}</button>
+        <button class="btn-ghost etoro-prop-dismiss" data-id="${p.id}" title="Hide this proposal while the difference persists">Dismiss</button>
+      </span>
+    </div>`;
+  };
+  const adds = ps.filter((p) => p.action === 'add');
+  const removes = ps.filter((p) => p.action === 'remove');
+  const section = (title, hint, rows) => rows.length ? `
+    <div class="recon-section">
+      <div class="recon-section-head">${title} <span class="dim">${rows.length}</span>
+        <span class="recon-section-hint dim">${hint}</span></div>
+      ${rows.map(row).join('')}
+    </div>` : '';
+  host.innerHTML = `
+    <div class="etoro-proposals">
+      <div class="etoro-proposals-head">eToro changes need your approval
+        <span class="dim">— values on matched holdings already sync automatically</span></div>
+      ${section('Held at eToro, missing in FT', 'approve to add', adds)}
+      ${section('In FT, no longer held at eToro', 'approve to soft-delete (thesis and history kept)', removes)}
+      <div class="etoro-prop-msg dim" id="etoro-prop-msg"></div>
+    </div>`;
+  const decide = async (btn, action) => {
+    const msg = $('#etoro-prop-msg');
+    host.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    try {
+      const r = await api(`/api/etoro/reconcile/proposals/${btn.dataset.id}/${action}`, { method: 'POST' });
+      if (msg) msg.textContent = r.result || 'done';
+      if (action === 'approve') {
+        state.stocks = null;
+        state.crypto = null;
+        await loadActiveTab();
+        return;
+      }
+      await renderEtoroProposals();
+    } catch (e) {
+      if (msg) msg.textContent = e.message;
+      await renderEtoroProposals();
+    }
+  };
+  host.querySelectorAll('.etoro-prop-approve').forEach((b) => b.addEventListener('click', () => decide(b, 'approve')));
+  host.querySelectorAll('.etoro-prop-dismiss').forEach((b) => b.addEventListener('click', () => decide(b, 'dismiss')));
+}
+
 async function renderStocks() {
   const rows = state.stocks;
   const etoroLevels = await getEtoroLevels(); // SC-42
@@ -3906,7 +3979,7 @@ async function renderStocks() {
     } catch (_) { fxEURUSD = 1.08; }
   }
   if (rows.length === 0) {
-    $('#content').innerHTML = `
+    $('#content').innerHTML = `<div id="etoro-proposals"></div>
       <div class="empty">
         <div>No stock holdings yet.</div>
         <div class="hint">Run <code>sudo -u ft /opt/ft/bin/ft seed</code> on the server to load demo data, or wait for xlsx import (Phase B).</div>
@@ -4025,7 +4098,7 @@ async function renderStocks() {
   `;
 
   // Spec 12 D5d — header tooltips on technical / risk metric headers.
-  $('#content').innerHTML = chips + toolbar + `
+  $('#content').innerHTML = '<div id="etoro-proposals"></div>' + chips + toolbar + `
     <div class="tablewrap">
       <table class="holdings">
         <thead>
@@ -4066,6 +4139,7 @@ async function renderStocks() {
   $('#add-stock').addEventListener('click', () => openHoldingModal({ kind: 'stock', mode: 'add' }));
   wireRowActions('stock');
   wireTickerHover('stock');
+  renderEtoroProposals(); // SC-44
   // SC-08 — per-row stop-method toggle (Tech / Vol). PUTs the chosen method,
   // then reloads so the server re-resolves the effective stop + metrics.
   for (const btn of document.querySelectorAll('.sl-method-toggle .slm-btn')) {

@@ -105,13 +105,17 @@ func (f *fakeEtoro) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(resp)
 	case r.URL.Path == "/api/v1/market-data/instruments":
 		f.instCalls++
-		names := map[string]string{"10": "GLD", "20": "slv", "30": "RHM.de"}
+		names := map[string]string{"10": "GLD", "20": "slv", "30": "RHM.de", "40": "BTC", "50": "MSTR"}
 		var out []map[string]any
 		for _, id := range strings.Split(r.URL.Query().Get("instrumentIds"), ",") {
 			if sym, ok := names[id]; ok {
 				var n int
 				json.Unmarshal([]byte(id), &n)
-				out = append(out, map[string]any{"instrumentID": n, "symbolFull": sym, "instrumentDisplayName": sym + " name"})
+				typ := 5
+				if sym == "BTC" {
+					typ = etoroCryptoType
+				}
+				out = append(out, map[string]any{"instrumentID": n, "symbolFull": sym, "instrumentDisplayName": sym + " name", "instrumentTypeID": typ})
 			}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"instrumentDisplayDatas": out})
@@ -142,10 +146,10 @@ func TestSyncEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(fake)
 	defer srv.Close()
 	clock := int64(1_800_000_000)
-	svc := New(st.DB, srv.URL, "app-key", "user-key")
+	svc := New(st, srv.URL, "app-key", "user-key")
 	svc.Now = func() time.Time { clock += 60; return time.Unix(clock, 0) }
 
-	if r := New(st.DB, srv.URL, "", "").Sync(ctx); r.Status != "skipped" {
+	if r := New(st, srv.URL, "", "").Sync(ctx); r.Status != "skipped" {
 		t.Fatalf("unconfigured sync = %s, want skipped", r.Status)
 	}
 

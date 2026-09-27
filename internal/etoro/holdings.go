@@ -245,6 +245,10 @@ func normTicker(t string) string {
 	return strings.ToUpper(t)
 }
 
+// IsCryptoUnderlying reports whether an FT ticker routes to crypto_holdings
+// under SC-17 R1 (used by the SC-44 eToro reconcile).
+func IsCryptoUnderlying(ticker string) bool { return underlyingOf(ticker, "") == "crypto" }
+
 // underlyingOf routes by the instrument's underlying, not its wrapper (R1).
 func underlyingOf(ticker, assetType string) string {
 	if strings.EqualFold(strings.TrimSpace(assetType), "Crypto") {
