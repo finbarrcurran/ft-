@@ -3150,8 +3150,11 @@ function renderEtoroReconBody() {
     foot.innerHTML = `<button class="btn-primary" id="recon-done">Done</button>`;
     $('#recon-done').addEventListener('click', () => {
       closeImportModal();
+      // Refresh whichever tab the modal was opened from (Performance or Stocks).
       state.summary = null;
-      renderSummary();
+      state.stocks = null;
+      state.crypto = null;
+      loadActiveTab();
     });
     return;
   }
@@ -4099,6 +4102,7 @@ async function renderStocks() {
   const toolbar = `
     <div class="table-toolbar">
       <button class="btn-ghost" id="add-stock">+ Add stock</button>
+      ${state.demo ? '' : '<button class="btn-ghost" id="stocks-etoro-recon" title="Manual fallback: upload an eToro .xlsx statement (account opening date → today) and reconcile it against your holdings">⬆ Reconcile with eToro statement</button>'}
       <a class="btn-ghost" href="/api/export.csv?tab=stocks" download title="Download current rows as CSV">⬇ Download CSV</a>
     </div>
   `;
@@ -4143,6 +4147,7 @@ async function renderStocks() {
   `;
 
   $('#add-stock').addEventListener('click', () => openHoldingModal({ kind: 'stock', mode: 'add' }));
+  $('#stocks-etoro-recon')?.addEventListener('click', openEtoroReconcileModal);
   wireRowActions('stock');
   wireTickerHover('stock');
   renderEtoroProposals(); // SC-44

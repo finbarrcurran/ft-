@@ -59,7 +59,9 @@ type HoldingsResult struct {
 	StartDate string    `json:"startDate"` // statement range from Account Summary, YYYY-MM-DD ("" if unreadable)
 	EndDate   string    `json:"endDate"`
 	Holdings  []Holding `json:"holdings"`
-	Warnings  []string  `json:"warnings"`
+	// CopySkipped counts open lots left out because they are copy-trade positions.
+	CopySkipped int      `json:"copySkipped"`
+	Warnings    []string `json:"warnings"`
 }
 
 // cryptoTickers are the underlyings that route to the Crypto tab even when the
@@ -82,6 +84,15 @@ var tickerParen = regexp.MustCompile(`\(([^()]+)\)\s*$`)
 
 // ParseHoldings reconstructs current open holdings from an eToro statement.
 func ParseHoldings(r io.Reader, fileName string) (*HoldingsResult, error) {
+	return ParseHoldingsSkipping(r, fileName, nil)
+}
+
+// ParseHoldingsSkipping is ParseHoldings minus the given position IDs. The
+// statement's Account Activity sheet doesn't mark copy-trade opens (only
+// Closed Positions has "Copied From"), so copied lots look like the user's
+// own; the caller passes the copy-trade position IDs known from the SC-42 API
+// sync so they stay out of FT holdings (SC-42/SC-44: copy-trades excluded).
+func ParseHoldingsSkipping(r io.Reader, fileName string, skip map[string]bool) (*HoldingsResult, error) {
 	f, err := excelize.OpenReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("open xlsx: %w", err)
@@ -163,6 +174,10 @@ func ParseHoldings(r io.Reader, fileName string) (*HoldingsResult, error) {
 		pid := cell(row, iPID)
 		if pid == "" || closedIDs[pid] {
 			continue // closed before statement end (or unkeyed) → not currently open
+		}
+		if skip[pid] {
+			res.CopySkipped++
+			continue
 		}
 		ticker, currency := splitDetails(cell(row, iDetails))
 		if ticker == "" {

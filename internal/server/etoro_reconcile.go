@@ -118,10 +118,14 @@ func (s *Server) handleEtoroReconcilePreview(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	hr, err := etoro.ParseHoldings(file, header.Filename)
+	hr, err := etoro.ParseHoldingsSkipping(file, header.Filename, s.etoroCopyPositionIDs(r))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "parse: "+err.Error())
 		return
+	}
+	if hr.CopySkipped > 0 {
+		hr.Warnings = append(hr.Warnings, itoa(int64(hr.CopySkipped))+
+			" copy-trade lots in this statement were left out — FT tracks only your own positions.")
 	}
 
 	stocks, err := s.store.ListStockHoldings(r.Context(), userID)
@@ -175,6 +179,24 @@ func (s *Server) handleEtoroReconcilePreview(w http.ResponseWriter, r *http.Requ
 		},
 		"ttlSeconds": int(pendingEtoroTTL.Seconds()),
 	})
+}
+
+// etoroCopyPositionIDs returns every position ID the SC-42 sync has seen as a
+// copy-trade lot. The statement can't tell copied opens from the user's own.
+func (s *Server) etoroCopyPositionIDs(r *http.Request) map[string]bool {
+	ids := map[string]bool{}
+	rows, err := s.store.DB.QueryContext(r.Context(), `SELECT DISTINCT position_id FROM etoro_holdings_lots WHERE mirror_id != 0`)
+	if err != nil {
+		return ids
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids[itoa(id)] = true
+		}
+	}
+	return ids
 }
 
 // etoroOpenLotRange returns the open dates (YYYY-MM-DD) of the oldest and newest

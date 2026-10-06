@@ -64,4 +64,16 @@ func TestHoldingsCoverage(t *testing.T) {
 	if ok, why := stale.Coverage("2025-03-10", "2026-09-20"); ok || !strings.Contains(why, "ends 2026-05-31") {
 		t.Errorf("end before newest open lot must be incomplete: %v %q", ok, why)
 	}
+
+	// Copy-trade lots (position IDs known from the API sync) stay out. The
+	// helper numbers positions "9", "99", …
+	mixed := statement(t, "01/01/2024 00:00:00", "27/09/2026 23:59:59",
+		[][3]string{{"GLD/USD", "2", "900"}, {"FIG/USD", "5", "100"}, {"GLD/USD", "1", "50"}})
+	own, err := ParseHoldingsSkipping(mixed, "mixed.xlsx", map[string]bool{"99": true, "999": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if own.CopySkipped != 2 || len(own.Holdings) != 1 || own.Holdings[0].Ticker != "GLD" || own.Holdings[0].Units != 2 || own.Holdings[0].InvestedUSD != 900 {
+		t.Errorf("copy lots must be excluded: skipped=%d holdings=%+v", own.CopySkipped, own.Holdings)
+	}
 }
