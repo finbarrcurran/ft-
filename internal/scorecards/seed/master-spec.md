@@ -6,7 +6,9 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Last meaningful overhaul:** 2026-10-06 (sixty-ninth pass) — **SC-17 fallback: copy-trade lots excluded + Stocks-tab entry point (v1.75.2).** Found when Fin ran the first full-history statement (1 Jul 2025 → 5 Oct 2026) through the fallback: it proposed, and Fin approved, adding FIG, MSFT, UNH and UPS — all **copy-trade** positions. The statement's Account Activity sheet doesn't mark copied opens (only Closed Positions carries "Copied From"), so SC-17 treated them as own lots; SC-44's next sync correctly proposed removing all four. **Fix:** the preview now passes every position ID the SC-42 sync has seen with `mirror_id != 0` to `ParseHoldingsSkipping`, which leaves those lots out and reports the count (`copySkipped`, shown as a warning). Without SC-42 data the parser behaves as before. **UI:** new "⬆ Reconcile with eToro statement" button in the Stocks-tab toolbar (the only entry point was the Performance tab's "Reconcile holdings"); the modal's Done now reloads the tab it was opened from instead of always rendering Summary. No schema change, no LLM. Test: `TestHoldingsCoverage` extended (copy lots excluded, own lots of the same ticker kept). Supersedes v1.75.1.
+> **Last meaningful overhaul:** 2026-10-09 (seventieth pass) — **Sections 1–12 rewritten from the running build + SC-45 Drive bridge recorded (v1.76.0).** Documentation only; no behaviour change. **Why:** Claude.ai, reading the new Drive mirror, found the reference sections stale under a current version header — the schema table stopped at 0033, Crypto Theses said 8 adapters (12 live), AI Nexus was described as not yet shipped, the tab table listed 12 of 19 tabs, and nothing after SC-36 appeared. Cause: since roughly v1.5x each bump added a change-log entry here but did not revise sections 1–12. **Fix:** sections 1–12 re-derived from the code and Jarvis (19 tabs, 48 migrations, in-process and Jarvis-side jobs, the full route table grouped by area incl. eToro sync/reconcile, video digest, AI Nexus, signals, crypto theses and the read-only MCP connector, environment names, the real edit→test→deploy→push loop, CLI incl. `nexus-*`, `video-digest-reground`, `token create-mcp`, and a current deferred queue). Bot commands, most provider rows and the older deferred items are marked *carried over* — not re-verified. **Rule tightened (§7):** every bump now updates the affected reference sections in the same commit and sets the `reference_reviewed` marker above §1; the Drive mirror flags the reference STALE whenever that marker is behind the version or the live schema is ahead of the migrations mentioned. **SC-45 (infrastructure, no FT code):** Jarvis writes to a Google Drive folder `FT-Bridge/` through rclone with the `drive.file` scope (sees only files it created), authorised on Fin's account 2026-10-09. `reports/ft-snapshot.md` (placeholder; generator is P5), `notes/shared-notes.md` (Jarvis/cc append; Claude.ai's connector can create files but cannot edit one, and Jarvis cannot see files Claude creates), and `spec/` — `ft-bridge-spec.timer` exports this spec from the live DB every 10 minutes when it changes, as Google Docs: an index (`FT-spec-current`), the reference (`FT-spec-A-reference`), the change log and §13 in parts under 75,000 characters (Claude's Drive read stops near 100,000), and the whole spec (`FT-master-spec`, attached to the claude.ai Project as a synced source). Found on the way: `ft help` omits newer commands (§12). Supersedes v1.75.2.
+>
+> **Prior overhaul:** 2026-10-06 (sixty-ninth pass) — **SC-17 fallback: copy-trade lots excluded + Stocks-tab entry point (v1.75.2).** Found when Fin ran the first full-history statement (1 Jul 2025 → 5 Oct 2026) through the fallback: it proposed, and Fin approved, adding FIG, MSFT, UNH and UPS — all **copy-trade** positions. The statement's Account Activity sheet doesn't mark copied opens (only Closed Positions carries "Copied From"), so SC-17 treated them as own lots; SC-44's next sync correctly proposed removing all four. **Fix:** the preview now passes every position ID the SC-42 sync has seen with `mirror_id != 0` to `ParseHoldingsSkipping`, which leaves those lots out and reports the count (`copySkipped`, shown as a warning). Without SC-42 data the parser behaves as before. **UI:** new "⬆ Reconcile with eToro statement" button in the Stocks-tab toolbar (the only entry point was the Performance tab's "Reconcile holdings"); the modal's Done now reloads the tab it was opened from instead of always rendering Summary. No schema change, no LLM. Test: `TestHoldingsCoverage` extended (copy lots excluded, own lots of the same ticker kept). Supersedes v1.75.1.
 >
 > **Prior overhaul:** 2026-09-27 (sixty-eighth pass) — **SC-17 fallback: incomplete-statement guard (v1.75.1).** Raised while closing SC-44 AC8. Claude.ai's premise (fallback is CSV-only) didn't hold — `/api/etoro/reconcile/preview` already accepts `.xlsx` only; the CSV-only upload is the separate Transactions import. **Real gap:** the fallback rebuilds holdings from the *Open Position* rows inside the statement's date range, so a short-range statement silently misses every position opened outside it — tested live with Fin's 1–26 Sep 2026 statement: 0 holdings, no warning, and applying it would have proposed closing all 22 holdings. **Fix:** `ParseHoldings` now reads the statement's Start/End Date (Account Summary), and the preview checks coverage — **incomplete** if nothing is rebuilt, if the statement starts after the oldest still-open own eToro lot, or ends before the newest (lot open dates from the SC-42 sync; oldest currently 2025-10-21). When incomplete, closure and drift rows are **withheld server-side** (never staged, so apply can't act on them); only add rows remain, with a red "Incomplete statement" banner and the reason. Upload screen now says the statement must run from the account's opening date to today; the preview shows the statement's date range. Preview response gains `coverage {complete, reason, startDate, endDate, oldestOpen, newestOpen}`. No schema change, no LLM. Tests: `TestHoldingsCoverage` (full-history ok; empty, late-start and early-end statements flagged). AC8 stays open until the fallback is exercised with a full-history statement. Supersedes v1.75.0.
 >
@@ -138,36 +140,51 @@
 
 ---
 
+<!-- reference_reviewed: v1.76.0 2026-10-09 -->
+
+> **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. The change log above this point and §13 below are history; **these sections are the current state.**
+
 ## 1. What FT is
 
-A single-user portfolio dashboard for Fin Curran. Tracks stock + crypto holdings, regime overlay, sector rotation, performance retrospective, transaction history, framework scoring, and a thesis observation log. Deployed at `https://ft.curranhouse.dev` (Cloudflare Tunnel → `127.0.0.1:8081`).
+A single-user portfolio dashboard for Fin Curran. Tracks stock + crypto holdings (stocks kept in step with eToro automatically), regime overlays (crypto + macro), sector rotation, realised performance, transaction history, framework scoring, stock and crypto thesis libraries, political/insider/13F signals, the AI Nexus replication layer and a video-digest brain. Deployed at `https://ft.curranhouse.dev` (Cloudflare Tunnel → `127.0.0.1:8081`).
 
-Built in Go + SQLite + vanilla HTML/JS, no framework, no bundler. Runs in ~80 MB RSS on `jarvis` alongside HCT.
+Built in Go + SQLite + vanilla HTML/JS, no framework, no bundler. One binary (`/opt/ft/bin/ft`), one database (`/var/lib/ft/ft.db`), ~50 MB RSS on `jarvis` alongside HCT.
+
+**Who can read it:** the browser UI (cookie login), the FT Telegram bot (bearer token), and Claude through a **read-only** MCP connector at `/mcp` (SC-41). **Demo / privacy mode** (SC-22) is a server-side toggle that serves a synthetic book; broker data (eToro positions, proposals) is never served in demo mode.
+
+**LLM use** goes through one governor (`internal/llm`, Spec 9c.1): Haiku default, per-call caps of 30,000 input / 4,000 output tokens, hard stops at $0.50/day and $5/month, per-feature kill switches. The only scheduled LLM feature is the video digest (SC-43). The eToro sync and reconcile make no LLM calls.
 
 ## 2. Layout — tabs in order
 
+Nineteen tabs, in nav order:
+
 | # | Tab | Spec | Role |
 |---|------|------|------|
-| 1 | Summary | 2 | KPIs, donuts (asset / core-alt / sector / bottleneck / phase), stale-score banner, stale-thesis banner, regime pills, market pill |
-| 2 | Stocks & ETFs | 3, 9c, 12 | Holdings table with alerts, proposed SL/TP (price\|%), 12m vol, score, sector-flow pill |
-| 3 | Crypto | 3, 9c, 12 | Crypto holdings with classification (auto Core/Alt), current location, 12m vol, score |
-| 4 | Performance | 9d | Closed-trades retrospective: window pill, R-multiple histogram, equity curve, methodology calibration, cohort drill-down |
-| 5 | Screener | 9b | S&P sample with filters; "+ watchlist" prefilled |
-| 6 | Sector Rotation | 9f | 34-row taxonomy (17 AI + 6 non-AI + 11 GICS), multi-window returns, RS vs SPY, tag pills, drag-reorder, weekly digest |
-| 7 | Scorecards | 9g | Adapter MD repository (Philosophy + Energy + Hydrocarbons + Master Spec). Two-pane viewer/editor |
-| — | Crypto Indicators | 9e | BTC-primary regime layer — Cowen 4-phase, Pal macro, ETF flows, F&G, stablecoin supply |
-| — | Crypto Theses | 9l | 8-adapter Repository (BTC + L1 + L2 + DeFi + Infra + DePIN + RWA + Speculative). Phase 1 = adapter repository only; Scoring Engine + per-coin theses pending locked adapter MDs |
-| — | Signals | 9k | Political + insider signal tab (SEC EDGAR per-ticker, capitol-trades, OGE) |
-| — | Stock Theses (was "Theses") | 15 | Renamed 2026-05-29 to disambiguate from new Crypto Theses sibling. Same GitHub-backed library + earnings-revision warnings |
-| 8 | Watchlist | 4, 9b, 12 | Names being considered, framework-scored, analyst Bear/Base/Bull, sortable, promotable |
-| 9 | Heatmap | 6, 9d | SVG treemap. Three modes: market_cap / my_holdings / pnl |
-| 10 | News | 2 D6, 12 D10 | NewsAPI feed + stocks F&G chip + macro calendar cards + filter mode |
-| 11 | Crypto News | 2 D6 | CryptoPanic feed + alternative.me F&G chip |
-| 12 | Settings | 3, 9b, 9c, 9c.1, 7, 11 | Portfolio risk dashboard, LLM spend dashboard, diagnostics + provider health, deleted-holdings restore, audit log, regime history, **Spec docs (this section)** |
+| 1 | Summary | 2, SC-22 | KPIs, donuts, stale-score / stale-thesis banners, regime pills, market pill, demo-mode toggle, AI Nexus summary card |
+| 2 | Stocks & ETFs | 3, 9c, 12, SC-35, SC-42, SC-44 | Holdings table with alerts, proposed SL/TP, eToro's own SL/TP shown as a second line (`⚠ no eToro SL` when none), 12m vol, score, sector-flow pill, HOLD/TRADE class. **"eToro changes need your approval" panel** at the top (SC-44). Toolbar: Add stock, Reconcile with eToro statement (manual fallback), Download CSV |
+| 3 | Crypto | 3, 9c, 12, SC-29 | Crypto holdings by wallet with classification (Core/Alt), current location, 12m vol, score; XLSX export |
+| 4 | Crypto Indicators | 9e, SC-20 | BTC-primary regime layer — Cowen 4-phase, Pal macro, ETF flows, F&G, stablecoin supply; indicator explainers |
+| 5 | Crypto Theses | 9l | 12-adapter repository + per-coin scored theses with lock / fork / cascade acknowledgement, and the crypto allocation table |
+| 6 | Signals | 9k, SC-23, SC-24 | Insider (SEC Form 4), Congress, executive-order, OGE 278-T, named political-figure tracker, 13F institutional tracker. Tab badge on alarms |
+| 7 | Performance | 9d, SC-17, SC-26, SC-30 | Leads with real eToro realised history (annual + YTD from statement imports), copy-vs-systematic split; closed-trade retrospective below. Hosts "Upload statement" and "Reconcile holdings" |
+| 8 | Screener | 9b, SC-21 | Stock screener ("+ watchlist") and the crypto market screener (CoinGecko top 250) |
+| 9 | Macro Regime & Sector Rotation | 9f, 9p | Macro regime band (growth × inflation, FRED-driven, playbook) above the 34-row sector taxonomy with multi-window returns, RS vs SPY, tag pills, weekly digest |
+| 10 | AI Nexus | SC-36, SC-39 | Visser replication: Trend Score, Exhaustion, Forward PEG over the Nexus universe; Entry Candidates view |
+| 11 | Video Digest | SC-43 | LLM digests of Jordi Visser / Benjamin Cowen videos: summary, themes, mentions with timestamp links, verified quotes, Cowen snapshot fields |
+| 12 | Scorecards | 9g, SC-34 | Adapter / doctrine document repository (18 documents incl. this Master Spec), two-pane viewer/editor, Process/Playbook card pinned on top |
+| 13 | Stock Theses | 15, SC-38 | GitHub-backed thesis library (`cross_sector_research`), grouped owned / watchlist / other, earnings-revision warnings, score-vs-outcome calibration |
+| 14 | Watchlist | 4, 9b, 12, SC-14/15/16, SC-31 | Names under consideration, framework-scored, Bear/Base/Bull forecasts with manual override, grouped-by-sector view, promotable |
+| 15 | Heatmap | 6, 9d | SVG treemap: market_cap / my_holdings / pnl |
+| 16 | News | 2 D6, 12 D10 | NewsAPI feed + stocks F&G chip + macro calendar cards |
+| 17 | Crypto News | 2 D6 | CryptoPanic feed + alternative.me F&G chip |
+| 18 | Registry | SC-28 | Document-control view of the methodology-notes registry and doctrine documents |
+| 19 | Settings | 3, 7, 9b, 9c, 9c.1, 11 | Portfolio risk dashboard, LLM spend dashboard, diagnostics + provider health, deleted-holdings restore, audit log, regime history |
 
-Top bar: brand · market pill (clickable for all 7 exchanges, click-to-focus) · regime pills (Jordi / Cowen / Effective) · refresh status · refresh / import / export / ⌘K palette / logout.
+Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills (Jordi / Cowen / Effective) · refresh status · refresh / import / save master / ⌘K palette / user / sign out.
 
 ## 3. Schema — every migration
+
+48 migrations applied (latest `0048_etoro_reconcile.sql`).
 
 | # | File | Adds |
 |---|------|------|
@@ -204,71 +221,129 @@ Top bar: brand · market pill (clickable for all 7 exchanges, click-to-focus) ·
 | 0031 | `crypto_theses` | Spec 9l Phase 1 — `crypto_adapters` + `crypto_adapter_versions` + `crypto_theses` + `crypto_thesis_history` + `crypto_thesis_dependencies` + `cascade_events` + `crypto_allocation_current` + `crypto_allocation_history`. 8 adapters seeded as drafts |
 | 0032 | `crypto_theses_speculative_horizon` | Spec 9l v0.3 — BEFORE INSERT/UPDATE trigger pair on `crypto_theses`. Blocks Speculative adapter theses from locking at Never-Sell/Cycle/Multi-year horizon. Trade/Medium/TBD allowed |
 | 0033 | `crypto_theses_q5_ryr_rabr_custody_btc_ref` | Spec 9l v0.6 doctrinal + v0.7 as-built. **Five doctrinal items in single migration.** Item 1: Q5 mechanism CHECK 7→14 values (added `direct_asset_claim`, `required_for_service`, `dsr_surplus`, `burn_and_mint`, `buyback_stake`, `real_yield_staking`, `governance_with_fee_switch`). Item 2: DePIN RYR cross-pillar columns (`q4_q5_ryr`, `q5_paid_revenue_usd`, `q5_emissions_usd`, `network_age_months`). Item 3: RWA RABR cross-pillar columns (`q5_rabr`, `q5_verified_asset_value_usd`, `q5_token_supply_at_par_usd`, `q5_audit_date`, `q5_auditor`). Item 4: RWA Custody Verification Tier (`q6_custody_tier` with CHECK + `q6_custody_cadence` + `q6_custody_jurisdiction`). Item 5: BTC β CHECK 4→5 values (added `reference`). Implemented as table rebuild (SQLite CHECK replacement requires it; all column adds folded into same rebuild for clean schema). 8 indexes + 2 Speculative horizon triggers from 0032 re-created. Post-migration UPDATEs: 5 Q5 re-tags (LINK→required_for_service, AAVE→real_yield_staking, BUIDL→direct_asset_claim, LUNC→burn_and_mint, RNDR→burn_and_mint) + BTC β `low`→`reference` + RNDR RYR populate (0.35, $2.7M, $8M, 30 months) + BUIDL RABR populate (1.00, $2.45B, $2.45B, 2026-04-30, BNY Mellon) + BUIDL Custody populate (tier_1, monthly, United States). |
+| 0034 | `stock_holdings_sector_adapter_subtype` | `stock_holdings.sector_adapter_subtype` (table rebuild) — stock-side sector-adapter sub-type tag |
+| 0035 | `relax_sector_adapter_subtype_check` | Loosens the 0034 CHECK so single-word adapter slugs are accepted (table rebuild) |
+| 0036 | `stock_holdings_sl_method` | SC-08 — explicit per-holding stop-loss method (`sl_method`, `sl_safety_pct`) |
+| 0037 | `macro_regime` | Spec 9p — `macro_indicators`, `macro_indicator_snapshots`, `macro_regime_history`, `regime_playbook`, `ism_manual` |
+| 0038 | `etoro_performance` | SC-17 P1 — `etoro_performance`, `etoro_performance_year` (statement-import performance history) |
+| 0039 | `stock_holding_isin` | SC-17 P2 — `stock_holdings.isin` (durable match key for statement reconcile) |
+| 0040 | `crypto_adapters_expand_12` | Spec 9l — crypto adapters 8 → 12 (Stablecoin, Privacy, CeFi/Exchange, AI-Agent) |
+| 0041 | `tracked_individuals` | SC-24 — `tracked_individuals` + OGE 278-T signal class |
+| 0042 | `13f_tracker` | SC-23 — `tracked_funds`, `fund_13f_holdings`, `fund_13f_diffs`, `cusip_ticker_map` |
+| 0043 | `forecast_targets_sc31` | SC-31 — `forecast_median`, `forecast_analyst_count`, `forecast_source` on watchlist + stock_holdings |
+| 0044 | `position_class_levels_source` | SC-35 — per-holding `position_class` (hold/trade) and `levels_source`; `ma_50w`, `ma_200d` |
+| 0045 | `nexus` | SC-36 — `nexus_universe`, `nexus_ticker_map`, `nexus_technical`, `nexus_exhaustion`, `nexus_fundamentals` |
+| 0046 | `video_digest` | SC-43 — `video_sources` (seeded: jordi, cowen), `video_digests`, `video_mentions`, `video_quotes`, `video_frames`, `cowen_weekly_snapshot` |
+| 0047 | `etoro_sync` | SC-42 — `etoro_instruments`, `etoro_sync_runs`, `etoro_holdings_lots` (per-lot change history), `etoro_holdings_effective` (per ticker + direction) |
+| 0048 | `etoro_reconcile` | SC-44 — `etoro_reconcile_proposals`; `amount_usd` on lots, `invested_usd` on effective, `values_updated` / `proposals_pending` on sync runs |
+
+**Holdings model, as it stands:** `stock_holdings` has no units column — it stores `invested_usd` and `avg_open_price` (in the listing's own currency); units live only in the eToro tables. Deletes are soft (`deleted_at`). Thesis links are `stock_holdings.thesis_link` (legacy URL) and `holding_theses` (in-app); both survive a soft-delete.
 
 ## 4. Background jobs
 
+**Inside the FT process** (all times UTC):
+
 | Job | Schedule | What |
 |-----|----------|------|
-| Live refresh | `FT_REFRESH_INTERVAL` (default 15m) | FX → stocks → crypto → heatmap. Provider chain: Finnhub → TwelveData → Yahoo |
-| Daily job | 04:00 UTC | 365-day price_history backfill, calendar dates, beta auto-resolve, 12m vol compute, analyst forecasts. CLI: `ft daily` |
-| Sector rotation ingest | 22:00 UTC | 34-ETF + SPY + VWRL daily close. CLI: `ft sector-ingest` |
-| Weekly sector digest | Fri 22:00 UTC | Top/bottom 5 by RS, WoW movers, newly-tagged "rotating in" → `sector_rotation_digests` |
-| Sunday regime nudge | Sun 18:00 UTC | FT bot Telegram nudge unless `regime_skip_week` set or Cowen submitted in last 7 days |
-| Weekly perf summary | Sun 19:00 UTC | FT bot — 30-day perf snapshot |
-| Session GC | Hourly | Purges expired session rows |
-| DB backup | 03:15 UTC (cron) | `sqlite3 .backup` to `/var/backups/ft/`, prunes >14d |
+| Live refresh | `FT_REFRESH_INTERVAL` (default 15m), plus once ~5 s after boot | FX → stocks → crypto → heatmap. Provider chain: Finnhub → TwelveData → Yahoo |
+| eToro sync + holdings reconcile | every 30 min, around the clock; first run ~1 min after boot | SC-42: one portfolio call to eToro's Public API → lot history + effective SL/TP. SC-44: then diffs against FT holdings — matched values update silently, adds/removes queue for approval |
+| Earnings-only refresh | hourly | Updates `earnings_date` / `ex_dividend_date` so thesis revision warnings fire within ~1 h |
+| Thesis Library sync | `FT_THESIS_SYNC_EVERY` (default 5m) | `git pull` + re-index of `cross_sector_research`; no-op without `FT_GITHUB_TOKEN` |
+| Session GC | hourly | Purges expired sessions |
+| Crypto Indicators | 00:30, plus ~30 s after boot | Refresh all indicators + composite snapshot |
+| Macro Regime | 01:00, plus ~75 s after boot | FRED refresh + regime snapshot |
+| Legislators / committees | 02:00, self-gated to the first day of each quarter | Signals reference data |
+| Daily job | 04:00 | 365-day price history, calendar dates, beta, 12m vol, analyst forecasts. CLI: `ft daily` |
+| Video digest sweep | 09:15, plus ~2 min after boot | SC-43: ingests any complete package in `/var/lib/video_digest` not yet digested (one governor LLM call per new video) |
+| Sector rotation ingest | 22:00 | 34 sector ETFs + SPY + VWRL daily close. CLI: `ft sector-ingest` |
+| Weekly sector digest | Fri 22:00 | Top/bottom by RS, WoW movers → `sector_rotation_digests` |
+| AI Nexus daily | 22:30 | Universe + benchmark bars, Trend Score + Exhaustion |
+| AI Nexus weekly | Sun 22:45 | Forward PEG recompute |
+| Signals ingest | 23:00 / 23:10 / 23:20 | SEC Form 4 insiders (firehose + per-ticker), Congress, executive orders |
 
-## 5. Endpoints — by spec
+**On Jarvis, outside the FT process:**
 
-(Cookie auth unless marked **T** for cookie-or-token.)
+| Job | Schedule | What |
+|-----|----------|------|
+| `ft-bridge-spec.timer` | every 10 min | SC-45: exports this spec from the live DB to Google Drive (`FT-Bridge/spec`) when it changes |
+| `video-digest.timer` | Sun 20:00 + Mon 08:00 Europe/Dublin | SC-43 P0: fetches new Jordi/Cowen videos into `/var/lib/video_digest` |
+| `ft-backup.timer`, `ft-restore-verify.timer` | systemd timers | SC-37 backup / DR and restore verification |
+| DB backup (cron, user `ft`) | 03:15 daily | `/opt/ft/bin/backup-db.sh` |
+| Jarvis config backup (cron) | Sun 03:30 | `/opt/ft/bin/backup-jarvis-config.sh` |
+| Whole-box backup (cron) | 03:30 daily | `jarvis_backup.sh` — restic to Backblaze B2 |
+| Capitol-trades fetch (cron) | 23:05 daily | Feeds the Congress signal ingest |
+| Farside ETF-flow fetch (cron) | 00:25 daily | Feeds the Crypto Indicators ETF-flow series |
+| FT Telegram bot | see §6 | Proactive alert crons |
 
-**Auth:** `GET /api/auth/{state,me}`, `POST /api/auth/{setup,login,logout}`
+## 5. Endpoints — by area
 
-**Holdings:** `GET /api/holdings/{stocks,crypto}`, `POST` / `PUT/{id}` / `DELETE/{id}` / `/{id}/restore` / `/deleted`. `PUT /api/holdings/stocks/{id}/sector` (9f).
+Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grouped, not exhaustive per verb.
 
-**Summary + status:** `GET /api/summary`, `GET /api/marketstatus`, `GET /api/marketstatus/all`, `GET /api/audit`
+**Auth:** `GET /api/auth/{state,me}`, `POST /api/auth/{setup,login,logout}`. `GET /healthz` (no auth).
+
+**Holdings:** `GET /api/holdings/{stocks,crypto}`, `POST`, `PUT/{id}`, `DELETE/{id}` (soft), `POST/{id}/restore`, `GET .../deleted`. Stock-only setters: `PUT /api/holdings/stocks/{id}/{sector,sl-method,position-class,levels-source}`.
+
+**Summary + status:** `GET /api/summary`, `/api/marketstatus`, `/api/marketstatus/all`, `/api/audit`
 
 **Refresh:** `POST /api/refresh` **T**, `GET /api/refresh-status` **T**
 
-**Import/export:** `POST /api/import/{preview,apply}`, `GET /api/export.xlsx`, `GET /api/export.csv?tab=stocks|crypto|watchlist` (v1.5)
+**Import/export:** `POST /api/import/{preview,apply}` (master file, `.xlsx`/`.csv`), `GET /api/export.xlsx`, `GET /api/export.csv?tab=stocks|crypto|watchlist`, `GET /api/crypto/export.xlsx`
 
-**Spec 15 — Thesis Library:** `GET /api/theses{,/gaps,/{id},/{id}/revision-prompt}`, `POST /api/theses/{upload,scoring-log,sync}` (v1.6, scoring-log added v1.7, revision-prompt v1.9). `/upload` accepts `thesis` + optional `scoring_log` + optional `registry` parts; `/scoring-log` accepts `scoring_log` and/or `registry` (≥1 required) and commits the present files together (registry write-path added v1.51). GitHub repo `finbarrcurran/cross_sector_research` is the source of truth; FT keeps a local clone at `/var/lib/ft/research/` synced every 5 min. Theses rows tagged with ownership (owned/watchlist/other) via JOIN to stock_holdings + watchlist; UI groups them into three sections (v1.7).
-
-**SC-36 — AI Nexus (Visser replication):** `POST /api/nexus/upload` (multipart, auto-detects technical/exhaustion/fundamentals xlsx), `GET /api/nexus/{universe,technical,exhaustion,fundamentals}` (snapshots default `?source=upload`; `?as_of=` selects a date, else latest). W1+W2 backend only (v1.52); the AI Nexus tab UI is W5 (not yet shipped). Backed by migration 0045 `nexus_*` tables + `daily_bars kind='benchmark'` for SPY/QQQ/SOXX.
+**eToro (SC-17, SC-42, SC-44):**
+- Direct sync: `GET /api/etoro/sync` (last run + effective per-ticker SL/TP), `POST /api/etoro/sync` (run now).
+- Approval queue: `GET /api/etoro/reconcile/proposals?status=`, `POST /api/etoro/reconcile/proposals/{id}/{approve,dismiss}`.
+- Statement fallback (`.xlsx` only): `POST /api/etoro/reconcile/{preview,apply}` — the preview returns `coverage {complete, reason, startDate, endDate, oldestOpen, newestOpen}`; an incomplete statement has closure/drift rows withheld, and copy-trade lots are left out.
+- Performance history: `POST /api/etoro/import/{preview,apply}`, `GET /api/etoro/performance`.
 
 **Heatmap:** `GET /api/heatmap.svg?mode={market_cap|my_holdings|pnl}&sector=`
 
 **News + F&G:** `GET /api/news/{market,crypto}`, `GET /api/feargreed{,/stocks}`
 
-**Spec 4 — Watchlist + Frameworks:** `GET/POST /api/watchlist`, `PUT/DELETE/{id}`, `POST/{id}/promote`. `GET /api/frameworks{,/{id}}`. `GET/POST /api/scores`
+**Watchlist + frameworks (Spec 4):** `GET/POST /api/watchlist`, `PUT/DELETE/{id}`, `POST/{id}/promote`. `GET /api/frameworks{,/{id}}`. `GET/POST /api/scores`
 
-**Spec 6 — Preferences:** `GET/PUT /api/preferences/{key}` **T**
+**Preferences (Spec 6):** `GET /api/preferences` **T**, `GET/PUT /api/preferences/{key}` **T**
 
-**Spec 9b — Regime:** `GET /api/regime` **T**, `POST /api/regime/{jordi,cowen/manual,cowen/auto}`, `GET /api/regime/history`, `GET /api/screener`, `GET /api/macro`
+**Regime (9b) + macro (9p):** `GET /api/regime` **T**, `POST /api/regime/{jordi,cowen/manual,cowen/auto}`, `GET /api/regime/history`. `GET /api/macro/regime` **T**, `POST /api/macro/{refresh,ism}`, `GET/POST /api/macro/playbook`, `DELETE /api/macro/playbook/{id}`, `GET /api/macro`
 
-**Spec 9c — Percoco:** `GET /api/holdings/{stocks,crypto}/{id}/levels` **T**, `POST .../autoscore`, `GET /api/risk/dashboard` **T**, `POST /api/risk/snapshot` **T**
+**Screeners:** `GET /api/screener`, `GET /api/crypto-screener` (SC-21)
 
-**Spec 9c.1 — LLM:** `GET /api/llm/{spend,log}` **T**, `POST /api/llm/{pause,override,override/clear}` **T**
+**Percoco levels + risk (9c, SC-35):** `GET /api/holdings/{stocks,crypto}/{id}/levels` **T**, `POST .../autoscore`, `GET /api/risk/dashboard` **T**, `POST /api/risk/snapshot` **T**
 
-**Spec 9d — Performance:** `GET /api/performance/{overview,cohorts,calibration,cohort/{key},export.csv}` **T**
+**LLM governor (9c.1):** `GET /api/llm/{spend,log}` **T**, `POST /api/llm/{pause,override,override/clear}` **T**
 
-**Spec 10 — Transactions:** `GET/POST /api/transactions`, `POST /api/transactions/{id}/supersede`, `GET /api/holdings/{kind}/{id}/taxlots`, `GET/POST /api/dividends`, `POST /api/transactions/import`
+**Performance (9d):** `GET /api/performance/{overview,cohorts,calibration,cohort/{key},export.csv}` **T**
 
-**Spec 11 — Thesis notes:** `GET/POST /api/notes` **T**, `PUT/DELETE /api/notes/{id}` **T**, `GET /api/notes/{stale,contradictions,resolve}` **T**
+**Transactions (Spec 10):** `GET/POST /api/transactions`, `POST /api/transactions/{id}/supersede`, `GET /api/holdings/{kind}/{id}/taxlots`, `GET/POST /api/dividends`, `POST /api/transactions/import` (historical transactions, `.csv` only)
 
-**Spec 7 — Diagnostics:** `GET /api/diagnostics` **T**
+**Thesis notes (Spec 11):** `GET/POST /api/notes` **T**, `PUT/DELETE /api/notes/{id}` **T**, `GET /api/notes/{stale,contradictions,resolve}` **T**
 
-**Spec 12 — Lookup:** `GET /api/lookup/ticker?q=&kind=`
+**Diagnostics + lookup:** `GET /api/diagnostics` **T**, `GET /api/lookup/ticker?q=&kind=`
 
-**Spec 9f — Sector rotation:** `GET /api/sector-rotation/{metrics,sectors,digests}` **T**, `POST/DELETE /api/sector-rotation/ordering`, `POST /api/sector-rotation/refresh` **T**
+**Sector rotation (9f):** `GET /api/sector-rotation/{metrics,sectors,digests}` **T**, `POST/DELETE /api/sector-rotation/ordering`, `POST /api/sector-rotation/refresh` **T**
 
-**Spec 9g — Scorecards:** `GET /api/scorecards{,/{code}{,/versions}}` **T**, `PUT /api/scorecards/{code}`, `POST /api/scorecards/preview`, `PUT /api/scorecards/{code}/status`
+**Scorecards (9g) + Registry (SC-28):** `GET /api/scorecards{,/{code}{,/versions}}` **T**, `PUT /api/scorecards/{code}`, `POST /api/scorecards/preview`, `PUT /api/scorecards/{code}/status`, `GET /api/registry`
 
-**Spec 14 — Per-holding theses:** `GET/PUT /api/holdings/{kind}/{id}/thesis`, `GET /api/holdings/{kind}/{id}/thesis/versions`, `PUT /api/holdings/{kind}/{id}/thesis/status`, `POST /api/holdings/{kind}/{id}/thesis/preview`
+**Per-holding theses (Spec 14):** `GET/PUT /api/holdings/{kind}/{id}/thesis`, `GET .../thesis/versions`, `PUT .../thesis/status`, `POST .../thesis/preview`
 
-**Bot:** `GET /api/bot/{alerts,holdings/summary,holdings/movers}` **T**, `POST /api/bot/alerts/ack` **T**, `POST /api/bot/refresh` **T**
+**Stock Thesis Library (Spec 15, SC-38):** `GET /api/theses{,/gaps,/{id},/{id}/revision-prompt}`, `POST /api/theses/{upload,scoring-log,sync}`, `GET /api/calibration/theses`. GitHub repo `finbarrcurran/cross_sector_research` is the source of truth; FT keeps a clone at `/var/lib/ft/research/`.
+
+**Crypto Indicators (9e):** `GET /api/crypto-indicators{,/composite/latest,/composite/history,/btc-history,/etf-flow/history,/ism}`, `POST /api/crypto-indicators/{refresh,backfill,ism}`
+
+**Crypto Theses (9l):** adapters — `GET /api/crypto/adapters{,/{slug}{,/versions{,/{ver}}}}` **T**, `PUT /api/crypto/adapters/{slug}{,/status}`, `POST /api/crypto/adapters/preview`. Theses — `GET /api/crypto/theses` **T**, `GET /api/crypto/theses/drafts`, `POST /api/crypto/theses`, and per `{symbol}/{version}`: `GET` **T**, `PUT`, `DELETE`, `POST .../{lock,fork,acknowledge-cascade}`, `GET .../events` **T**. Allocation — `GET` **T** / `PUT /api/crypto/allocation`.
+
+**Signals (9k, SC-23, SC-24):** `GET /api/signals`, `POST /api/signals/{id}/ack`, `POST /api/signals/refresh-{insiders,congress,eo,committees,13f,278t-eo-link}`, `POST /api/signals/upload-{oge,278t}`, `GET /api/signals/universe`, `GET/POST /api/signals/tracked-individuals`, `GET/POST /api/signals/tracked-funds`, `POST /api/signals/tracked-funds/remove`, `GET /api/signals/fund-13f-diffs`
+
+**AI Nexus (SC-36, SC-39):** `POST /api/nexus/upload`, `GET /api/nexus/{universe,technical,exhaustion,fundamentals,entry-candidates}`
+
+**Video Digest (SC-43):** `GET /api/video-digest?source=`, `POST /api/video-digest/ingest`
+
+**Bot:** `GET /api/bot/{alerts,holdings/summary,holdings/movers,refresh-status}` **T**, `POST /api/bot/{alerts/ack,refresh}` **T**
+
+**MCP connector (SC-41):** `/mcp` — JSON-RPC, bearer token whose scope contains `read` (minted with `ft token create-mcp`). Six read-only tools: `get_theses`, `get_scorecards`, `get_gap_report`, `get_alerts`, `get_performance`, `get_watchlist`. Each returns what the matching dashboard endpoint returns (same demo-mode gating) inside an envelope with `queriedAt`. No write tool exists.
 
 ## 6. FT Telegram bot
+
+*(carried over — the service is running; commands and schedules were not re-verified in the 2026-10-09 pass.)*
 
 Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token auth. Bot identity `@FinsFTAlerts_bot`.
 
@@ -276,10 +351,11 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 
 **Proactive crons:**
 - 13:00 / 17:00 / 21:00 UTC weekdays — RED/AMBER alerts with `notification_log` dedup
-- Sunday 18:00 UTC — regime nudge
+- Sunday 18:00 UTC — regime nudge (unless `regime_skip_week` set or Cowen submitted in last 7 days)
 - Sunday 19:00 UTC — weekly perf summary
+- AI Nexus anomaly flags are relayed through the alert poll (SC-36 W4)
 
-`/snooze [hours]` writes `alerts_snooze_until` preference; proactive crons short-circuit when set.
+`/snooze [hours]` writes `alerts_snooze_until`; proactive crons short-circuit when set.
 
 ## 7. Conventions
 
@@ -289,78 +365,113 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 - Cache-busting via 8-char hash of `app.js+app.css` stamped into index.html as `?v=`
 - Every mutation writes a `holdings_audit` row with `changes_json` + optional `reason_code`
 - `user_preferences` is the home for any new k/v setting; per-key validation in `validPreferenceValue()`
-- All endpoints accept cookie auth + `ft_st_…` bearer token where the bot needs them
-- Append-only tables (`transactions`, `closed_trades`, `thesis_notes`, `sector_snapshots`, `sector_scorecard_versions`, `framework_scores`, `holdings_audit`) — corrections via supersede/soft-delete, never UPDATE on data columns
-- **Methodology-notes registry is the canonical note list** — the numbered notes live in `cross_sector_research/theses/_methodology_notes_registry.md` (split out of `_scoring_log.md` §5 on 2026-06-10), version-stamped, and integrity-checked by `tools/check_registry.sh`. Cite a note ONLY by its exact registry number + name; a `candidate` note is never citable as established. After editing the registry, bump its `REGISTRY v<N>` stamp (version/date/count/set must match the bodies, and the date must equal the commit that touches it) or `check_registry.sh` fails.
-- **Registry + doctrine drop-ins are re-exported on change** (re-export discipline, set 2026-06-10) — whenever `_methodology_notes_registry.md` or any version-stamped doctrine/adapter MD in `cross_sector_research` changes, re-export it as a Project drop-in so the ai-side (Claude.ai) skill reads the fresh, stamped copy rather than a drifted one. The freshness stamp (`> **<DOC> v<N> · <date> · …**`) under each H1 is what makes a stale drop-in visible at a glance.
-- **Master Spec is bumped on every completed section or spec** (set 2026-05-19, refined same day). A "section" = a spec shipping, a feature batch completing, a sub-phase landing, a polish batch wrapping, or an architectural decision being made. **Not** every commit — typo fixes, single parser tweaks, comment-only changes, test-only commits do NOT bump on their own; they roll up into whatever section they're part of. Versioning: patch (v1.7.x) for polish batches, minor (v1.8) for new specs/features, major (v2.0) for breaking architecture. Each bump: (a) new row in §13, (b) commit includes the spec change, (c) live DB updated via SQL UPDATE after deploy.
+- Endpoints the bot or the MCP connector need accept a bearer token as well as the cookie (marked **T** in §5); everything else is cookie-only
+- Append-only tables (`transactions`, `closed_trades`, `thesis_notes`, `sector_snapshots`, `sector_scorecard_versions`, `framework_scores`, `holdings_audit`, `etoro_holdings_lots`) — corrections via supersede/soft-delete, never UPDATE on data columns
+- **Broker data rules:** eToro owns units, `invested_usd` and `avg_open_price` (taken from eToro's own USD figures — no FT-side FX math); FT owns stop/TP, `sl_method`, notes, sector tags and thesis links. Copy-trade positions are stored but never become FT holdings. Anything that changes *which* holdings exist needs explicit approval. Crypto reconciles only against rows whose wallet is `eToro`.
+- **Demo mode** is enforced server-side; portfolio and broker data are never served in demo.
+- **LLM calls** only through the `internal/llm` governor, each feature behind its own kill switch.
+- **Methodology-notes registry is the canonical note list** — the numbered notes live in `cross_sector_research/theses/_methodology_notes_registry.md`, version-stamped, and integrity-checked by `tools/check_registry.sh`. Cite a note ONLY by its exact registry number + name; a `candidate` note is never citable as established. After editing the registry, bump its `REGISTRY v<N>` stamp or `check_registry.sh` fails.
+- **Registry + doctrine drop-ins are re-exported on change** (set 2026-06-10) so the ai-side reads the fresh, stamped copy.
+- **Master Spec is bumped on every completed section or spec** (set 2026-05-19). Versioning: patch for polish batches, minor for new specs/features, major for breaking architecture. **Each bump (rule tightened 2026-10-09):** (a) a change-log entry at the top; (b) **the affected parts of sections 1–12 are updated in the same commit** and the `reference_reviewed` marker above §1 is set to the new version — a bump that only adds a change-log entry leaves the reference stale, which is how these sections drifted from v1.5x to v1.75; (c) the commit includes the spec change; (d) the live DB row is updated after deploy.
+- **The spec is mirrored to Google Drive** (`FT-Bridge/spec`, SC-45) from the live DB row. The mirror marks the reference part STALE whenever the `reference_reviewed` marker is behind the spec version or the live schema is ahead of the migrations these sections mention.
 
 ## 8. Provider chain
 
-| Domain | Primary | Fallback | Free-tier notes |
-|--------|---------|----------|-----------------|
+*(carried over, with the eToro, FRED and CoinGecko-key rows added 2026-10-09; the other rows were not re-verified.)*
+
+| Domain | Primary | Fallback | Notes |
+|--------|---------|----------|-------|
 | US stock quote | Finnhub | TwelveData → Yahoo | TwelveData free is US-only since 2024 |
 | Non-US stock quote | Yahoo (crumb dance) | — | Fragile; updates every few months |
 | Stock history (sparkline + 12m vol) | Yahoo `v8/chart` | — | 365-day window |
 | Stock fundamentals (beta, calendar, targets) | Yahoo `quoteSummary` | — | Patchy for non-US |
-| Crypto quote | CoinGecko `/simple/price` | — | Bursts trigger sticky 429 |
+| Broker positions, SL/TP, invested USD | eToro Public API (`public-api.etoro.com`) | manual `.xlsx` statement upload | Key pair in env; 60 req/60 s shared limit; one call per 30-min sync |
+| Crypto quote | CoinGecko `/simple/price` | serve-stale | Demo key via `FT_COINGECKO_API_KEY` (SC-18) |
 | Crypto history | CoinGecko `/market_chart` | — | Sequential w/ 2.5s gap |
+| Crypto market screener | CoinGecko top 250 | — | SC-21 |
+| Macro + Pal indicators | FRED | manual ISM entry | `FRED_API_KEY` |
 | FX EUR→USD | Frankfurter | static fallback 1.08 | No key needed |
 | Stocks F&G | CNN `dataviz.cnn.io` | — | Unofficial; UA-gated |
 | Crypto F&G | alternative.me | — | Stable |
 | News (stocks) | NewsAPI | stale cache | Free 100 req/24h |
-| News (crypto) | CryptoPanic | stale cache | Free tier sufficient |
+| News (crypto) | CryptoPanic | stale cache | Free tier |
 | Sector ETFs | Yahoo daily closes | — | 36 ETFs × 1 call/day |
+| Insider / 13F filings | SEC EDGAR | — | Daily ingest; 13F on demand |
+| Video digests | Anthropic API via the governor | — | Haiku; packages come from the Jarvis yt-dlp pipeline |
 
 All provider calls wrapped with `health.Record` (Spec 7) for diagnostics surfacing.
 
 ## 9. Environment variables
 
-In `/etc/ft/env` (mode 0600, root:root). See `deploy/env.example` for the full list with signup URLs.
+In `/etc/ft/env` (mode 0600, root:root). Names only — values never leave that file.
 
-Required: `FT_FINNHUB_API_KEY` (else US quotes fail).
+**Set on Jarvis today:** `FT_FINNHUB_API_KEY`, `FT_TWELVEDATA_API_KEY`, `FT_GITHUB_TOKEN`, `FRED_API_KEY`, `NEWSAPI_API_KEY`, `FT_COINGECKO_API_KEY`, `FT_ANTHROPIC_API_KEY`, `FT_ETORO_API_KEY`, `FT_ETORO_USER_KEY`.
 
-Optional: `FT_TWELVEDATA_API_KEY`, `NEWSAPI_API_KEY`, `CRYPTOPANIC_API_KEY`, `FT_ANTHROPIC_API_KEY`, `FT_TELEGRAM_BOT_TOKEN`, `FT_TELEGRAM_CHAT_ID`, `FT_GITHUB_TOKEN` (Spec 15 Thesis Library, fine-grained PAT scoped to cross_sector_research).
+**eToro key pair — easy to swap by mistake:** `FT_ETORO_API_KEY` is the *Public Key* shown on eToro's settings page (sent as `x-api-key`); `FT_ETORO_USER_KEY` is the long key generated by "Create Your API Key" (sent as `x-user-key`). Swapped keys give a 401.
 
-Runtime: `FT_ADDR`, `FT_DB_PATH`, `FT_REFRESH_INTERVAL`, `FT_COOKIE_SECURE`.
+**Read by the code, optional / defaulted:** `CRYPTOPANIC_API_KEY`, `FT_TELEGRAM_BOT_TOKEN`, `FT_TELEGRAM_CHAT_ID`, `FT_ETORO_API_BASE`, `FT_VIDEO_DIGEST_ROOT` (default `/var/lib/video_digest`), `FT_THESIS_REPO_OWNER` / `_NAME` / `_DIR`, `FT_THESIS_SYNC_EVERY` (5m), `FT_CRYPTO_INDICATORS_DATA_DIR`.
 
-Off-site backup creds (NOT in `/etc/ft/env` — they live in rclone's own config): `/var/lib/ft/.config/rclone/rclone.conf` holds the Cloudflare R2 access key + secret + endpoint for daily DB snapshots (v1.7.3). Mode 0600, ft:ft. Bucket: `ft-backups`. 90-day retention.
+**Runtime:** `FT_ADDR` (`:8081`), `FT_BASE_URL`, `FT_DB_PATH`, `FT_SESSION_DAYS` (30), `FT_COOKIE_SECURE`, `FT_COOKIE_DOMAIN`, `FT_REFRESH_INTERVAL` (15m; 0 disables).
+
+Backups have their own credentials outside `/etc/ft/env` (`/etc/ft/backup.env` and the backup tools' own config — see SC-37 in the change log). The Google Drive mirror uses an rclone remote owned by user `curran`, scope `drive.file`.
 
 ## 10. Iteration loop
 
-1. Edit `staging/ft/` on laptop
-2. `git add . && git commit -m "..." && git push`
-3. On jarvis: `sudo /opt/ft/bin/deploy.sh` — pulls, builds, installs, restarts, healthz-checks
-4. Update this Master Spec to reflect any behavioural change
+As actually practised (the laptop has no Go toolchain; the server's GitHub deploy key is read-only):
+
+1. Claude.ai (ai) writes a build handover; Claude Code (cc) confirms its premises against the code before building.
+2. cc edits `/opt/ft/src` on Jarvis as user `ft`, then `go build ./... && go vet ./... && go test ./...` there (Go 1.26).
+3. Commit on Jarvis — code plus this spec (change-log entry **and** the affected sections 1–12 and the `reference_reviewed` marker).
+4. `sudo /opt/ft/bin/deploy.sh` — pulls, builds, installs, restarts, checks `/healthz`.
+5. Update the live spec row in the DB from the committed file. The Drive mirror picks it up within 10 minutes.
+6. Bundle the commit back to the laptop clone (`~/ft-src`) and `git push` to GitHub from there.
+7. cc writes a status report for ai covering each acceptance criterion, including anything not verified.
 
 ## 11. CLI subcommands
 
 ```
-ft                                       run server
-ft serve                                 run server (explicit)
-ft seed [--user-id N]                    load Fin's holdings
-ft daily [--user-id N] [--days 365]      Spec 3 D8/D10/D11 daily job + Spec 12 12m vol
-ft backfill-bars [--user-id N] [--range 2y]  Spec 9c daily OHLC
-ft perf-derive [--user-id N]             Spec 9d derive closed_trades + snapshots
-ft sector-backfill [--months 14]         Spec 9f one-off ETF history
-ft sector-ingest                         Spec 9f manual daily ingest
-ft token create --user-id N --name X     mint a bearer token (plaintext shown once)
-ft token list                            list tokens (no plaintext)
+ft                                        run server
+ft serve                                  run server (explicit)
+ft seed [--user-id N]                     load Fin's holdings
+ft daily [--user-id N] [--days 365]       daily job (history, calendar, beta, 12m vol)
+ft backfill-bars [--user-id N] [--range 2y]   Spec 9c daily OHLC
+ft perf-derive [--user-id N]              Spec 9d derive closed_trades + snapshots
+ft sector-backfill [--months 14]          Spec 9f one-off ETF history
+ft sector-ingest                          Spec 9f manual daily ingest
+ft nexus-ingest | nexus-backfill | nexus-compute | nexus-fundamentals    SC-36 AI Nexus
+ft video-digest-reground                  SC-43 re-ground stored digest timestamps (no LLM call)
+ft token create --user-id N --name X      mint a bearer token (plaintext shown once)
+ft token create-mcp ...                   mint a read-scoped token for the MCP connector (SC-41)
+ft token list                             list tokens (no plaintext)
+ft help
 ```
+
+`ft help`'s built-in text is older than this list — it omits the `nexus-*`, `video-digest-reground` and `token create-mcp` commands.
 
 ## 12. What's deferred — known queue
 
+Current as of 2026-10-09:
+
+| Item | Purpose | Status |
+|------|---------|--------|
+| P5 — FT snapshot report | Generated report (theses, gap report, watchlist, regime, latest video-digest week) written to `FT-Bridge/reports/ft-snapshot.md` | Not built. Transport ready (SC-45); the file there is a placeholder |
+| SC-43 P2 | OCR of Cowen chart frames to fill the snapshot columns left NULL in P1 (200WMA, log band, dominance, ETH/BTC) | Not built |
+| SC-43 P3 / P4 | Regime read surfaced in the UI; digest query tool | Not built — `suggested_regime` / `regime_read` are stored but not exposed |
+| SC-04 batch automation | Thesis updates at scale | Parked pending Fin's decisions on model / scope / sourcing |
+| Manual eToro statement fallback | Retire or keep as break-glass | Kept. Known limits: can't see partial closes; names SU.PA as "SU"; needs SC-42 data to exclude copy-trades |
+| eToro crypto | First real eToro-held crypto position | Path is test-only; FT's EUR-based crypto refresh may recompute the USD cost fields SC-44 writes — check on first use |
+| Spec history archive | Move the old change log / §13 out of this document so the working spec fits one read | Proposed 2026-10-09, awaiting ai's view |
+| `ft help` text | Bring the built-in usage text in line with §11 | Open, cosmetic |
+
+*(carried over from the earlier queue, not re-verified:)*
+
 | Spec | Purpose | Status |
 |------|---------|--------|
-| 9e | Correlation matrix tracking | Drafted in v2; awaiting 30+ positions to justify |
-| 9h | Real-time technicals monitoring (Finnhub WebSocket level breaks) | Drafted in handoff; defer until alert noise is a felt problem |
-| 9i | Adapter scoring engine | Drafted in handoff; depends on 4-5 adapters drafted first |
-| 9j | Additional sector adapters (Pharma, Defense, Mining, Industrial, Semi/AI-Infra) | User-authored as needed |
-| 14 | Thesis repository inside FT (long-form per-holding) | ✅ Shipped 2026-05-17 — Detail page Thesis section gains 📄 In-app thesis subsection with goldmark render + textarea editor with live preview + Save / Save-as-new-version + history modal. Migration 0021 + reuses scorecards.Render. |
-| 15 | Investment strategy / allocation framework | Depends on Spec 12 D2 ✓ |
-| 16 | Alert strategy overhaul (851-alert problem) | Needs alert-noise audit first |
-| 13 (numbering collision) | "Test coverage" (v2 doc) vs "Score automation engine" (Spec 12). Rename one | Open |
-| ~~12 D5g~~ | ~~EUR toggle on stocks P&L column~~ | ✅ Shipped 2026-05-18 — `$ / €` toggle in P&L header, persists via `pnl_currency` preference, converts via the existing FX snapshot |
+| 9e (old numbering) | Correlation matrix tracking | Drafted; awaiting 30+ positions to justify |
+| 9h | Real-time technicals monitoring (Finnhub WebSocket level breaks) | Deferred until alert noise is a felt problem |
+| 9i | Adapter scoring engine | Drafted in handoff |
+| 16 | Alert strategy overhaul | Needs alert-noise audit first |
+| 13 (numbering collision) | "Test coverage" vs "Score automation engine" — rename one | Open |
 
 ## 13. Version history of this doc
 
