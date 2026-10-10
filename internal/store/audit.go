@@ -10,11 +10,11 @@ import (
 
 // AuditAction values per the migration's enum.
 const (
-	AuditCreate         = "create"
-	AuditUpdate         = "update"
-	AuditSoftDelete     = "soft_delete"
-	AuditRestore        = "restore"
-	AuditImportReplace  = "import_replace"
+	AuditCreate        = "create"
+	AuditUpdate        = "update"
+	AuditSoftDelete    = "soft_delete"
+	AuditRestore       = "restore"
+	AuditImportReplace = "import_replace"
 )
 
 // RecordAudit appends one row to holdings_audit. `changes` is marshalled to JSON.
@@ -47,6 +47,25 @@ func (s *Store) RecordAuditWithCode(
 	reason *string,
 	reasonCode string,
 ) error {
+	return s.RecordAuditBy(ctx, "fin", userID, kind, holdingID, ticker, symbol, action, changes, reason, reasonCode)
+}
+
+// RecordAuditBy is the actor-explicit variant. Human-driven changes stay 'fin'
+// (single-user app); automated writers pass their own actor, e.g. 'etoro-sync'
+// for the SC-44 silent value updates, so the log shows who or what changed a row.
+func (s *Store) RecordAuditBy(
+	ctx context.Context,
+	actor string,
+	userID int64,
+	kind string,
+	holdingID int64,
+	ticker *string,
+	symbol *string,
+	action string,
+	changes any,
+	reason *string,
+	reasonCode string,
+) error {
 	body, err := json.Marshal(changes)
 	if err != nil {
 		body = []byte(`{}`)
@@ -59,10 +78,10 @@ func (s *Store) RecordAuditWithCode(
 		`INSERT INTO holdings_audit
 		   (ts, user_id, holding_kind, holding_id, ticker, symbol,
 		    action, changes_json, reason, reason_code, actor)
-		 VALUES (strftime('%s','now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'fin')`,
+		 VALUES (strftime('%s','now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		userID, kind, holdingID,
 		strPtrToNull(ticker), strPtrToNull(symbol),
-		action, string(body), strPtrToNull(reason), codeArg,
+		action, string(body), strPtrToNull(reason), codeArg, actor,
 	)
 	return err
 }

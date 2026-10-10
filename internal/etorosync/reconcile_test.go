@@ -110,10 +110,30 @@ func TestReconcile(t *testing.T) {
 		t.Fatalf("stock_holdings must be untouched before approval: %d live rows", live)
 	}
 
+	// Audit log (spec §7): the silent GLD update is recorded by the sync…
+	var auditN int
+	var actor, code string
+	if err := st.DB.QueryRow(`SELECT count(*), max(actor), max(reason_code) FROM holdings_audit
+		WHERE holding_kind='stock' AND holding_id=? AND action='update'`, gldID).Scan(&auditN, &actor, &code); err != nil ||
+		auditN != 1 || actor != "etoro-sync" || code != "etoro_reconcile" {
+		t.Errorf("GLD silent update audit: n=%d actor=%q code=%q err=%v", auditN, actor, code, err)
+	}
+	var chg string
+	st.DB.QueryRow(`SELECT changes_json FROM holdings_audit WHERE holding_id=? AND action='update'`, gldID).Scan(&chg)
+	if !strings.Contains(chg, `"investedUsd":{"from":100,"to":450}`) {
+		t.Errorf("audit should carry the invested change: %s", chg)
+	}
+	st.DB.QueryRow(`SELECT count(*) FROM holdings_audit`).Scan(&auditN)
+	before := auditN
+
 	// Idempotent re-run.
 	r2 := svc.Sync(ctx)
 	if r2.ValuesUpdated != 0 || r2.ProposalsNew != 0 || r2.ProposalsPending != 4 {
 		t.Fatalf("re-run: %+v", r2)
+	}
+	st.DB.QueryRow(`SELECT count(*) FROM holdings_audit`).Scan(&auditN)
+	if auditN != before {
+		t.Errorf("an unchanged re-sync must not write audit rows: %d -> %d", before, auditN)
 	}
 
 	// Dismiss sticks across syncs.
@@ -146,6 +166,28 @@ func TestReconcile(t *testing.T) {
 	if ledger != 0.5 {
 		t.Errorf("Ledger BTC must be untouched: %v", ledger)
 	}
+	// …and approvals are recorded as human decisions, with no entry snapshot
+	// (so performance.DeriveAll never fabricates a closed trade from them).
+	rows, _ := st.DB.Query(`SELECT holding_kind, action, actor, coalesce(ticker,symbol,''), changes_json FROM holdings_audit WHERE id > 0 AND actor='fin' ORDER BY id`)
+	got := map[string]string{}
+	for rows.Next() {
+		var k, ac, who, tk, cj string
+		rows.Scan(&k, &ac, &who, &tk, &cj)
+		got[k+"/"+ac+"/"+tk] = cj
+		if strings.Contains(cj, "trade_snapshot_json") {
+			t.Errorf("approved-change audit must not carry trade_snapshot_json: %s", cj)
+		}
+	}
+	rows.Close()
+	for _, k := range []string{"stock/create/SLV", "crypto/create/BTC", "stock/soft_delete/ABBV"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("missing audit row %s (have %v)", k, got)
+		}
+	}
+	if !strings.Contains(got["stock/soft_delete/ABBV"], `"hadThesisLink":true`) {
+		t.Errorf("ABBV removal audit should flag the thesis link: %s", got["stock/soft_delete/ABBV"])
+	}
+
 	// AC4: soft-delete, thesis kept.
 	var deleted, theses int
 	st.DB.QueryRow(`SELECT deleted_at IS NOT NULL FROM stock_holdings WHERE id=?`, abbvID).Scan(&deleted)

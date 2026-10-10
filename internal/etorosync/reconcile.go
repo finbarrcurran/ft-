@@ -20,11 +20,54 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 
 	"ft/internal/domain"
 	"ft/internal/etoro"
+	"ft/internal/store"
 )
+
+// Audit conventions for SC-44 (spec §7: every holdings mutation writes a
+// holdings_audit row). Silent value updates are made by the sync itself
+// (actor 'etoro-sync'); approved adds/removals are human decisions (actor 'fin').
+// No trade_snapshot_json is written on purpose: performance.DeriveAll turns a
+// soft_delete into a closed trade only when it finds a matching create with an
+// entry snapshot, and eToro-side closures have no FT-side entry snapshot.
+const (
+	auditActorSync   = "etoro-sync"
+	auditActorHuman  = "fin"
+	auditReasonCode  = "etoro_reconcile"
+	auditReasonAuto  = "SC-44 eToro reconcile: values updated from eToro"
+	auditReasonAdd   = "SC-44 eToro reconcile: approved add (held at eToro, missing in FT)"
+	auditReasonClose = "SC-44 eToro reconcile: approved removal (no longer held at eToro)"
+)
+
+// audit records one holdings_audit row; a failure is logged, never fatal — the
+// holdings change has already happened and must not be rolled back by logging.
+func (s *Service) audit(ctx context.Context, actor string, uid int64, kind string, holdingID int64,
+	ticker string, action string, changes any, reason string) {
+	if s.Store == nil {
+		return
+	}
+	var tk, sym *string
+	if kind == "crypto" {
+		sym = &ticker
+	} else {
+		tk = &ticker
+	}
+	if err := s.Store.RecordAuditBy(ctx, actor, uid, kind, holdingID, tk, sym, action, changes, &reason, auditReasonCode); err != nil {
+		slog.Warn("etoro reconcile: audit write failed", "kind", kind, "holding", holdingID, "ticker", ticker, "err", err)
+	}
+}
+
+func fromTo(from sql.NullFloat64, to float64) map[string]any {
+	var f any
+	if from.Valid {
+		f = from.Float64
+	}
+	return map[string]any{"from": f, "to": to}
+}
 
 // EtoroWallet is the crypto_holdings.wallet value for eToro-held crypto.
 const EtoroWallet = "eToro"
@@ -175,6 +218,11 @@ func (s *Service) reconcile(ctx context.Context, eff []Effective) (reconOutcome,
 					return out, err
 				}
 				out.valuesUpdated++
+				ch := map[string]any{"investedUsd": fromTo(r.invested, round2(e.InvestedUSD))}
+				if avg > 0 {
+					ch["avgOpenPrice"] = fromTo(r.avg, avg)
+				}
+				s.audit(ctx, auditActorSync, uid, "stock", r.id, e.Ticker, store.AuditUpdate, ch, auditReasonAuto)
 			}
 		case "crypto":
 			var qty float64
@@ -186,6 +234,11 @@ func (s *Service) reconcile(ctx context.Context, eff []Effective) (reconOutcome,
 					return out, err
 				}
 				out.valuesUpdated++
+				ch := map[string]any{
+					"quantityHeld": fromTo(sql.NullFloat64{Float64: qty, Valid: true}, e.TotalUnits),
+					"costBasisUsd": fromTo(r.invested, round2(e.InvestedUSD)),
+				}
+				s.audit(ctx, auditActorSync, uid, "crypto", r.id, e.Ticker, store.AuditUpdate, ch, auditReasonAuto)
 			}
 		}
 	}
@@ -405,6 +458,10 @@ func (s *Service) Approve(ctx context.Context, id int64) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		s.audit(ctx, auditActorHuman, uid, "stock", hid, p.Ticker, store.AuditCreate, map[string]any{
+			"new":        map[string]any{"name": p.Name, "ticker": p.Ticker, "investedUsd": h.InvestedUSD, "avgOpenPrice": h.AvgOpenPrice},
+			"proposalId": p.ID,
+		}, auditReasonAdd)
 		msg = fmt.Sprintf("added %s as stock holding %d", p.Ticker, hid)
 	case p.Kind == "crypto" && p.Action == "add":
 		w := EtoroWallet
@@ -417,16 +474,26 @@ func (s *Service) Approve(ctx context.Context, id int64) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		s.audit(ctx, auditActorHuman, uid, "crypto", hid, p.Ticker, store.AuditCreate, map[string]any{
+			"new":        map[string]any{"name": p.Name, "symbol": p.Ticker, "wallet": EtoroWallet, "quantityHeld": h.QuantityHeld, "costBasisUsd": p.EtoroInvestedUSD},
+			"proposalId": p.ID,
+		}, auditReasonAdd)
 		msg = fmt.Sprintf("added %s as eToro crypto holding %d", p.Ticker, hid)
 	case p.Kind == "stock" && p.Action == "remove":
 		if err := s.Store.SoftDeleteStockHolding(ctx, uid, *p.HoldingID); err != nil {
 			return "", err
 		}
+		s.audit(ctx, auditActorHuman, uid, "stock", *p.HoldingID, p.Ticker, store.AuditSoftDelete, map[string]any{
+			"proposalId": p.ID, "ftInvestedUsd": p.FTInvestedUSD, "hadThesisLink": p.HasThesisLink,
+		}, auditReasonClose)
 		msg = fmt.Sprintf("soft-deleted stock holding %d (%s); thesis links and history kept", *p.HoldingID, p.Ticker)
 	case p.Kind == "crypto" && p.Action == "remove":
 		if err := s.Store.SoftDeleteCryptoHolding(ctx, uid, *p.HoldingID); err != nil {
 			return "", err
 		}
+		s.audit(ctx, auditActorHuman, uid, "crypto", *p.HoldingID, p.Ticker, store.AuditSoftDelete, map[string]any{
+			"proposalId": p.ID, "ftInvestedUsd": p.FTInvestedUSD, "hadThesisLink": p.HasThesisLink,
+		}, auditReasonClose)
 		msg = fmt.Sprintf("soft-deleted eToro crypto holding %d (%s)", *p.HoldingID, p.Ticker)
 	default:
 		return "", fmt.Errorf("unknown proposal %s/%s", p.Kind, p.Action)

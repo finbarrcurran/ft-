@@ -1,0 +1,8 @@
+[Unit]
+Description=SC-45: export live FT master spec to Google Drive (FT-Bridge/spec)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ft-bridge-spec

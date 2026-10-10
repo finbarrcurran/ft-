@@ -1,0 +1,116 @@
+#!/bin/bash
+# SC-45 — mirror the FT master spec to Google Drive (FT-Bridge/spec).
+# Runs as root from ft-bridge-spec.timer; the upload runs as curran, who owns the
+# rclone remote (scope drive.file). Uploads only when the working spec (the LIVE
+# database row, so in-app edits are caught), the archive in docs/spec-archive/, or
+# this script changes.
+#
+# Layout on Drive (all Google Docs, imported from text — Claude's Drive connector
+# reads Docs as plain text, a .md file only as a base64 download):
+#   FT-master-spec               the whole working spec (reference + 10 newest changes).
+#                                Must stay well under the ~100,000-character read limit.
+#   FT-spec-current              index, freshness, three newest changes, what is where
+#   archive/FT-spec-archive-INDEX, -changelog-NN, -history-NN   the append-only archive
+set -euo pipefail
+DB=/var/lib/ft/ft.db
+W=/var/lib/ft_bridge
+ARCH=/opt/ft/src/docs/spec-archive
+RUSER=curran
+[ -d "$ARCH" ] || { echo "archive dir $ARCH missing — not syncing (would delete the archive on Drive)"; exit 1; }
+install -d -m 750 -o root -g "$RUSER" "$W"
+cd "$W"
+
+VER=$(sqlite3 -readonly "$DB" "SELECT current_version FROM sector_scorecards WHERE code='master-spec'")
+sqlite3 -readonly "$DB" "SELECT writefile('$W/body.md', markdown_current) FROM sector_scorecards WHERE code='master-spec'" >/dev/null
+[ -s body.md ] || { echo "empty spec export — not uploading"; exit 1; }
+
+HASH=$( (echo "$VER"; cat body.md; cat "$ARCH"/*.md; sha256sum "$0") | sha256sum | cut -d' ' -f1)
+if [ -f last.sha ] && [ "$(cat last.sha)" = "$HASH" ] && [ "${1:-}" != "--force" ]; then
+  exit 0
+fi
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+LIVE_MIG=$(sqlite3 -readonly "$DB" "SELECT substr(max(version),1,4) FROM schema_migrations" 2>/dev/null || echo "")
+
+rm -rf out && install -d -m 750 -o root -g "$RUSER" out out/archive
+VER="$VER" NOW="$NOW" LIVE_MIG="$LIVE_MIG" ARCH="$ARCH" python3 - <<'PY'
+import os, re
+ver, now, live_mig, arch = os.environ["VER"], os.environ["NOW"], os.environ["LIVE_MIG"], os.environ["ARCH"]
+body = open("body.md", encoding="utf-8").read()
+ESC = set("\\*_`#[]<>|!~{}")
+def esc_len(t): return len(t) + sum(1 for c in t if c in ESC)
+
+def header(name, extra=""):
+    return (f"---\nft_spec_version: {ver}\nexported_at: {now}\n"
+            f"source: live FT database on Jarvis (the copy FT itself serves)\nfile: {name}\n{extra}---\n\n")
+
+# Freshness of sections 1-12 and completeness of the document.
+m = re.search(r"<!--\s*reference_reviewed:\s*(.+?)\s*-->", body)
+reviewed = m.group(1) if m else "never recorded"
+ref_text = body[body.find("\n## 1."):body.find("\n## 13.")]
+ref_mig = max(re.findall(r"\b(00\d\d)\b", ref_text) or [""])
+behind = (not m) or (not m.group(1).startswith("v" + ver)) or bool(live_mig and ref_mig < live_mig)
+status = ("STALE — sections 1-12 have not been revised to this version. Treat as background and confirm against the "
+          "recent changes (§13) before relying on them.") if behind else "current"
+end = re.search(r"<!-- END FT-master-spec v(\d+\.\d+\.\d+) -->\s*$", body)
+end_state = "present" if end else "MISSING — the document is cut off or malformed"
+if end and end.group(1) != ver:
+    end_state += f" (marks v{end.group(1)} but the live version is v{ver})"
+
+files = {}
+files["FT-master-spec"] = header("FT-master-spec",
+    f"bytes: {len(body.encode())}\nend_marker: {end_state}\nreference_reviewed: {reviewed}\n"
+    f"reference_mentions_migrations_to: {ref_mig}\nlive_schema_migration: {live_mig}\nreference_status: {status}\n"
+    "complete_in_one_read: yes (about 40,000 characters; it ends with the END marker plus one short tail line)\n") + body
+
+# Three newest changes from §13.
+recent = re.findall(r"(?ms)^(### v\d+\.\d+\.\d+ · .+?)(?=^### v|^---$)", body)
+# Archive inventory.
+inv = []
+for n in sorted(os.listdir(arch)):
+    t = open(os.path.join(arch, n), encoding="utf-8").read()
+    mm = re.fullmatch(r"(changelog|history)-(\d\d)\.md", n)
+    if mm:
+        kind, nn = mm.groups()
+        if kind == "changelog":
+            ds = re.findall(r"^> \*\*[A-Za-z ]*[Oo]verhaul:\*\* (\d{4}-\d\d-\d\d)", t, re.M)
+            inv.append((f"FT-spec-archive-changelog-{nn}", f"full change-log entries, {min(ds)} … {max(ds)} (oldest first)"))
+        else:
+            vs = re.findall(r"^\| (\d+\.\d+(?:\.\d+)?) \|", t, re.M)
+            inv.append((f"FT-spec-archive-history-{nn}", f"old version table rows, v{vs[0]} … v{vs[-1]} (frozen)" if vs else "old version table rows"))
+        files["archive/FT-spec-archive-" + kind + "-" + nn] = header(f"FT-spec-archive-{kind}-{nn}") + t
+    elif n == "INDEX.md":
+        inv.insert(0, ("FT-spec-archive-INDEX", "every version and pass of the spec's history -> the archive part that holds it"))
+        files["archive/FT-spec-archive-INDEX"] = header("FT-spec-archive-INDEX") + t
+
+cur = header("FT-spec-current") + f"# FT spec — index and current state\n\nLive FT master spec is **v{ver}** (exported {now}).\n\n"
+cur += f"- **Document completeness:** `FT-master-spec` end marker — {end_state}.\n"
+cur += f"- **Reference sections 1–12:** {status if behind else 'current as of ' + reviewed}.\n\n"
+cur += "## Where things are\n\n"
+cur += ("- **FT-master-spec** — the whole working spec in one read: sections 1–12 (how FT works now), then §13, the ten newest "
+        "changes in short form. Read this first. It ends with `<!-- END FT-master-spec vX.Y.Z -->` followed by one short tail line. "
+        "Readers sometimes clip the last 10-40 characters, so a clipped tail is normal and a marker line that has started "
+        "counts as complete; if you do not see even the start of the marker, your read was cut off.\n")
+cur += "- **archive/** (Drive folder `FT-Bridge/spec/archive/`) — everything older, append-only; never edited:\n"
+for name, desc in inv:
+    cur += f"  - **{name}** — {desc}\n"
+cur += ("\nLook a version or pass up in `FT-spec-archive-INDEX` first; it names the part that holds the full text. "
+        "A `Supersedes vX` pointer resolves through the same index.\n\n## Three newest changes\n\n")
+cur += "\n\n".join(r.strip() for r in recent[:3]) + "\n"
+files["FT-spec-current"] = cur
+
+TAIL = "[end of Drive copy — if this line is clipped, the END marker above is still complete]"
+for name, text in files.items():
+    text = text.rstrip("\n") + "\n\n" + TAIL + "\n"
+    files[name] = text
+    path = os.path.join("out", name + ".txt")
+    open(path, "w", encoding="utf-8").write(text)
+    if esc_len(text) > 90000:
+        print(f"WARN: {name} is ~{esc_len(text):,} chars after escaping — may be cut off by the Drive reader")
+print(" ".join(f"{k}:{len(v)}" for k, v in sorted(files.items())))
+PY
+chgrp -R "$RUSER" out; chmod 750 out/archive; chmod 640 out/*.txt out/archive/*.txt
+# sync = upload changed, remove Docs that no longer exist (the old A/B/C parts). rclone sees only files it
+# created (drive.file), so this never touches anything else in the folder.
+runuser -u "$RUSER" -- rclone sync --drive-import-formats txt --drive-export-formats txt "$W/out" ftbridge:spec
+echo "$HASH" > last.sha
+echo "uploaded FT spec v$VER at $NOW ($(find out -name '*.txt' | wc -l) docs)"

@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.77.1 · 2026-10-10** — latest change: Archive INDEX polish and end-marker hardening (§13).
+> **Current version: v1.77.2 · 2026-10-10** — latest change: Post-migration fixes (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.77.1 2026-10-10 -->
+<!-- reference_reviewed: v1.77.2 2026-10-10 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -137,14 +137,14 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 
 | Job | Schedule | What |
 |-----|----------|------|
-| `ft-bridge-spec.timer` | every 10 min | SC-45: exports the working spec (live DB row) and the archive (`docs/spec-archive/`) to Google Drive (`FT-Bridge/spec`, `FT-Bridge/spec/archive`) when either changes |
+| `ft-bridge-spec.timer` | every 10 min | SC-45: exports the working spec (live DB row) and the archive (`docs/spec-archive/`) to Google Drive (`FT-Bridge/spec`, `FT-Bridge/spec/archive`) when either changes. Source and installer in `ops/bridge/` (`sudo ops/bridge/install.sh`) |
 | `video-digest.timer` | Sun 20:00 + Mon 08:00 Europe/Dublin | SC-43 P0: fetches new Jordi/Cowen videos into `/var/lib/video_digest` |
 | `ft-backup.timer`, `ft-restore-verify.timer` | systemd timers | SC-37 backup / DR and restore verification |
 | DB backup (cron, user `ft`) | 03:15 daily | `/opt/ft/bin/backup-db.sh` |
 | Jarvis config backup (cron) | Sun 03:30 | `/opt/ft/bin/backup-jarvis-config.sh` |
 | Whole-box backup (cron) | 03:30 daily | `jarvis_backup.sh` — restic to Backblaze B2 |
-| Capitol-trades fetch (cron) | 23:05 daily | Feeds the Congress signal ingest |
-| Farside ETF-flow fetch (cron) | 00:25 daily | Feeds the Crypto Indicators ETF-flow series |
+| Capitol-trades fetch (cron, user `curran`) | 23:05 daily | Feeds the Congress signal ingest. **Not working** — see §12. Logs to `~curran/logs/ft-capitol-trades.log` |
+| Farside ETF-flow fetch (cron, user `curran`) | 00:25 daily | Writes `/var/lib/ft/data/farside/etf-flow.json` for the Crypto Indicators ETF-flow series. **Not running since the Lenovo move** — see §12. Logs to `~curran/logs/ft-farside-fetch.log` |
 | FT Telegram bot | see §6 | Proactive alert crons |
 
 ## 5. Endpoints — by area
@@ -235,7 +235,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 - All numeric columns get `class="num"`
 - Frontend is vanilla JS in `web/app.js`; no framework, no bundler
 - Cache-busting via 8-char hash of `app.js+app.css` stamped into index.html as `?v=`
-- Every mutation writes a `holdings_audit` row with `changes_json` + optional `reason_code`
+- Every mutation writes a `holdings_audit` row with `changes_json` + optional `reason_code`. That includes SC-44's: silent eToro value updates (actor `etoro-sync`) and approved adds/removals (actor `fin`), all with `reason_code = etoro_reconcile` and **no** `trade_snapshot_json` (so `performance.DeriveAll` never turns an eToro-side closure into a closed trade)
 - `user_preferences` is the home for any new k/v setting; per-key validation in `validPreferenceValue()`
 - Endpoints the bot or the MCP connector need accept a bearer token as well as the cookie (marked **T** in §5); everything else is cookie-only
 - Append-only tables (`transactions`, `closed_trades`, `thesis_notes`, `sector_snapshots`, `sector_scorecard_versions`, `framework_scores`, `holdings_audit`, `etoro_holdings_lots`) — corrections via supersede/soft-delete, never UPDATE on data columns
@@ -330,6 +330,7 @@ Current as of 2026-10-09:
 | SC-43 P2 | OCR of Cowen chart frames to fill the snapshot columns left NULL in P1 (200WMA, log band, dominance, ETH/BTC) | Not built |
 | SC-43 P3 / P4 | Regime read surfaced in the UI; digest query tool | Not built — `suggested_regime` / `regime_read` are stored but not exposed |
 | SC-04 batch automation | Thesis updates at scale | Parked pending Fin's decisions on model / scope / sourcing |
+| Cron scrapers (Farside, Capitol Trades) | Restore on the Lenovo, or replace | **Blocked three ways:** (1) fixed 2026-10-10: cron log paths pointed at `/var/log`, which `curran` cannot write, so the shell failed before `node` started; (2) `curran` cannot write `/var/lib/ft/data/{farside,capitol-trades}` (now `ft`-owned); (3) Playwright and its browser are not installed on the new box. **Capitol Trades is also blocked by the site:** since ~2026-08-14 it answers 429 / "Vercel Security Checkpoint" to automated clients, so `trades.json` is stale from 2026-08-14 and Congress signals end 2026-06-05. Farside: the ETF-flow **card** value stays live (FT ignores a cache file older than 36 h and fetches directly, working since 2026-09-21), but the ETF-flow **chart** reads the cache file with no freshness check (last bar 2026-09-18) |
 | Manual eToro statement fallback | Retire or keep as break-glass | Kept. Known limits: can't see partial closes; names SU.PA as "SU"; needs SC-42 data to exclude copy-trades |
 | eToro crypto | First real eToro-held crypto position | Path is test-only; FT's EUR-based crypto refresh may recompute the USD cost fields SC-44 writes — check on first use |
 | `ft help` text | Bring the built-in usage text in line with §11 | Open, cosmetic |
@@ -348,13 +349,19 @@ Current as of 2026-10-09:
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.77.2 · 2026-10-10 · pass 73 · SC-44
+
+**Post-migration fixes.** SC-44's silent updates and approved adds/removals now write `holdings_audit` rows (actors `etoro-sync` / `fin`, no entry snapshot, so no fabricated closed trades); the six 2026-10-10 removals backfilled. Cron logs moved to `~curran/logs`; the Farside/Capitol jobs are still blocked (output-dir permissions, Playwright missing, Capitol Trades answers 429). Drive exporter moved into `ops/bridge/` with an installer. Behaviour: yes (audit only). Migrations/endpoints: none. Reference updated: §4, §7, §12. Supersedes v1.77.1.
+
 ### v1.77.1 · 2026-10-10 · pass 72 · SC-45
 
 **Archive INDEX polish and end-marker hardening.** Both readers clip the last 10–40 characters of a Drive Doc, so the Drive copies now end with a short tail line after the END marker (exporter only); a marker line that has started counts as complete. INDEX: look in both tables; EIGEN entry resolves to v1.22.7; titles cut on word boundaries. Behaviour: no. Migrations/endpoints: none. Reference updated: §7. Binding: archive text stays byte-for-byte; INDEX is generated. ai's reads confirmed the 40.7k spec and 50k parts need no re-split. Supersedes v1.77.0.
 
+
 ### v1.77.0 · 2026-10-10 · pass 71 · SC-45
 
 **Spec restructured; history moved to an archive.** Working spec is now sections 1–12 + the 10 newest changes (§13), ~40k chars (was 409k); all 66 change-log entries and 97 old §13 rows moved byte-for-byte to `docs/spec-archive/` (`INDEX.md`; Drive `FT-Bridge/spec/archive/`). Behaviour: no. Migrations/endpoints: none. Reference updated: §4, §7, §10, §12. Binding: each bump = `tools/spec_archive.py bump` (short entry here, full entry to archive) + affected §1–12 + `reference_reviewed` + `check`; archive text never edited. Drive `FT-master-spec` is now the whole working spec. Supersedes v1.76.0.
+
 
 
 ### v1.76.0 · 2026-10-09 · pass 70 · SC-45
@@ -362,9 +369,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Sections 1–12 rewritten from the build; Drive bridge recorded.** Reference had drifted since ~v1.5x (12 of 19 tabs, migrations to 0033) because bumps only added change-log entries. Re-derived from code and Jarvis; bot, most providers and older deferred items marked *carried over*. SC-45: rclone `drive.file` bridge to `FT-Bridge/`, 10-min spec mirror. Behaviour: no. Migrations/endpoints: none. Binding: a bump must update affected §1–12 and the `reference_reviewed` marker in the same commit. Supersedes v1.75.2.
 
 
+
 ### v1.75.2 · 2026-10-06 · pass 69 · SC-17
 
 **Statement fallback excludes copy-trade lots; Stocks-tab entry point.** The statement can't mark copied opens, so a full-history upload proposed FIG, MSFT, UNH, UPS (copy-trades); position IDs SC-42 has seen as copy lots are now skipped and counted. Added "Reconcile with eToro statement" to the Stocks toolbar. Behaviour: yes (fallback only). Endpoint: `/api/etoro/reconcile/preview` gains `copySkipped`. No migration. Binding: copy-trade positions never become FT holdings by any route. Supersedes v1.75.1.
+
 
 
 ### v1.75.1 · 2026-09-27 · pass 68 · SC-17
@@ -372,9 +381,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Statement fallback guards against incomplete statements.** The upload is `.xlsx` only (CSV-only is the separate transactions import). A short-range statement rebuilt 0 holdings silently and would have proposed closing everything. The preview now checks the statement's dates against the oldest/newest open eToro lot; if incomplete, closure and drift rows are withheld server-side, with a banner. Behaviour: yes (fallback only). Endpoint: `preview` gains `coverage`. No migration. Binding: statements must run from account opening to today. Supersedes v1.75.0.
 
 
+
 ### v1.75.0 · 2026-09-27 · pass 67 · SC-44
 
 **Automatic holdings reconcile from eToro.** After each SC-42 sync, matched holdings' eToro-owned values (`invested_usd` from eToro's own USD amount, `avg_open_price`) update silently; adds/removals queue in `etoro_reconcile_proposals` and apply only on approval (removals soft-delete, thesis kept). Crypto reconciles only against `wallet='eToro'`. Behaviour: yes. Migration 0048. Endpoints: `/api/etoro/reconcile/proposals{,/{id}/approve,/{id}/dismiss}`. Binding (Fin): eToro owns units/invested/avg; FT owns stop/TP, sl_method, notes, tags, thesis links; thesis-linked removal allowed on approval (differs from SC-17). Supersedes v1.74.1.
+
 
 
 ### v1.74.1 · 2026-09-27 · pass 66 · SC-42
@@ -382,9 +393,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Near-zero eToro stops count as no stop.** First live sync (98 positions, 22 own tickers): eToro reports some stops as enabled at meaningless prices (SLV 0.0001, 4063.T 0.01); a long's stop below 5% of its open price now counts as no stop, raw value kept in the lot history. Also found: FT's `stock_holdings` was stale vs eToro (fixed by SC-44). Behaviour: yes. No migration/endpoint. Binding: the `isNoStopLoss` flag alone is not enough. Supersedes v1.74.0.
 
 
+
 ### v1.74.0 · 2026-09-26 · pass 65 · SC-42
 
 **eToro direct sync: holdings and broker SL/TP.** FT polls eToro's Public API (key pair, every 30 min, no LLM) into per-lot change history and per-ticker effective levels (longs: highest stop, lowest take-profit; shorts mirrored). Behaviour: yes. Migration 0047. Endpoints: `GET/POST /api/etoro/sync`. Binding (Fin): eToro levels shown alongside FT's own SL/TP, alerts unchanged; copy-trade lots stored but excluded from levels; manual upload kept as fallback; an empty portfolio is treated as an API glitch. Supersedes v1.73.1.
+
 
 
 ### v1.73.1 · 2026-09-26 · pass 64 · SC-43
@@ -392,13 +405,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Video digest fix-up after the first real run.** 4 long videos truncated at the 2,000-token output cap; model timestamps drifted; 13 of ~27 quotes rejected. Fixed: output cap 4,000 (Fin); mention timestamps re-anchored to where the name is spoken (no match, no timestamp); quote matching ignores fillers; new `ft video-digest-reground`. Behaviour: yes. No migration. Binding: quotes must still be verbatim in the transcript. Supersedes v1.73.0.
 
 
-### v1.73.0 · 2026-09-26 · pass 63 · SC-43
-
-**Video Digest Brain P1: schema, ingest, tab.** FT sweeps `/var/lib/video_digest` itself (boot+2 min, daily 09:15 UTC) and makes one governor LLM call per new video (Haiku, feature `video_digest`); output validated, unverifiable quotes dropped; Cowen snapshot asks only the (b) fields. Behaviour: yes. Migration 0046 (6 tables). Endpoints: `GET /api/video-digest`, `POST /api/video-digest/ingest`. Binding (Fin): FT sweeps (no Jarvis cron POST); governor input cap 30,000 tokens. Supersedes v1.72.1.
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.77.1 -->
+<!-- END FT-master-spec v1.77.2 -->
