@@ -84,7 +84,10 @@ def title_of(body, limit=110):
     b = re.match(r"\*\*(.+?)\*\*", body)
     t = re.sub(r"\s+", " ", b.group(1) if b else body).strip(" .").replace("|", "/")
     if len(t) > limit:  # cut on a word boundary, not mid-word
-        t = t[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-—+(") + "…"
+        t = t[:limit].rsplit(" ", 1)[0]
+        if t.count("(") > t.count(")"):  # don't leave an open bracket
+            t = t[: t.rindex("(")]
+        t = t.rstrip(" ,;:-—+") + "…"
     return t
 
 
@@ -233,8 +236,8 @@ def check():
             t = read(os.path.join(ARCH, name))
             if not t.rstrip("\n").endswith(END_PART.format(kind=kind, nn=f"{n:02d}")):
                 errs.append(f"archive: {name} does not end with its END marker")
-            if len(t) > PART_LIMIT + 7000 and kind == "changelog" and n < len(ps):
-                errs.append(f"archive: {name} is {len(t):,} chars (limit ~{PART_LIMIT:,} + one entry)")
+            if len(t) > PART_LIMIT + 1000:  # every part, including the open last one (bump rolls over before this)
+                errs.append(f"archive: {name} is {len(t):,} chars (limit ~{PART_LIMIT:,}): start a new part")
             if escaped_len(t) > ESCAPE_MAX:
                 errs.append(f"archive: {name} escapes to ~{escaped_len(t):,} chars (max {ESCAPE_MAX:,})")
     ip = os.path.join(ARCH, "INDEX.md")
