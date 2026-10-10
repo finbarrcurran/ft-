@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.77.0 · 2026-10-10** — latest change: Spec restructured; history moved to an archive (§13).
+> **Current version: v1.77.1 · 2026-10-10** — latest change: Archive INDEX polish and end-marker hardening (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.77.0 2026-10-10 -->
+<!-- reference_reviewed: v1.77.1 2026-10-10 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -245,7 +245,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 - **Methodology-notes registry is the canonical note list** — the numbered notes live in `cross_sector_research/theses/_methodology_notes_registry.md`, version-stamped, and integrity-checked by `tools/check_registry.sh`. Cite a note ONLY by its exact registry number + name; a `candidate` note is never citable as established. After editing the registry, bump its `REGISTRY v<N>` stamp or `check_registry.sh` fails.
 - **Registry + doctrine drop-ins are re-exported on change** (set 2026-06-10) so the ai-side reads the fresh, stamped copy.
 - **Master Spec is bumped on every completed section or spec** (set 2026-05-19). Versioning: patch for polish batches, minor for new specs/features, major for breaking architecture. **Each bump (rule changed 2026-10-10, v1.77.0):** (a) run `tools/spec_archive.py bump --version X.Y.Z --full FULL.md --short SHORT.md` — it appends the *full* entry (one `> **Overhaul:** …` line, no length limit) to the archive, puts the *short* entry (≤800 characters: what and why in two sentences, behaviour change yes/no, migrations/endpoints, binding rulings, `Supersedes vX`) at the top of §13, drops the oldest beyond ten, and refreshes the current-version line, the END marker and `docs/spec-archive/INDEX.md`; (b) **the affected parts of sections 1–12 are updated in the same commit** and the `reference_reviewed` marker is set to the new version (a bump that only adds an entry leaves the reference stale — how these sections drifted from v1.5x to v1.75); (c) `tools/spec_archive.py check` and `go test ./internal/scorecards/` must pass; (d) the commit includes the spec and the archive; (e) the live DB row is updated after deploy. Anything that must stay true goes in sections 1–12, not in a change entry. Archive text is **never edited** — a correction is a new entry.
-- **The spec is mirrored to Google Drive** (`FT-Bridge/spec`, SC-45): `FT-master-spec` is the whole working spec from the live DB row — about 40,000 characters, ending with `<!-- END FT-master-spec vX.Y.Z -->` so a reader can tell it got everything — `FT-spec-current` is the index and freshness page, and `spec/archive/` carries the archive. Claude's Drive read stops near 100,000 characters, so no file may be larger than that. The mirror marks the reference STALE whenever the `reference_reviewed` marker is behind the spec version or the live schema is ahead of the migrations these sections mention.
+- **The spec is mirrored to Google Drive** (`FT-Bridge/spec`, SC-45): `FT-master-spec` is the whole working spec from the live DB row — about 40,000 characters, ending with `<!-- END FT-master-spec vX.Y.Z -->` so a reader can tell it got everything (the Drive copy adds one short tail line after the marker, because readers sometimes clip the last 10–40 characters: a clip eats the tail, not the marker, and a marker line that has started counts as complete) — `FT-spec-current` is the index and freshness page, and `spec/archive/` carries the archive. Claude's Drive read stops near 100,000 characters, so no file may be larger than that. The mirror marks the reference STALE whenever the `reference_reviewed` marker is behind the spec version or the live schema is ahead of the migrations these sections mention.
 
 ## 8. Provider chain
 
@@ -348,48 +348,57 @@ Current as of 2026-10-09:
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.77.1 · 2026-10-10 · pass 72 · SC-45
+
+**Archive INDEX polish and end-marker hardening.** Both readers clip the last 10–40 characters of a Drive Doc, so the Drive copies now end with a short tail line after the END marker (exporter only); a marker line that has started counts as complete. INDEX: look in both tables; EIGEN entry resolves to v1.22.7; titles cut on word boundaries. Behaviour: no. Migrations/endpoints: none. Reference updated: §7. Binding: archive text stays byte-for-byte; INDEX is generated. ai's reads confirmed the 40.7k spec and 50k parts need no re-split. Supersedes v1.77.0.
+
 ### v1.77.0 · 2026-10-10 · pass 71 · SC-45
 
 **Spec restructured; history moved to an archive.** Working spec is now sections 1–12 + the 10 newest changes (§13), ~40k chars (was 409k); all 66 change-log entries and 97 old §13 rows moved byte-for-byte to `docs/spec-archive/` (`INDEX.md`; Drive `FT-Bridge/spec/archive/`). Behaviour: no. Migrations/endpoints: none. Reference updated: §4, §7, §10, §12. Binding: each bump = `tools/spec_archive.py bump` (short entry here, full entry to archive) + affected §1–12 + `reference_reviewed` + `check`; archive text never edited. Drive `FT-master-spec` is now the whole working spec. Supersedes v1.76.0.
+
 
 ### v1.76.0 · 2026-10-09 · pass 70 · SC-45
 
 **Sections 1–12 rewritten from the build; Drive bridge recorded.** Reference had drifted since ~v1.5x (12 of 19 tabs, migrations to 0033) because bumps only added change-log entries. Re-derived from code and Jarvis; bot, most providers and older deferred items marked *carried over*. SC-45: rclone `drive.file` bridge to `FT-Bridge/`, 10-min spec mirror. Behaviour: no. Migrations/endpoints: none. Binding: a bump must update affected §1–12 and the `reference_reviewed` marker in the same commit. Supersedes v1.75.2.
 
+
 ### v1.75.2 · 2026-10-06 · pass 69 · SC-17
 
 **Statement fallback excludes copy-trade lots; Stocks-tab entry point.** The statement can't mark copied opens, so a full-history upload proposed FIG, MSFT, UNH, UPS (copy-trades); position IDs SC-42 has seen as copy lots are now skipped and counted. Added "Reconcile with eToro statement" to the Stocks toolbar. Behaviour: yes (fallback only). Endpoint: `/api/etoro/reconcile/preview` gains `copySkipped`. No migration. Binding: copy-trade positions never become FT holdings by any route. Supersedes v1.75.1.
+
 
 ### v1.75.1 · 2026-09-27 · pass 68 · SC-17
 
 **Statement fallback guards against incomplete statements.** The upload is `.xlsx` only (CSV-only is the separate transactions import). A short-range statement rebuilt 0 holdings silently and would have proposed closing everything. The preview now checks the statement's dates against the oldest/newest open eToro lot; if incomplete, closure and drift rows are withheld server-side, with a banner. Behaviour: yes (fallback only). Endpoint: `preview` gains `coverage`. No migration. Binding: statements must run from account opening to today. Supersedes v1.75.0.
 
+
 ### v1.75.0 · 2026-09-27 · pass 67 · SC-44
 
 **Automatic holdings reconcile from eToro.** After each SC-42 sync, matched holdings' eToro-owned values (`invested_usd` from eToro's own USD amount, `avg_open_price`) update silently; adds/removals queue in `etoro_reconcile_proposals` and apply only on approval (removals soft-delete, thesis kept). Crypto reconciles only against `wallet='eToro'`. Behaviour: yes. Migration 0048. Endpoints: `/api/etoro/reconcile/proposals{,/{id}/approve,/{id}/dismiss}`. Binding (Fin): eToro owns units/invested/avg; FT owns stop/TP, sl_method, notes, tags, thesis links; thesis-linked removal allowed on approval (differs from SC-17). Supersedes v1.74.1.
+
 
 ### v1.74.1 · 2026-09-27 · pass 66 · SC-42
 
 **Near-zero eToro stops count as no stop.** First live sync (98 positions, 22 own tickers): eToro reports some stops as enabled at meaningless prices (SLV 0.0001, 4063.T 0.01); a long's stop below 5% of its open price now counts as no stop, raw value kept in the lot history. Also found: FT's `stock_holdings` was stale vs eToro (fixed by SC-44). Behaviour: yes. No migration/endpoint. Binding: the `isNoStopLoss` flag alone is not enough. Supersedes v1.74.0.
 
+
 ### v1.74.0 · 2026-09-26 · pass 65 · SC-42
 
 **eToro direct sync: holdings and broker SL/TP.** FT polls eToro's Public API (key pair, every 30 min, no LLM) into per-lot change history and per-ticker effective levels (longs: highest stop, lowest take-profit; shorts mirrored). Behaviour: yes. Migration 0047. Endpoints: `GET/POST /api/etoro/sync`. Binding (Fin): eToro levels shown alongside FT's own SL/TP, alerts unchanged; copy-trade lots stored but excluded from levels; manual upload kept as fallback; an empty portfolio is treated as an API glitch. Supersedes v1.73.1.
+
 
 ### v1.73.1 · 2026-09-26 · pass 64 · SC-43
 
 **Video digest fix-up after the first real run.** 4 long videos truncated at the 2,000-token output cap; model timestamps drifted; 13 of ~27 quotes rejected. Fixed: output cap 4,000 (Fin); mention timestamps re-anchored to where the name is spoken (no match, no timestamp); quote matching ignores fillers; new `ft video-digest-reground`. Behaviour: yes. No migration. Binding: quotes must still be verbatim in the transcript. Supersedes v1.73.0.
 
+
 ### v1.73.0 · 2026-09-26 · pass 63 · SC-43
 
 **Video Digest Brain P1: schema, ingest, tab.** FT sweeps `/var/lib/video_digest` itself (boot+2 min, daily 09:15 UTC) and makes one governor LLM call per new video (Haiku, feature `video_digest`); output validated, unverifiable quotes dropped; Cowen snapshot asks only the (b) fields. Behaviour: yes. Migration 0046 (6 tables). Endpoints: `GET /api/video-digest`, `POST /api/video-digest/ingest`. Binding (Fin): FT sweeps (no Jarvis cron POST); governor input cap 30,000 tokens. Supersedes v1.72.1.
 
-### v1.72.1 · 2026-09-08 · pass 62 · SC-41
-
-**`/mcp` request logging fix.** `requireReadToken` logged only successful calls, so rejected requests left no trace; every hit on `/mcp` now logs at the middleware with the rejection reason. It showed claude.ai's connector reaches FT but sends no bearer token (the custom-connector dialog had no auth field): a connector-auth gap, not FT or Cloudflare. Behaviour: logging only. No migration/endpoint. Open: OAuth 2.1 support would be a separate, larger SC-41 follow-up. Supersedes v1.72.0.
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.77.0 -->
+<!-- END FT-master-spec v1.77.1 -->

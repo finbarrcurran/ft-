@@ -42,6 +42,9 @@ END_PART = "<!-- END FT-spec-archive {kind}-{nn} -->"
 ENTRY = re.compile(r"^> \*\*[A-Za-z ]*[Oo]verhaul:\*\* (\d{4}-\d\d-\d\d) \(([^)]*)\) — (.*)$")
 SHORT = re.compile(r"^### v(\d+\.\d+\.\d+) · (\d{4}-\d\d-\d\d) · pass (\d+)(?: · (.+))?$")
 ESCAPABLE = set("\\*_`#[]<>|!~{}")
+# Entries whose text carries no version but whose pass the old section-13 table numbered.
+# The archive text stays untouched; only the generated INDEX uses this.
+VERSION_OVERRIDES = {("2026-05-30", "PM late evening, fourth pass"): "1.22.7"}  # EIGEN v1 ingest
 
 
 def read(p):
@@ -77,10 +80,12 @@ def parts(kind):
 
 # ---------------------------------------------------------------- parsing
 
-def title_of(body):
+def title_of(body, limit=110):
     b = re.match(r"\*\*(.+?)\*\*", body)
-    t = b.group(1) if b else body
-    return re.sub(r"\s+", " ", t).strip(" .")[:110].replace("|", "/")
+    t = re.sub(r"\s+", " ", b.group(1) if b else body).strip(" .").replace("|", "/")
+    if len(t) > limit:  # cut on a word boundary, not mid-word
+        t = t[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-—+(") + "…"
+    return t
 
 
 def version_of(text):
@@ -100,7 +105,10 @@ def archive_entries():
             m = ENTRY.match(line)
             if m:
                 title = title_of(m.group(3))
-                out.append((name, m.group(1), m.group(2), version_of(line), scs(title), title))
+                v = version_of(line)
+                if v == "—":
+                    v = VERSION_OVERRIDES.get((m.group(1), m.group(2)), v)
+                out.append((name, m.group(1), m.group(2), v, scs(title), title))
     return out
 
 
@@ -122,7 +130,8 @@ def build_index():
          "master spec's history to the archive file that holds its full text. `changelog-NN.md` parts are append-only "
          "and oldest-first; `history-NN.md` parts are the old section-13 table, frozen at v1.76.0 (for versions from "
          "about 1.37 it restates the change-log entry in shorter form). Text in the parts is never edited; a "
-         "correction is a new entry. The ten newest changes are also in section 13 of the working spec.", "",
+         "correction is a new entry. The ten newest changes are also in section 13 of the working spec. **A version may "
+         "appear in only one of the two tables below — look it up in both.**", "",
          f"## Change-log entries — {len(ents)}, newest first", "",
          "| Date | Pass | Version | SC | Title | File |", "|---|---|---|---|---|---|"]
     for f, d, p, v, sc, t in reversed(ents):
