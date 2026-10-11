@@ -21,9 +21,13 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"ft/internal/domain"
 	"ft/internal/etoro"
+	"ft/internal/etorosync"
+	"ft/internal/store"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -137,7 +141,7 @@ func (s *Server) handleEtoroReconcilePreview(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	rows := reconcile(hr.Holdings, stocks, cryptos)
+	rows := reconcile(hr.Holdings, stocks, cryptos, s.etoroLiveHoldings(r.Context()))
 
 	// A statement that doesn't cover the whole life of the open portfolio
 	// rebuilds only some holdings: everything it misses would be proposed as
@@ -209,14 +213,105 @@ func (s *Server) etoroOpenLotRange(r *http.Request) (oldest, newest string) {
 	return o.String, n.String
 }
 
+// liveHolding is one row of the SC-42 API data (etoro_holdings_effective): the
+// broker's own units, invested USD and average open price (in the listing's own
+// currency, the same unit FT stores).
+type liveHolding struct{ Units, InvestedUSD, AvgOpen float64 }
+
+// etoroLiveHoldings loads the SC-42 data keyed by FT ticker. Empty when the sync
+// isn't configured or has never run — the reconcile then falls back to statement-only rules.
+func (s *Server) etoroLiveHoldings(ctx context.Context) map[string]liveHolding {
+	out := map[string]liveHolding{}
+	rows, err := s.store.DB.QueryContext(ctx, `SELECT ticker, total_units, coalesce(invested_usd,0),
+		coalesce(avg_open_price,0) FROM etoro_holdings_effective WHERE direction='long'`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t string
+		var l liveHolding
+		if rows.Scan(&t, &l.Units, &l.InvestedUSD, &l.AvgOpen) == nil {
+			out[t] = l
+		}
+	}
+	return out
+}
+
+func baseTicker(t string) string {
+	if i := strings.Index(t, "."); i >= 0 {
+		return t[:i]
+	}
+	return t
+}
+
+// usdListed: avg_open_price is stored in the listing's own currency, so units can
+// only be derived as invested(USD) ÷ avg for USD listings (empty hint = US ticker).
+func usdListed(currency string) bool {
+	c := strings.ToUpper(strings.TrimSpace(currency))
+	return c == "" || c == "USD"
+}
+
+func relDiff(a, b float64) float64 {
+	m := math.Max(math.Abs(a), math.Abs(b))
+	if m == 0 {
+		return 0
+	}
+	return math.Abs(a-b) / m
+}
+
+// liveFor finds the API row for a ticker, tolerating a missing exchange suffix
+// (the statement says "SU", eToro's API and FT say "SU.PA") when exactly one matches.
+func liveFor(live map[string]liveHolding, ticker string) (string, liveHolding, bool) {
+	if l, ok := live[ticker]; ok {
+		return ticker, l, true
+	}
+	if !strings.Contains(ticker, ".") {
+		var key string
+		n := 0
+		for k := range live {
+			if baseTicker(k) == ticker {
+				key, n = k, n+1
+			}
+		}
+		if n == 1 {
+			return key, live[key], true
+		}
+	}
+	return "", liveHolding{}, false
+}
+
 // reconcile diffs reconstructed eToro holdings against live FT holdings.
-func reconcile(holdings []etoro.Holding, stocks []*domain.StockHolding, cryptos []*domain.CryptoHolding) []reconRow {
+//
+// Rules (SC-17 fallback, tightened 2026-10-11):
+//   - Crypto: only rows whose wallet is eToro are eToro's to reconcile. Binance,
+//     Ledger, MetaMask and Phantom rows are never matched, updated or proposed for
+//     closure (same rule as SC-44).
+//   - Units: FT stores none. When the SC-42 API data is available it is the truth
+//     for "FT units" and for what a drift proposal applies; statements can't see
+//     partial closes. Without it, units are derived (invested ÷ avg) only for
+//     USD-listed instruments — for GBp/JPY/EUR listings the derivation mixes
+//     currencies and would invent drift.
+//   - Tickers: a statement ticker with no exchange suffix ("SU") matches the one FT
+//     holding with the same base ("SU.PA") instead of becoming an add plus a closure.
+func reconcile(holdings []etoro.Holding, stocks []*domain.StockHolding, cryptos []*domain.CryptoHolding, live map[string]liveHolding) []reconRow {
+	var etoroCrypto []*domain.CryptoHolding
+	for _, h := range cryptos {
+		if h.Wallet != nil && strings.EqualFold(strings.TrimSpace(*h.Wallet), etorosync.EtoroWallet) {
+			etoroCrypto = append(etoroCrypto, h)
+		}
+	}
+	cryptos = etoroCrypto
+
 	// Index FT holdings.
 	stockByTicker := map[string]*domain.StockHolding{}
 	stockByISIN := map[string]*domain.StockHolding{}
+	stockByBase := map[string][]*domain.StockHolding{}
 	for _, h := range stocks {
 		if h.Ticker != nil {
-			stockByTicker[etoro.NormalizeTicker(*h.Ticker)] = h
+			nt := etoro.NormalizeTicker(*h.Ticker)
+			stockByTicker[nt] = h
+			stockByBase[baseTicker(nt)] = append(stockByBase[baseTicker(nt)], h)
 		}
 		if h.ISIN != nil && *h.ISIN != "" {
 			stockByISIN[strings.ToUpper(strings.TrimSpace(*h.ISIN))] = h
@@ -244,7 +339,7 @@ func reconcile(holdings []etoro.Holding, stocks []*domain.StockHolding, cryptos 
 				Confidence: "needs_confirm", Ticker: sym, Name: e.Name,
 				EtoroUnits: e.Units, EtoroInvested: e.InvestedUSD,
 				EtoroAvgPrice: e.AvgPriceUSD, EtoroLots: e.Lots,
-				Note: "new crypto — not in FT",
+				Note: "new eToro crypto — not in FT",
 			})
 			continue
 		}
@@ -252,6 +347,7 @@ func reconcile(holdings []etoro.Holding, stocks []*domain.StockHolding, cryptos 
 		// Stock / ETF / non-crypto CFD underlying.
 		var ft *domain.StockHolding
 		conf := "needs_confirm"
+		matchNote := ""
 		if e.ISIN != "" {
 			if h, ok := stockByISIN[strings.ToUpper(e.ISIN)]; ok {
 				ft, conf = h, "high"
@@ -262,25 +358,36 @@ func reconcile(holdings []etoro.Holding, stocks []*domain.StockHolding, cryptos 
 				ft = h
 			}
 		}
+		if ft == nil && !strings.Contains(e.Ticker, ".") {
+			if c := stockByBase[e.Ticker]; len(c) == 1 && !matchedStock[c[0].ID] {
+				ft = c[0]
+				matchNote = "statement ticker " + e.Ticker + " matched to FT's " + derefStr(c[0].Ticker) +
+					" (the statement omits the exchange suffix)"
+			}
+		}
 		if ft != nil {
 			matchedStock[ft.ID] = true
-			rows = append(rows, stockMatchRow(e, ft, conf))
+			rows = append(rows, stockMatchRow(e, ft, conf, live, matchNote))
 			continue
 		}
 		// New holding. ISIN present → we trust the identity (high); otherwise
-		// the bare ticker can be ambiguous (e.g. SU) → needs_confirm (R3).
+		// the bare ticker can be ambiguous (R3) → needs_confirm.
 		addConf := "needs_confirm"
 		if e.ISIN != "" {
 			addConf = "high"
 		}
-		rows = append(rows, reconRow{
+		row := reconRow{
 			Ref: "stock:add:" + e.Ticker, Kind: "stock", Action: "add",
 			Confidence: addConf, Ticker: e.Ticker, Name: e.Name,
 			Wrapper: cfdFlag(e.Wrapper), ISIN: e.ISIN,
 			EtoroUnits: e.Units, EtoroInvested: e.InvestedUSD,
-			EtoroAvgPrice: e.AvgPriceUSD, EtoroLots: e.Lots,
+			EtoroAvgPrice: stmtAvg(e), EtoroLots: e.Lots,
 			Note: "new — not in FT",
-		})
+		}
+		if _, lv, ok := liveFor(live, e.Ticker); ok { // the broker's own figures beat the statement's
+			row.EtoroUnits, row.EtoroInvested, row.EtoroAvgPrice = lv.Units, round2f(lv.InvestedUSD), lv.AvgOpen
+		}
+		rows = append(rows, row)
 	}
 
 	// FT holdings with no eToro counterpart → possible closures.
@@ -300,7 +407,7 @@ func reconcile(holdings []etoro.Holding, stocks []*domain.StockHolding, cryptos 
 			Note:    "in FT, not open in eToro — close?",
 		})
 	}
-	for _, h := range cryptos {
+	for _, h := range cryptos { // eToro-wallet rows only (filtered above)
 		if matchedCrypto[h.ID] {
 			continue
 		}
@@ -308,35 +415,122 @@ func reconcile(holdings []etoro.Holding, stocks []*domain.StockHolding, cryptos 
 			Ref: "crypto:close:" + itoa(h.ID), Kind: "crypto", Action: "close",
 			Confidence: "needs_confirm", Ticker: h.Symbol, Name: h.Name,
 			FTHoldingID: h.ID, FTUnits: round6f(h.QuantityHeld),
-			Note: "in FT, not open in eToro — close?",
+			Note: "in FT's eToro wallet, not open in eToro — close?",
 		})
 	}
 	return rows
 }
 
-func stockMatchRow(e etoro.Holding, ft *domain.StockHolding, conf string) reconRow {
-	ftUnits := ftStockUnits(ft)
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// auditStatement writes the holdings_audit row for a human-approved fallback change
+// (spec §7). No trade_snapshot_json, same reasoning as the SC-44 paths. Failure is
+// logged, never fatal.
+func (s *Server) auditStatement(ctx context.Context, userID int64, kind string, id int64, ticker, action string, changes any, reason string) {
+	var tk, sym *string
+	if kind == "crypto" {
+		sym = &ticker
+	} else {
+		tk = &ticker
+	}
+	if err := s.store.RecordAuditWithCode(ctx, userID, kind, id, tk, sym, action, changes, &reason, "etoro_statement_reconcile"); err != nil {
+		slog.Warn("statement reconcile: audit write failed", "kind", kind, "holding", id, "ticker", ticker, "err", err)
+	}
+}
+
+// stmtAvg: the statement's average price is in USD, FT's avg_open_price is in the
+// listing's own currency — only hand it on for USD listings.
+func stmtAvg(e etoro.Holding) float64 {
+	if usdListed(e.Currency) {
+		return e.AvgPriceUSD
+	}
+	return 0
+}
+
+func stockMatchRow(e etoro.Holding, ft *domain.StockHolding, conf string, live map[string]liveHolding, matchNote string) reconRow {
+	ftTicker := e.Ticker
+	if ft.Ticker != nil {
+		ftTicker = etoro.NormalizeTicker(*ft.Ticker)
+	}
 	row := reconRow{
 		Ref: "stock:drift:" + itoa(ft.ID), Kind: "stock", Confidence: conf,
-		Ticker: e.Ticker, Name: e.Name, Wrapper: cfdFlag(e.Wrapper), ISIN: e.ISIN,
-		EtoroUnits: e.Units, EtoroInvested: e.InvestedUSD, EtoroAvgPrice: e.AvgPriceUSD,
-		EtoroLots: e.Lots, FTHoldingID: ft.ID, FTUnits: ftUnits,
-		FTInvested: round2f(ft.InvestedUSD),
+		Ticker: ftTicker, Name: e.Name, Wrapper: cfdFlag(e.Wrapper), ISIN: e.ISIN,
+		EtoroUnits: e.Units, EtoroInvested: e.InvestedUSD, EtoroAvgPrice: stmtAvg(e),
+		EtoroLots: e.Lots, FTHoldingID: ft.ID, FTInvested: round2f(ft.InvestedUSD),
 	}
+	note := func(n string) string {
+		if matchNote != "" {
+			return matchNote + "; " + n
+		}
+		return n
+	}
+
+	if lv, ok := live[ftTicker]; ok {
+		row.FTUnits = round6f(lv.Units) // FT stores no units: show the broker's
+		if relDiff(ft.InvestedUSD, lv.InvestedUSD) <= 0.005 {
+			// FT already matches the live eToro data. A differing statement just
+			// can't see partial closes — never "update" FT from it.
+			row.Action = "insync"
+			if relDiff(e.Units, lv.Units) > reconDriftThreshold {
+				row.Note = note("FT already matches live eToro data; the statement shows the original open amounts (partial closes aren't visible in statements)")
+			} else if matchNote != "" {
+				row.Note = matchNote
+			}
+			return row
+		}
+		// FT is behind the live data: propose the broker's figures.
+		row.Action = "drift"
+		row.EtoroUnits, row.EtoroInvested, row.EtoroAvgPrice = lv.Units, round2f(lv.InvestedUSD), lv.AvgOpen
+		if ft.InvestedUSD > 0 {
+			row.DriftPct = round4f((lv.InvestedUSD - ft.InvestedUSD) / ft.InvestedUSD * 100)
+		}
+		row.Note = note("FT differs from live eToro data — set from eToro?")
+		return row
+	}
+
+	// No live data for this holding: statement-only rules.
+	cur := ""
+	if ft.Currency != nil {
+		cur = *ft.Currency
+	}
+	if !usdListed(cur) {
+		// Units can't be derived (price is in another currency) — compare cost only.
+		if ft.InvestedUSD > 0 && relDiff(e.InvestedUSD, ft.InvestedUSD) > reconDriftThreshold {
+			row.Action = "drift"
+			row.DriftPct = round4f((e.InvestedUSD - ft.InvestedUSD) / ft.InvestedUSD * 100)
+			row.Note = note("invested amount differs (units not comparable: non-USD listing)")
+			return row
+		}
+		row.Action = "insync"
+		if matchNote != "" {
+			row.Note = matchNote
+		}
+		return row
+	}
+	ftUnits := ftStockUnits(ft)
+	row.FTUnits = ftUnits
 	if ftUnits > 0 && e.Units > 0 {
 		drift := (e.Units - ftUnits) / ftUnits
 		row.DriftPct = round4f(drift * 100)
 		if abs64(drift) > reconDriftThreshold {
 			row.Action = "drift"
-			row.Note = "quantity drift"
+			row.Note = note("quantity drift")
 			return row
 		}
 	} else if ftUnits == 0 {
 		row.Action = "drift"
-		row.Note = "FT cost basis incomplete — set from eToro?"
+		row.Note = note("FT cost basis incomplete — set from eToro?")
 		return row
 	}
 	row.Action = "insync"
+	if matchNote != "" {
+		row.Note = matchNote
+	}
 	return row
 }
 
@@ -360,8 +554,12 @@ func cryptoMatchRow(e etoro.Holding, ft *domain.CryptoHolding, sym string) recon
 	return row
 }
 
-// ftStockUnits derives quantity from FT's cost-basis model (invested / avg open).
+// ftStockUnits derives quantity from FT's cost-basis model (invested / avg open),
+// for USD-listed instruments only (0 = unknown).
 func ftStockUnits(h *domain.StockHolding) float64 {
+	if h.Currency != nil && !usdListed(*h.Currency) {
+		return 0 // avg_open_price is in another currency: the division would be meaningless
+	}
 	if h.AvgOpenPrice != nil && *h.AvgOpenPrice > 0 {
 		return round6f(h.InvestedUSD / *h.AvgOpenPrice)
 	}
@@ -471,6 +669,9 @@ func (s *Server) handleEtoroReconcileApply(w http.ResponseWriter, r *http.Reques
 					errs = append(errs, "seed isin "+row.Ticker+": "+err.Error())
 				}
 			}
+			s.auditStatement(ctx, userID, "stock", id, row.Ticker, store.AuditCreate, map[string]any{
+				"new": map[string]any{"name": row.Name, "ticker": row.Ticker, "investedUsd": h.InvestedUSD, "avgOpenPrice": h.AvgOpenPrice},
+			}, "SC-17 statement reconcile: add")
 			added++
 
 		case row.Kind == "crypto" && row.Action == "add":
@@ -481,10 +682,18 @@ func (s *Server) handleEtoroReconcileApply(w http.ResponseWriter, r *http.Reques
 				Classification: "alt",
 				QuantityHeld:   round6f(row.EtoroUnits),
 			}
-			if _, err := s.store.InsertCryptoHolding(ctx, h); err != nil {
+			// Tag the wallet, or the row would never be matched again now that the
+			// fallback reconciles eToro-wallet crypto only.
+			wallet := etorosync.EtoroWallet
+			h.Wallet = &wallet
+			id, err := s.store.InsertCryptoHolding(ctx, h)
+			if err != nil {
 				errs = append(errs, "add "+row.Ticker+": "+err.Error())
 				continue
 			}
+			s.auditStatement(ctx, userID, "crypto", id, h.Symbol, store.AuditCreate, map[string]any{
+				"new": map[string]any{"name": row.Name, "symbol": h.Symbol, "wallet": wallet, "quantityHeld": h.QuantityHeld},
+			}, "SC-17 statement reconcile: add")
 			added++
 
 		case row.Kind == "stock" && row.Action == "drift":
@@ -493,6 +702,7 @@ func (s *Server) handleEtoroReconcileApply(w http.ResponseWriter, r *http.Reques
 				errs = append(errs, "drift "+row.Ticker+": "+err.Error())
 				continue
 			}
+			oldInv, oldAvg := h.InvestedUSD, h.AvgOpenPrice
 			h.InvestedUSD = round2f(row.EtoroInvested)
 			if row.EtoroAvgPrice > 0 {
 				avg := row.EtoroAvgPrice
@@ -502,6 +712,10 @@ func (s *Server) handleEtoroReconcileApply(w http.ResponseWriter, r *http.Reques
 				errs = append(errs, "drift "+row.Ticker+": "+err.Error())
 				continue
 			}
+			s.auditStatement(ctx, userID, "stock", h.ID, row.Ticker, store.AuditUpdate, map[string]any{
+				"investedUsd":  map[string]any{"from": oldInv, "to": h.InvestedUSD},
+				"avgOpenPrice": map[string]any{"from": oldAvg, "to": h.AvgOpenPrice},
+			}, "SC-17 statement reconcile: update from eToro")
 			if row.ISIN != "" && (h.ISIN == nil || *h.ISIN == "") {
 				if err := s.store.SeedStockHoldingISIN(ctx, userID, h.ID, row.ISIN); err != nil {
 					errs = append(errs, "seed isin "+row.Ticker+": "+err.Error())
@@ -515,11 +729,15 @@ func (s *Server) handleEtoroReconcileApply(w http.ResponseWriter, r *http.Reques
 				errs = append(errs, "drift "+row.Ticker+": "+err.Error())
 				continue
 			}
+			oldQty := h.QuantityHeld
 			h.QuantityHeld = round6f(row.EtoroUnits)
 			if err := s.store.UpdateCryptoHolding(ctx, h); err != nil {
 				errs = append(errs, "drift "+row.Ticker+": "+err.Error())
 				continue
 			}
+			s.auditStatement(ctx, userID, "crypto", h.ID, row.Ticker, store.AuditUpdate, map[string]any{
+				"quantityHeld": map[string]any{"from": oldQty, "to": h.QuantityHeld},
+			}, "SC-17 statement reconcile: update from eToro")
 			updated++
 
 		case row.Kind == "stock" && row.Action == "close":
@@ -536,6 +754,8 @@ func (s *Server) handleEtoroReconcileApply(w http.ResponseWriter, r *http.Reques
 				errs = append(errs, "close "+row.Ticker+": "+err.Error())
 				continue
 			}
+			s.auditStatement(ctx, userID, "stock", row.FTHoldingID, row.Ticker, store.AuditSoftDelete,
+				map[string]any{"ftInvestedUsd": row.FTInvested}, "SC-17 statement reconcile: close")
 			closed++
 
 		case row.Kind == "crypto" && row.Action == "close":
@@ -552,6 +772,8 @@ func (s *Server) handleEtoroReconcileApply(w http.ResponseWriter, r *http.Reques
 				errs = append(errs, "close "+row.Ticker+": "+err.Error())
 				continue
 			}
+			s.auditStatement(ctx, userID, "crypto", row.FTHoldingID, row.Ticker, store.AuditSoftDelete,
+				map[string]any{}, "SC-17 statement reconcile: close")
 			closed++
 
 		default:

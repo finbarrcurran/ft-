@@ -1,0 +1,5 @@
+# FT — daily capitol-trades scrape via Playwright. 23:05 UTC, before
+# the FT congress ingest at 23:10. Logs to /home/curran/logs/ft-capitol-trades.log.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+5 23 * * * curran cd /home/curran/scripts && NODE_PATH=/home/curran/scripts/node_modules /usr/local/bin/node capitol-trades-fetch.js >> /home/curran/logs/ft-capitol-trades.log 2>&1

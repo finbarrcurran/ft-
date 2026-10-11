@@ -77,3 +77,24 @@ func TestHoldingsCoverage(t *testing.T) {
 		t.Errorf("copy lots must be excluded: skipped=%d holdings=%+v", own.CopySkipped, own.Holdings)
 	}
 }
+
+// A wrong-file upload to the master-file import must be recognised as an eToro
+// statement (it used to parse to an empty diff without any error).
+func TestLooksLikeStatement(t *testing.T) {
+	if !LooksLikeStatement(statement(t, "01/01/2025 00:00:00", "09/10/2026 23:59:59", [][3]string{{"GLD/USD", "2", "900"}})) {
+		t.Error("an eToro statement workbook should be recognised")
+	}
+	f := excelize.NewFile()
+	f.SetSheetName("Sheet1", "Stocks")
+	f.SetSheetRow("Stocks", "A1", &[]any{"Name", "Ticker", "Invested USD"})
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if LooksLikeStatement(bytes.NewReader(buf.Bytes())) {
+		t.Error("a master-file-style workbook must not be mistaken for a statement")
+	}
+	if LooksLikeStatement(strings.NewReader("not a workbook")) {
+		t.Error("garbage must not be mistaken for a statement")
+	}
+}

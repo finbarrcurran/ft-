@@ -1,0 +1,7 @@
+# FT — daily Farside ETF flow fetch via Playwright (bypasses Cloudflare).
+# Runs at 00:25 UTC, 5 minutes before the indicator refresh cron at 00:30.
+# Output logged to /home/curran/logs/ft-farside-fetch.log.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+25 0 * * * curran cd /home/curran/scripts && NODE_PATH=/home/curran/scripts/node_modules /usr/local/bin/node farside-fetch.js >> /home/curran/logs/ft-farside-fetch.log 2>&1

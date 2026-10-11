@@ -1,0 +1,9 @@
+/home/curran/logs/*.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+    su curran curran
+    create 0644 curran curran
+}

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"ft/internal/domain"
+	"ft/internal/etoro"
 	"ft/internal/market"
 	"ft/internal/persistence"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -85,6 +87,19 @@ func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(lower, ".csv"):
 		parsed, err = persistence.ParseCSV(file)
 	case strings.HasSuffix(lower, ".xlsx"), strings.HasSuffix(lower, ".xls"):
+		// An eToro account statement is not a master file; without this check
+		// the parser finds no recognisable sheet and returns an empty diff, so
+		// the upload looks like it worked. Say what to do instead.
+		if etoro.LooksLikeStatement(file) {
+			writeError(w, http.StatusBadRequest,
+				"this is an eToro account statement, not a master file — use Performance → \"Upload statement\" "+
+					"for performance history, or Stocks → \"Reconcile with eToro statement\" for holdings")
+			return
+		}
+		if _, serr := file.Seek(0, io.SeekStart); serr != nil {
+			writeError(w, http.StatusBadRequest, "could not re-read the upload")
+			return
+		}
 		parsed, err = persistence.ParseXLSX(file)
 	default:
 		writeError(w, http.StatusBadRequest,
@@ -160,20 +175,20 @@ func (s *Server) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"fileName":             header.Filename,
-		"stockCount":           len(parsed.Stocks),
-		"cryptoCount":          len(parsed.Crypto),
-		"isMasterFormatStocks": parsed.IsMasterFormatStocks,
-		"hasCrypto":            parsed.HasCrypto,
-		"schemaVersion":        parsed.SchemaVersion,
-		"fxSnapshotEurUsd":     parsed.FXSnapshotEURUSD,
-		"warnings":             parsed.Warnings,
-		"skipped":              parsed.Skipped,
-		"stockDiff":            stockDiff,
-		"cryptoDiff":           cryptoDiff,
+		"fileName":              header.Filename,
+		"stockCount":            len(parsed.Stocks),
+		"cryptoCount":           len(parsed.Crypto),
+		"isMasterFormatStocks":  parsed.IsMasterFormatStocks,
+		"hasCrypto":             parsed.HasCrypto,
+		"schemaVersion":         parsed.SchemaVersion,
+		"fxSnapshotEurUsd":      parsed.FXSnapshotEURUSD,
+		"warnings":              parsed.Warnings,
+		"skipped":               parsed.Skipped,
+		"stockDiff":             stockDiff,
+		"cryptoDiff":            cryptoDiff,
 		"willDemoteToWatchlist": willDemote, // v1.7.6
-		"enriched":             enriched, // Spec 12 D7 — UI highlight hints
-		"ttlSeconds":           int(pendingTTL.Seconds()),
+		"enriched":              enriched,   // Spec 12 D7 — UI highlight hints
+		"ttlSeconds":            int(pendingTTL.Seconds()),
 	})
 }
 
@@ -282,9 +297,9 @@ func (s *Server) handleImportApply(w http.ResponseWriter, r *http.Request) {
 		"file", pending.FileName)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"stocksApplied":      stocksApplied,
-		"cryptoApplied":      cryptoApplied,
-		"stocksDemoted":      stocksDemoted, // v1.7.6
+		"stocksApplied": stocksApplied,
+		"cryptoApplied": cryptoApplied,
+		"stocksDemoted": stocksDemoted, // v1.7.6
 	})
 }
 

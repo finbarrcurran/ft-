@@ -317,3 +317,20 @@ func (r *HoldingsResult) Coverage(oldestOpen, newestOpen string) (complete bool,
 	}
 	return true, ""
 }
+
+// LooksLikeStatement reports whether r is an eToro account-statement workbook
+// (it carries the Account Summary, Closed Positions and Account Activity
+// sheets). The master-file import uses it to turn a wrong-file upload into a
+// clear message instead of an empty, silently accepted parse.
+func LooksLikeStatement(r io.Reader) bool {
+	f, err := excelize.OpenReader(r)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	have := map[string]bool{}
+	for _, n := range f.GetSheetList() {
+		have[n] = true
+	}
+	return have[sheetAccountSummary] && have[sheetClosedPos] && have[sheetAccountActivity]
+}
