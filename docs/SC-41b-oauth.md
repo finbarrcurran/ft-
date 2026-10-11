@@ -22,8 +22,7 @@ Settings → Diagnostics shows the OAuth counts. Tokens: access 1 h, refresh 30 
 `ft oauth create-client --name claude.ai --secret` prints a client id and a secret (shown once).
 
 ## Cloudflare (manual — FT has no API token)
-Dashboard → ft.curranhouse.dev (zone curranhouse.dev) → Security → WAF → Custom rules:
-1. **Block** when `(http.host eq "ft.curranhouse.dev") and (http.request.uri.path eq "/token" or http.request.uri.path eq "/register" or starts_with(http.request.uri.path, "/mcp") or starts_with(http.request.uri.path, "/.well-known/")) and not ip.src in {160.79.104.0/21}`.
-   `/authorize` stays open (Fin's browser). Anthropic's published egress range is 160.79.104.0/21; the range is shared by all Claude users, so this reduces noise, it is not authentication.
-2. Rate limiting rule (Security → WAF → Rate limiting rules) on `http.request.uri.path eq "/api/auth/login"`: 10 requests per 10 seconds per IP, action Block for 10 minutes.
-FT itself also limits failed logins (5 per IP per 15 min).
+Step-by-step with screens is in the status report `FT_Status_WorkOrder_E_SC41b_OAuth`. Summary:
+
+1. Custom rule, action **Block**: `(http.host eq "ft.curranhouse.dev" and (http.request.uri.path eq "/token" or http.request.uri.path eq "/register" or starts_with(http.request.uri.path, "/mcp") or starts_with(http.request.uri.path, "/.well-known/")) and not ip.src in {160.79.104.0/21})`. `/authorize` stays open (Fin's browser). 160.79.104.0/21 is Anthropic's published egress range, shared by all Claude users: it cuts noise, it is not authentication. It also blocks Claude Code on Fin's own machine from using this connector (that is outside the range).
+2. Rate-limiting rule on `/api/auth/login`. Free plans offer limited choices (typically one rule, a 10-second window and a short block): take the strictest the dashboard allows. FT's own limiter (5 failed logins per IP per 15 min) does the real work.
