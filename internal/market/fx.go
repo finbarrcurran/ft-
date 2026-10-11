@@ -17,7 +17,7 @@ func FetchEURUSD(ctx context.Context) (rate *FXRate, retErr error) {
 		Date   string             `json:"date"`
 		Rates  map[string]float64 `json:"rates"`
 	}
-	if err := httpGetJSON(ctx, "https://api.frankfurter.app/latest?from=EUR&to=USD", &resp); err != nil {
+	if err := httpGetJSON(ctx, "https://api.frankfurter.dev/v1/latest?from=EUR&to=USD", &resp); err != nil {
 		return nil, err
 	}
 	r, ok := resp.Rates["USD"]

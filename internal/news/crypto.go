@@ -80,28 +80,38 @@ func parsePubDate(s string) time.Time {
 	return time.Time{} // zero — sorts to end
 }
 
-// FetchCryptoNews returns the merged feed. Always returns a non-nil
-// slice (possibly empty) — never nil — so the handler can distinguish
-// "providers returned zero items" from "missing API key" (the latter
-// triggers the UI's `unconfigured` banner). RSS providers never go
-// unconfigured.
+// FetchCryptoNews returns the merged crypto feed (see fetchRSSAggregate).
 func FetchCryptoNews(ctx context.Context) (articles []Article, retErr error) {
+	return fetchRSSAggregate(ctx, "rss_crypto", cryptoFeeds, false)
+}
+
+// rssSource names one publisher feed.
+type rssSource = struct {
+	Name string
+	URL  string
+}
+
+// fetchRSSAggregate fetches every feed (one bad feed never kills the aggregate),
+// dedupes by URL, sorts newest-first, caps at 50 and records ONE provider_health
+// outcome under `provider`. Always returns a non-nil slice (possibly empty) so the
+// handler can tell "providers returned zero items" from "missing API key" (the
+// latter triggers the UI's `unconfigured` banner). RSS never goes unconfigured.
+// With sentiment=true each headline gets the same heuristic label NewsAPI items get.
+func fetchRSSAggregate(ctx context.Context, provider string, feeds []rssSource, sentiment bool) (articles []Article, retErr error) {
 	defer func() {
-		health.Record(ctx, "rss_crypto", retErr)
+		health.Record(ctx, provider, retErr)
 	}()
 
 	client := &http.Client{
 		Timeout: 12 * time.Second,
-		// Default redirect policy follows up to 10 hops — fine for
-		// CoinDesk's outboundfeeds redirect.
+		// Default redirect policy follows up to 10 hops (CoinDesk's outboundfeeds redirect).
 	}
 
-	// Always return a non-nil slice (see godoc note above).
 	out := []Article{}
 	seen := map[string]bool{}
 	var firstErr error
 
-	for _, feed := range cryptoFeeds {
+	for _, feed := range feeds {
 		select {
 		case <-ctx.Done():
 			return out, ctx.Err()
@@ -109,7 +119,6 @@ func FetchCryptoNews(ctx context.Context) (articles []Article, retErr error) {
 		}
 		items, err := fetchRSSItems(ctx, client, feed.URL)
 		if err != nil {
-			// One bad feed doesn't kill the aggregate.
 			if firstErr == nil {
 				firstErr = fmt.Errorf("%s: %w", feed.Name, err)
 			}
@@ -122,28 +131,28 @@ func FetchCryptoNews(ctx context.Context) (articles []Article, retErr error) {
 				continue
 			}
 			seen[url] = true
+			sent := "neutral"
+			if sentiment {
+				sent = heuristicSentiment(title)
+			}
 			out = append(out, Article{
 				Title:       title,
 				URL:         url,
 				Source:      feed.Name,
 				PublishedAt: parsePubDate(it.PubDate),
-				Sentiment:   "neutral",
+				Sentiment:   sent,
 			})
 		}
 	}
 
-	// Sort newest-first; cap at 50.
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].PublishedAt.After(out[j].PublishedAt)
 	})
 	if len(out) > 50 {
 		out = out[:50]
 	}
-
-	// If we got at least one article, swallow the partial error — we have
-	// something to show. Surface the first error only when nothing came
-	// back, so the cache logic in the handler still treats us as "tried
-	// and failed" rather than "unconfigured".
+	// At least one article: swallow the partial error. Only when nothing came back
+	// surface the first error, so the handler treats it as "tried and failed".
 	if len(out) > 0 {
 		return out, nil
 	}

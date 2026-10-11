@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -99,7 +100,7 @@ func (s *Service) fireThreshold(ctx context.Context, t thresholdLevel, spent, ca
 	}
 	body := fmt.Sprintf(t.BodyTemplate, spent, cap, pct)
 	msg := t.Title + "\n\n" + body
-	if err := s.sendTelegram(ctx, msg); err != nil {
+	if err := s.deliver(ctx, msg); err != nil {
 		slog.Warn("llm: threshold telegram failed", "level", t.Pct, "err", err)
 	} else {
 		slog.Info("llm: threshold alert fired", "pct", t.Pct, "spent", spent, "cap", cap)
@@ -113,7 +114,7 @@ func (s *Service) sendTelegram(ctx context.Context, text string) error {
 	botToken := os.Getenv("FT_TELEGRAM_BOT_TOKEN")
 	chatID := os.Getenv("FT_TELEGRAM_CHAT_ID")
 	if botToken == "" || chatID == "" {
-		return nil // not configured; not an error
+		return errTelegramNotConfigured // SC-48: say so instead of logging a delivery that never happened
 	}
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
 	body, _ := json.Marshal(map[string]any{
@@ -152,4 +153,22 @@ func escapeMD2(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// errTelegramNotConfigured is returned when FT_TELEGRAM_BOT_TOKEN / FT_TELEGRAM_CHAT_ID are unset.
+var errTelegramNotConfigured = errors.New("telegram not configured (FT_TELEGRAM_BOT_TOKEN / FT_TELEGRAM_CHAT_ID)")
+
+// deliver sends through the test hook when set, else Telegram.
+func (s *Service) deliver(ctx context.Context, text string) error {
+	if s.Notify != nil {
+		return s.Notify(ctx, text)
+	}
+	return s.sendTelegram(ctx, text)
+}
+
+// SendTestAlert pushes one real message through the same delivery path the budget
+// thresholds use, so delivery can be verified end to end without spending anything.
+func (s *Service) SendTestAlert(ctx context.Context) error {
+	return s.deliver(ctx, "🧪 TEST — FT LLM budget alert path\n\n"+
+		"This is a delivery check, not a real alert. Spend is $0.00. Real thresholds: 50%, 75%, 90%, 100% of the monthly cap and 100% of the daily cap.")
 }

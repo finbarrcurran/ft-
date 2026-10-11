@@ -263,7 +263,7 @@ func (s *Server) enrichWatchlistEntry(ctx context.Context, e *domain.WatchlistEn
 		}
 	}
 	// Current price from the same quote chain the rest of FT uses
-	// (Finnhub → TwelveData → Yahoo).
+	// (Finnhub → Yahoo).
 	if e.CurrentPrice == nil {
 		if q, err := market.FetchStockQuote(ctx, e.Ticker); err == nil && q != nil {
 			if q.Price > 0 {

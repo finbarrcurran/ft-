@@ -5,6 +5,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"regexp"
+	"strconv"
 	"time"
 )
 
@@ -23,6 +25,7 @@ type ProviderHealth struct {
 // RecordProviderHealth UPSERTs one row, updating counts + timestamps.
 // `errMsg` is truncated at 200 chars by callers.
 func (s *Store) RecordProviderHealth(ctx context.Context, provider string, ok bool, errMsg string) error {
+	s.recordProviderDaily(ctx, provider, ok, errMsg) // SC-48 per-day counters; never blocks the main write
 	now := time.Now().UTC().Unix()
 	if ok {
 		_, err := s.DB.ExecContext(ctx, `
@@ -86,6 +89,78 @@ func (s *Store) ListProviderHealth(ctx context.Context) ([]ProviderHealth, error
 			p.LastError = lerr.String
 		}
 		p.UpdatedAt = time.Unix(updated, 0).UTC()
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// httpStatusInErr finds "http 429" style statuses the providers embed in their errors.
+var httpStatusInErr = regexp.MustCompile(`(?i)\bhttp (\d{3})\b`)
+
+// recordProviderDaily upserts today's counters for the provider (SC-48). Errors are
+// swallowed: bookkeeping must never break the calling code path.
+func (s *Store) recordProviderDaily(ctx context.Context, provider string, ok bool, errMsg string) {
+	day := time.Now().UTC().Format("2006-01-02")
+	var okN, failN, f429, f4xx, f5xx, fother int
+	if ok {
+		okN = 1
+	} else {
+		failN = 1
+		if m := httpStatusInErr.FindStringSubmatch(errMsg); m != nil {
+			code, _ := strconv.Atoi(m[1])
+			switch {
+			case code == 429:
+				f429 = 1
+			case code >= 400 && code < 500:
+				f4xx = 1
+			case code >= 500:
+				f5xx = 1
+			default:
+				fother = 1
+			}
+		} else {
+			fother = 1
+		}
+	}
+	_, _ = s.DB.ExecContext(ctx, `
+		INSERT INTO provider_daily (provider, day, calls, ok, fail, fail_429, fail_4xx, fail_5xx, fail_other)
+		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(provider, day) DO UPDATE SET
+		  calls = calls + 1, ok = ok + excluded.ok, fail = fail + excluded.fail,
+		  fail_429 = fail_429 + excluded.fail_429, fail_4xx = fail_4xx + excluded.fail_4xx,
+		  fail_5xx = fail_5xx + excluded.fail_5xx, fail_other = fail_other + excluded.fail_other`,
+		provider, day, okN, failN, f429, f4xx, f5xx, fother)
+}
+
+// ProviderDay is one provider-day of call counters.
+type ProviderDay struct {
+	Provider  string `json:"provider"`
+	Day       string `json:"day"`
+	Calls     int    `json:"calls"`
+	OK        int    `json:"ok"`
+	Fail      int    `json:"fail"`
+	Fail429   int    `json:"fail429"`
+	Fail4xx   int    `json:"fail4xx"`
+	Fail5xx   int    `json:"fail5xx"`
+	FailOther int    `json:"failOther"`
+}
+
+// ProviderDaily returns the last `days` UTC days of counters (today included), newest first.
+func (s *Store) ProviderDaily(ctx context.Context, days int) ([]ProviderDay, error) {
+	since := time.Now().UTC().AddDate(0, 0, -(days - 1)).Format("2006-01-02")
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT provider, day, calls, ok, fail, fail_429, fail_4xx, fail_5xx, fail_other
+		  FROM provider_daily WHERE day >= ? ORDER BY day DESC, provider`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ProviderDay{}
+	for rows.Next() {
+		var p ProviderDay
+		if err := rows.Scan(&p.Provider, &p.Day, &p.Calls, &p.OK, &p.Fail, &p.Fail429, &p.Fail4xx, &p.Fail5xx, &p.FailOther); err != nil {
+			return nil, err
+		}
 		out = append(out, p)
 	}
 	return out, rows.Err()

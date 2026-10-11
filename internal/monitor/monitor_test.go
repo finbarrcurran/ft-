@@ -122,3 +122,25 @@ func TestUndeliveredIsRecorded(t *testing.T) {
 		t.Fatal("failed send must be recorded as undelivered")
 	}
 }
+
+func TestCheckKeysListsNamesOnly(t *testing.T) {
+	t.Setenv("FT_FINNHUB_API_KEY", "secret-value-1")
+	t.Setenv("FT_COINGECKO_API_KEY", "")
+	n := &fakeNotifier{}
+	missing := CheckKeys(context.Background(), n, []string{"FT_FINNHUB_API_KEY", "FT_COINGECKO_API_KEY", "FT_NOPE_KEY"})
+	if len(missing) != 2 || missing[0] != "FT_COINGECKO_API_KEY" || missing[1] != "FT_NOPE_KEY" {
+		t.Fatalf("missing = %v", missing)
+	}
+	if len(n.msgs) != 1 || !strings.Contains(n.msgs[0], "FT_COINGECKO_API_KEY, FT_NOPE_KEY") {
+		t.Fatalf("expected one alert naming both variables, got %v", n.msgs)
+	}
+	if strings.Contains(n.msgs[0], "secret-value-1") || strings.Contains(n.msgs[0], "FT_FINNHUB_API_KEY") {
+		t.Fatal("alert must list only the missing names, never values or set variables")
+	}
+	n2 := &fakeNotifier{}
+	t.Setenv("FT_COINGECKO_API_KEY", "x")
+	t.Setenv("FT_NOPE_KEY", "y")
+	if got := CheckKeys(context.Background(), n2, []string{"FT_FINNHUB_API_KEY", "FT_COINGECKO_API_KEY", "FT_NOPE_KEY"}); len(got) != 0 || len(n2.msgs) != 0 {
+		t.Fatalf("all set must be silent: %v %v", got, n2.msgs)
+	}
+}

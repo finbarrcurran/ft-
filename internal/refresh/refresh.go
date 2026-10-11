@@ -135,7 +135,7 @@ func (s *Service) RefreshAll(ctx context.Context, userID int64) *Result {
 			}
 		}
 		if len(heatmapOnly) > 0 {
-			hmQuotes := market.FetchStockQuotes(ctx, heatmapOnly)
+			hmQuotes := market.FetchStockQuotesYahoo(ctx, heatmapOnly) // SC-48: Yahoo, not Finnhub (60/min)
 			for _, q := range hmQuotes {
 				heatmap.SetLiveQuote(q.Ticker, q.Price, q.ChangePct)
 				r.HeatmapUpdated++

@@ -5522,6 +5522,38 @@ function renderDiagnosticsSection(d) {
       ${monEvents ? `<ul class="diag-kv" style="margin-top:0.5rem">${monEvents}</ul>` : ''}
   ` : '';
 
+  // SC-48 — provider usage today vs limit, and a 7-day calls view.
+  const u = d.usage || {};
+  const usageLines = [];
+  if (u.finnhub) {
+    const f = u.finnhub;
+    const head = f.remaining != null ? `${f.remaining}/${f.limitPerMin} calls left in the current minute` : `limit ${f.limitPerMin}/min`;
+    usageLines.push(`<li><strong>Finnhub</strong>: ${f.calls} calls today (${f.ok} ok, <span class="${f.fail429 > 0 ? 'amber-text' : 'dim'}">${f.fail429} rate-limited</span>) <span class="dim">· ${head}</span></li>`);
+  }
+  if (u.yahoo) {
+    const y = u.yahoo;
+    usageLines.push(`<li><strong>Yahoo</strong>: ${y.calls} calls today, <span class="${(y.failRatePct || 0) > 10 ? 'amber-text' : 'dim'}">${y.failRatePct != null ? y.failRatePct.toFixed(1) : '0.0'}% failed</span></li>`);
+  }
+  if (u.bargo) {
+    usageLines.push(`<li><strong>Bargo</strong>: ${u.bargo.rowsToday} rows today <span class="dim">of ${u.bargo.rowsLimitPerDay}/day</span></li>`);
+  }
+  const pd = d.providerDaily || [];
+  const days = [...new Set(pd.map(r => r.day))].sort().reverse();
+  const provs = [...new Set(pd.map(r => r.provider))].sort();
+  const pdMap = {};
+  pd.forEach(r => { pdMap[r.provider + '|' + r.day] = r; });
+  const pdRows = provs.map(p => `<tr><td><strong>${escapeHTML(p)}</strong></td>` + days.map(dy => {
+    const r = pdMap[p + '|' + dy];
+    if (!r) return '<td class="num dim">—</td>';
+    const bad = r.fail > 0 ? ` <span class="${r.fail429 > 0 || r.fail > r.ok ? 'amber-text' : 'dim'}">(${r.fail} fail)</span>` : '';
+    return `<td class="num">${r.calls}${bad}</td>`;
+  }).join('') + '</tr>').join('');
+  const usageHTML = (usageLines.length || pdRows) ? `
+      <h4 class="diag-h4">Provider usage <span class="dim" style="font-size:0.78rem; font-weight:normal">(calls per UTC day)</span></h4>
+      ${usageLines.length ? `<ul class="diag-kv">${usageLines.join('')}</ul>` : ''}
+      ${pdRows ? `<div class="tablewrap"><table class="holdings"><thead><tr><th>Provider</th>${days.map(dy => `<th class="num">${escapeHTML(dy.slice(5))}</th>`).join('')}</tr></thead><tbody>${pdRows}</tbody></table></div>` : ''}
+  ` : '';
+
   return `
     <section class="settings-block">
       <h3 class="settings-h3" style="display:flex; justify-content:space-between; align-items:center">
@@ -5551,6 +5583,8 @@ function renderDiagnosticsSection(d) {
       </div>
 
       ${monitorHTML}
+
+      ${usageHTML}
 
       <h4 class="diag-h4">Provider health</h4>
       <div class="tablewrap"><table class="holdings"><thead><tr>

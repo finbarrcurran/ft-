@@ -43,7 +43,9 @@ func FetchStockFearGreed(ctx context.Context) (fg *FearGreed, retErr error) {
 			Timestamp string `json:"timestamp"`
 		} `json:"fear_and_greed"`
 	}
-	if err := httpGetJSON(ctx, "https://production.dataviz.cnn.io/index/fearandgreed/graphdata", &resp); err != nil {
+	// SC-48: without a cnn.com Referer/Origin the endpoint answers HTTP 418 "You're a bot".
+	cnnHeaders := map[string]string{"Referer": "https://edition.cnn.com/", "Origin": "https://edition.cnn.com"}
+	if err := httpGetJSONHeaders(ctx, "https://production.dataviz.cnn.io/index/fearandgreed/graphdata", cnnHeaders, &resp); err != nil {
 		return nil, err
 	}
 

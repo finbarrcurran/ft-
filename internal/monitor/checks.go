@@ -79,14 +79,16 @@ func DefaultChecks(db *sql.DB) []Check {
 		{Source: "yahoo", Label: "Yahoo Finance (prices)", MaxAge: 12 * h, Probe: providerProbe(db, "yahoo")},
 		{Source: "coingecko", Label: "CoinGecko (crypto prices)", MaxAge: 12 * h, Probe: providerProbe(db, "coingecko")},
 		{Source: "finnhub", Label: "Finnhub", MaxAge: 12 * h, Probe: providerProbe(db, "finnhub")},
-		{Source: "twelvedata", Label: "Twelve Data", MaxAge: 36 * h, Probe: providerProbe(db, "twelvedata")},
 		{Source: "frankfurter", Label: "Frankfurter (FX)", MaxAge: 36 * h, Probe: providerProbe(db, "frankfurter")},
-		{Source: "alternative_me", Label: "Alternative.me (Fear & Greed)", MaxAge: 48 * h, Probe: providerProbe(db, "alternative_me")},
-		{Source: "cnn_feargreed", Label: "CNN Fear & Greed", MaxAge: 72 * h, Probe: providerProbe(db, "cnn_feargreed")},
-		{Source: "newsapi", Label: "NewsAPI", MaxAge: 72 * h, Probe: providerProbe(db, "newsapi")},
-		{Source: "rss_crypto", Label: "Crypto RSS news", MaxAge: 72 * h, Probe: providerProbe(db, "rss_crypto")},
-		// Known-broken since May (JSON shape change); listed so it stays visible.
-		{Source: "cryptocompare", Label: "CryptoCompare news", MaxAge: 72 * h, Optional: true, Probe: providerProbe(db, "cryptocompare")},
+		{Source: "alternative_me", Label: "Alternative.me (Fear & Greed)", MaxAge: 36 * h, Probe: providerProbe(db, "alternative_me")},
+		// Request-driven feeds (called when a tab/card is opened, cached 60 min). The daily
+		// 06:30 UTC warm-up (internal/server/warmup.go) keeps them fresh, so 36 h is the
+		// right allowance; before SC-48 they sat on a 72 h rule nobody satisfied.
+		{Source: "cnn_feargreed", Label: "CNN Fear & Greed", MaxAge: 36 * h, Probe: providerProbe(db, "cnn_feargreed")},
+		{Source: "newsapi", Label: "NewsAPI (market news)", MaxAge: 36 * h, Probe: providerProbe(db, "newsapi")},
+		{Source: "rss_crypto", Label: "Crypto RSS news", MaxAge: 36 * h, Probe: providerProbe(db, "rss_crypto")},
+		// Market-news RSS (SC-48): optional until the switch `market_news_source` = rss is flipped.
+		{Source: "rss_market", Label: "Market-news RSS", MaxAge: 36 * h, Optional: true, Probe: providerProbe(db, "rss_market")},
 
 		// Congress feed (SC-47): daily 23:10 UTC sync. A quota stop with data
 		// stored is 'partial' and still counts as a success.

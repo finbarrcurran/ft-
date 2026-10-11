@@ -11,16 +11,16 @@ import "time"
 
 // StockQuote is what we get back from Yahoo Finance for one ticker.
 type StockQuote struct {
-	Ticker     string
-	Name       string
-	Price      float64
-	ChangePct  float64
-	Currency   string
-	Volume     int64
-	MA50       *float64
-	MA200      *float64
-	RSI14      *float64 // computed client-side from history
-	FetchedAt  time.Time
+	Ticker    string
+	Name      string
+	Price     float64
+	ChangePct float64
+	Currency  string
+	Volume    int64
+	MA50      *float64
+	MA200     *float64
+	RSI14     *float64 // computed client-side from history
+	FetchedAt time.Time
 }
 
 // CryptoQuote is one row from CoinGecko's /simple/price + market_chart.

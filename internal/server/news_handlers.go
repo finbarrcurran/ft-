@@ -24,6 +24,22 @@ const newsTTL = 60 * time.Minute
 //   3. If the live call fails AND we have a stale cache, return the stale cache.
 //   4. If everything fails, return an empty feed with source="unconfigured".
 func (s *Server) handleMarketNews(w http.ResponseWriter, r *http.Request) {
+	// SC-48: the market-news source is switchable. `meta.market_news_source` = "newsapi"
+	// (default) or "rss" (free publisher feeds; NewsAPI is then never called).
+	// `?source=rss` previews the RSS feeds without switching or touching the cache.
+	if r.URL.Query().Get("source") == "rss" {
+		arts, err := news.FetchMarketNewsRSS(r.Context())
+		if err != nil {
+			slog.Warn("market news rss preview", "err", err)
+		}
+		feed := news.Feed{Articles: arts, FetchedAt: time.Now().UTC(), Source: "rss"}
+		writeJSON(w, http.StatusOK, feed)
+		return
+	}
+	if v, _ := s.store.GetMeta(r.Context(), "market_news_source"); v == "rss" {
+		s.handleNews(w, r, "market", "rss", news.FetchMarketNewsRSS)
+		return
+	}
 	s.handleNews(w, r, "market", "newsapi", news.FetchMarketNews)
 }
 func (s *Server) handleCryptoNews(w http.ResponseWriter, r *http.Request) {

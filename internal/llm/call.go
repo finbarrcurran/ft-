@@ -97,6 +97,7 @@ type Service struct {
 	APIKey       string // from FT_ANTHROPIC_API_KEY env, populated at boot
 	APIBaseURL   string // override for tests; default "https://api.anthropic.com"
 	clock        func() time.Time
+	Notify       func(ctx context.Context, text string) error // override for tests; default = Telegram
 }
 
 // NewService constructs a Service. APIKey can be "" — Call() will then

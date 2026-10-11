@@ -87,6 +87,8 @@ func main() {
 		runNexusCompute(os.Args[2:])
 	case "oauth":
 		runOAuth(os.Args[2:])
+	case "llm-alert-test":
+		runLLMAlertTest()
 	case "video-digest-reground":
 		runVideoDigestReground()
 		return
@@ -177,6 +179,7 @@ USAGE
   ft token revoke --id N [--user-id N]         revoke a service token
   ft oauth status | revoke-all | revoke-client --id ID | create-client --name N --redirect URI [--secret]
                                                manage the claude.ai connector's OAuth sign-ins (SC-41b)
+  ft llm-alert-test                            send one TEST budget alert through Telegram (delivery check, no spend)
   ft help                  print this usage
 
 ENVIRONMENT
@@ -264,6 +267,19 @@ func runServe() {
 	// SC-47 — connectivity monitor: one Telegram alert when an external source
 	// goes stale, a reminder every 24 h, and one when it recovers.
 	go (&monitor.Monitor{DB: st.DB, Checks: monitor.DefaultChecks(st.DB), Notify: &monitor.Telegram{}}).Run(bgCtx)
+
+	// SC-48 — daily warm-up of the request-driven feeds (CNN F&G, news) so they are always fresh.
+	go srv.ScheduleWarmup(bgCtx, 6, 30)
+
+	// SC-48 — a missing provider key fails loudly at startup: one Telegram alert listing the
+	// missing variable NAMES (never values), so a host move cannot silently drop config again.
+	go func() {
+		time.Sleep(30 * time.Second) // let the network and the Telegram sender come up
+		src, _ := st.GetMeta(bgCtx, "market_news_source")
+		if missing := monitor.CheckKeys(bgCtx, &monitor.Telegram{}, monitor.RequiredProviderKeys(src != "rss")); len(missing) > 0 {
+			slog.Error("startup: provider settings missing from the environment", "names", missing)
+		}
+	}()
 	go func() {
 		t := time.NewTicker(1 * time.Hour)
 		defer t.Stop()
@@ -1225,4 +1241,19 @@ func runOAuth(args []string) {
 		fmt.Fprintln(os.Stderr, "usage: ft oauth status | revoke-all | revoke-client --id ID | create-client [--name N] [--redirect URI] [--secret]")
 		os.Exit(2)
 	}
+}
+
+// runLLMAlertTest sends one TEST message through the 9c.1 budget-alert delivery path (SC-48).
+func runLLMAlertTest() {
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	svc := llm.NewService(st, "")
+	if err := svc.SendTestAlert(context.Background()); err != nil {
+		fmt.Fprintln(os.Stderr, "NOT delivered:", err)
+		os.Exit(1)
+	}
+	fmt.Println("delivered: check Telegram for the \"TEST - FT LLM budget alert path\" message")
 }

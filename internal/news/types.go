@@ -20,7 +20,7 @@ type Article struct {
 // Feed is what /api/news/{market,crypto} returns.
 type Feed struct {
 	Articles  []Article `json:"articles"`
-	Source    string    `json:"source"`    // "newsapi" / "cryptopanic" / "seed"
+	Source    string    `json:"source"` // "newsapi" / "cryptopanic" / "seed"
 	FetchedAt time.Time `json:"fetchedAt"`
 	Cached    bool      `json:"cached"`
 }

@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.79.1 · 2026-10-12** — latest change: Decisions applied (§13).
+> **Current version: v1.80.0 · 2026-10-12** — latest change: Data-provider fixes (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.79.1 2026-10-11 -->
+<!-- reference_reviewed: v1.80.0 2026-10-11 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -135,6 +135,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | AI Nexus weekly | Sun 22:45 | Forward PEG recompute |
 | Signals ingest | 23:00 / 23:10 / 23:20 | SEC Form 4 insiders (firehose + per-ticker), Congress, executive orders. The 23:10 Congress step (SC-47) imports the legacy Capitol Trades file into `congress_trades_raw` once, syncs Bargo (a rolling window of recent transaction dates, 7-day slices; first run backfills 3 months; Sundays re-read 60 days because disclosures lag up to ~45 days), then turns recent raw rows into tiered `signal_events` |
 | Connectivity monitor | every 10 min (first run 5 min after start) | SC-47: reads each watched source's last success (`provider_health`, `bargo_sync_runs`, `etoro_sync_runs`, Farside file mtime, newest DB backup) and compares it with the silence that source is allowed (`internal/monitor/checks.go`). One Telegram message when a source goes stale, a reminder every 24 h while it stays stale, one on recovery; on first sight, already-stale sources are folded into a single "monitor is on" message. Known-dead feeds are flagged optional (shown, never alert). Alerts go straight to Telegram via `FT_TELEGRAM_BOT_TOKEN` / `FT_TELEGRAM_CHAT_ID`; with them unset events are recorded as undelivered |
+| Feed warm-up | 06:30 daily | SC-48: runs the real handlers for CNN Fear & Greed, crypto Fear & Greed, market news and crypto news once (same path as a user request, cache and stale fallback included) so request-driven feeds stay fresh; one Telegram alert naming any that still fail. Startup (30 s after boot): one Telegram alert naming any missing required provider variable (names only) |
 
 **On Jarvis, outside the FT process:**
 
@@ -255,30 +256,33 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 
 ## 8. Provider chain
 
-*(carried over, with the eToro, FRED and CoinGecko-key rows added 2026-10-09; the other rows were not re-verified.)*
+*(Rewritten 2026-10-12 from the SC-48 diagnosis; each row was checked against the code and a live probe from Jarvis on 2026-10-11. Per-provider call counts per UTC day are in `provider_daily` and Settings → Diagnostics.)*
 
 | Domain | Primary | Fallback | Notes |
 |--------|---------|----------|-------|
-| US stock quote | Finnhub | TwelveData → Yahoo | TwelveData free is US-only since 2024 |
-| Non-US stock quote | Yahoo (crumb dance) | — | Fragile; updates every few months |
+| US stock quote (holdings) | Finnhub `/quote` | Yahoo | Free tier **60 calls/min** (read from the `x-ratelimit-*` response headers, shown in Diagnostics). FT gates calls ≥ 1.1 s apart with jitter, backs off 30 s on a 429, caches 5 min, collapses duplicate requests, and **skips tickers with an exchange suffix** (`.L .PA .DE .T`: not served by the free tier). A rejected or skipped ticker falls to Yahoo. |
+| Non-US stock quote | Yahoo (crumb dance) | — | Unofficial; fragile by nature |
+| Heatmap tiles (~80 S&P sample) | Yahoo (direct) | previous live values kept | Sequential, 150 ms apart; the batch stops after 5 consecutive failures. They no longer touch Finnhub (SC-48) |
 | Stock history (sparkline + 12m vol) | Yahoo `v8/chart` | — | 365-day window |
 | Stock fundamentals (beta, calendar, targets) | Yahoo `quoteSummary` | — | Patchy for non-US |
-| Congress trades | Bargo Congress API (`bargo.ai/free-apis/congress/v1`) | — | Free key (`FT_BARGO_API_KEY`, Bearer header): 100 requests + 1,000 rows/day, 250 rows/page; free tier serves only the last ~3 months, so FT keeps its own history in `congress_trades_raw`. Terms: visible attribution (Signals tab footer) and no bulk redistribution. A quota stop after some data is "partial", not a failure |
-| Broker positions, SL/TP, invested USD | eToro Public API (`public-api.etoro.com`) | manual `.xlsx` statement upload | Key pair in env; 60 req/60 s shared limit; one call per 30-min sync |
-| Crypto quote | CoinGecko `/simple/price` | serve-stale | Demo key via `FT_COINGECKO_API_KEY` (SC-18) |
+| ~~Twelve Data~~ | **retired 2026-10-12 (SC-48)** | | Its free plan is US-only and capped at 800 credits/day; FT spent ~3,400/day on it and every call failed (Yahoo supplied the data). No key use remains; the variable may stay in env unused |
+| Congress trades | Bargo Congress API (`bargo.ai/free-apis/congress/v1`) | — | Free key (`FT_BARGO_API_KEY`, Bearer header): 100 requests + 1,000 rows/day, 250 rows/page; free tier serves only the last ~3 months, so FT keeps its own history in `congress_trades_raw`. Terms: visible attribution (Signals tab footer) and no bulk redistribution |
+| Broker positions, SL/TP, invested USD | eToro Public API (`public-api.etoro.com`) | manual `.xlsx` statement upload | Key pair in env; 60 req/60 s shared limit; one call per 30-min sync; the sync transaction is `BEGIN IMMEDIATE` |
+| Crypto quote | CoinGecko `/simple/price` | serve-stale | Demo key `FT_COINGECKO_API_KEY`; free Demo plan 100 calls/min and 10,000/month (FT uses ~100–200/day) |
 | Crypto history | CoinGecko `/market_chart` | — | Sequential w/ 2.5s gap |
 | Crypto market screener | CoinGecko top 250 | — | SC-21 |
 | Macro + Pal indicators | FRED | manual ISM entry | `FRED_API_KEY` |
-| FX EUR→USD | Frankfurter | static fallback 1.08 | No key needed |
-| Stocks F&G | CNN `dataviz.cnn.io` | — | Unofficial; UA-gated |
-| Crypto F&G | alternative.me | — | Stable |
-| News (stocks) | NewsAPI | stale cache | Free 100 req/24h |
-| News (crypto) | CryptoPanic | stale cache | Free tier |
+| FX EUR→USD | Frankfurter (`api.frankfurter.dev/v1`) | stored rate, then static 1.08 | No key; moved from `frankfurter.app` (v1.80.0) |
+| Stocks Fear & Greed | CNN `production.dataviz.cnn.io` | stale cache ≤ 6 h | Unofficial; answers HTTP 418 unless a cnn.com `Referer`/`Origin` is sent (sent since v1.80.0). Fragile: the daily warm-up alerts if it still fails |
+| Crypto Fear & Greed | alternative.me | stale cache | Stable |
+| News (stocks) | NewsAPI **or** free publisher RSS | stale cache | Switch `meta.market_news_source`: `newsapi` (default; Developer plan, 100 req/day, development-use terms) or `rss` (CNBC, MarketWatch, Nasdaq, BBC Business; no key; headline + source + link only). `/api/news/market?source=rss` previews RSS without switching. RSS candidates await Fin's approval |
+| News (crypto) | Publisher RSS (CoinDesk, Cointelegraph, The Block, Decrypt) | stale cache | No key. (CryptoPanic and CryptoCompare are no longer used; CryptoCompare's stale health row was removed) |
 | Sector ETFs | Yahoo daily closes | — | 36 ETFs × 1 call/day |
 | Insider / 13F filings | SEC EDGAR | — | Daily ingest; 13F on demand |
 | Video digests | Anthropic API via the governor | — | Haiku; packages come from the Jarvis yt-dlp pipeline |
+| ETF flows (crypto) | Farside via the Playwright cron | live HTTP for the card after 36 h | Chart reads the cache file with no age check (ai's freshness-guard spec pending) |
 
-All provider calls wrapped with `health.Record` (Spec 7) for diagnostics surfacing.
+**Request-driven feeds** (CNN F&G, both news feeds, alternative.me) are only fetched when a tab/card is opened and cached 60 minutes; a **daily 06:30 UTC warm-up** (`internal/server/warmup.go`) runs the real handlers once so they stay fresh, and sends a Telegram alert for any that still fail. The monitor allows them 36 h. All provider calls go through `health.Record` (Spec 7), which also feeds the per-day counters. **At startup** FT sends one Telegram alert naming any missing required provider variable (names only).
 
 ## 9. Environment variables
 
@@ -331,7 +335,7 @@ ft help
 
 ## 12. What's deferred — known queue
 
-Current as of 2026-10-09:
+Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 | Item | Purpose | Status |
 |------|---------|--------|
@@ -342,29 +346,34 @@ Current as of 2026-10-09:
 | Cron scrapers (Farside) | Restore on the Lenovo, or replace | **Farside: fixed 2026-10-11** — the post-migration breakage had three independent causes: (1) cron logs pointed at `/var/log` (now `~curran/logs`); (2) `curran` could not reach/write `/var/lib/ft/data/{farside,capitol-trades}` (`curran` joined group `ft`, dirs `curran:ft` 2775 — `/var/lib/ft` itself stays 750 and `ft.db` is mode 644, so it is not opened to everyone); (3) Playwright and Chromium were not installed (`node_modules` and `~/.cache` are outside the backups; installed 2026-10-11, v1.60). All captured in `ops/scrapers/install.sh`; a logrotate rule keeps 8 weekly logs. **Capitol Trades: replaced by Bargo (SC-47, 2026-10-11)** — the cron was removed. Farside: the ETF-flow **card** stays live regardless (FT ignores a cache file older than 36 h and fetches directly), but the **chart** reads the cache file with no freshness check, so a stale file shows silently |
 | Manual eToro statement fallback | Retire or keep as break-glass | Kept (permanent break-glass). Fixed 2026-10-11: wallet scoping, live units, SU/SU.PA matching, audit rows (see §5). Remaining limit: a statement can't see partial closes (when live data exists it no longer proposes updates from the statement). Still open: the performance importer's handling of multi-year statements (whole statement attributed to the End-Date year), "Income from Refunds" in the Financial Summary, and its €-only reconciliation warning — ai to spec |
 | eToro crypto | First real eToro-held crypto position | Path is test-only; FT's EUR-based crypto refresh may recompute the USD cost fields SC-44 writes — check on first use |
-| `ft help` text | Bring the built-in usage text in line with §11 | Open, cosmetic |
 
-*(carried over from the earlier queue, not re-verified:)*
+*(older queue — checked 2026-10-12 against the code and the spec files in the research repo:)*
 
 | Spec | Purpose | Status |
 |------|---------|--------|
-| 9e (old numbering) | Correlation matrix tracking | Drafted; awaiting 30+ positions to justify |
-| 9h | Real-time technicals monitoring (Finnhub WebSocket level breaks) | Deferred until alert noise is a felt problem |
-| 9i | Adapter scoring engine | Drafted in handoff |
-| 16 | Alert strategy overhaul | Needs alert-noise audit first |
-| 13 (numbering collision) | "Test coverage" vs "Score automation engine" — rename one | Open |
+| 9e (old numbering) | Correlation matrix tracking | **Not built** (no matrix code; the only correlation in FT is the score-vs-outcome calibration, SC-38). Original rationale (30+ positions) not re-checked |
+| 9h | Real-time technicals monitoring (Finnhub WebSocket level breaks) | **Not built** (no WebSocket code). Note Finnhub's free tier is rate-limited to 60 calls/min (§8) |
+| 9i | *(label corrected)* The repo spec `FT_Spec_9i` is "Three-Framework Integration Architecture v1 (draft)". The crypto scoring engine shipped as D25 (§3, §5); the stock-side status of 9i was **not verified** | Mixed; see note |
+| 16 | Alert strategy overhaul | **Not verified.** SC-35 (Percoco levels + alert intelligence, §5) shipped later and may have superseded part of it |
+| 13 (numbering collision) | "Test coverage" vs "Score automation engine" — rename one | **Not verified**; no spec file with either title exists in the repo |
 
 ## 13. Recent changes and the archive
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.80.0 · 2026-10-12 · pass 79 · SC-48
+
+**Data-provider fixes.** Finnhub is rate-gated, cached and limited to US holdings; heatmap tiles use Yahoo; Twelve Data retired; CNN Fear & Greed works again (Referer fix); a daily warm-up keeps the request-driven feeds fresh and alerts if one fails; market-news RSS is built but not yet switched on; per-provider daily call counters and usage lines in Diagnostics; a startup alert for missing provider keys; budget-alert path tested. Behaviour: yes. Migrations: 1. Reference updated: §8, §12. Supersedes v1.79.1.
+
 ### v1.79.1 · 2026-10-12 · pass 78 · SC-47
 
 **Decisions applied.** AVGO and RR.L re-tagged, connector token #12 revoked, OpenClaw's dead FT skill retired; the eToro sync transaction is now `BEGIN IMMEDIATE` (fixes the intermittent `database is locked (517)`); the ETH thesis prose in the DB replaced by the amended original (scores unchanged); the unused legacy PPG gate removed; per-ticker stock theses added to the Drive library. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.79.0.
 
+
 ### v1.79.0 · 2026-10-12 · pass 77 · SC-41b
 
 **OAuth for the claude.ai connector; login rate limiting.** FT now runs its own single-user OAuth 2.1 server (discovery, registration, authorize with Fin's password, token with PKCE and rotating refresh tokens) so claude.ai can connect to `/mcp` with the URL alone; the 401 carries the OAuth discovery header and `/.well-known/*` no longer returns the SPA page. Login and authorize are now rate limited (5 failures per IP per 15 min) with a Telegram alert; migration 0050; `ft oauth` and `ft token revoke` commands; `ft help` aligned. Behaviour: yes. Migrations: 1. Reference updated: §3, §5, §11. Supersedes v1.78.1.
+
 
 
 ### v1.78.1 · 2026-10-11 · pass 76 · SC-47
@@ -373,9 +382,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.78.0 · 2026-10-11 · pass 75 · SC-47
 
 **Bargo Congress feed, raw history, connectivity monitor.** Congress trades now come from Bargo (free key; Capitol Trades cron retired) into a new unfiltered `congress_trades_raw` history table (migration 0049) that outlives Bargo's 3-month window; recent rows feed the Signals tab, which now carries Bargo's required attribution. A freshness monitor watches every external source (price APIs, Bargo, eToro sync, Farside, backups) and sends one Telegram alert per outage, a 24 h reminder and a recovery note; Diagnostics shows it. Needs `FT_TELEGRAM_*` in FT's env. Behaviour: yes. Migrations: 1. Reference updated: §2–5, §8, §9, §12. Supersedes v1.77.3.
+
 
 
 
@@ -388,9 +399,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.2 · 2026-10-10 · pass 73 · SC-44
 
 **Post-migration fixes.** SC-44's silent updates and approved adds/removals now write `holdings_audit` rows (actors `etoro-sync` / `fin`, no entry snapshot, so no fabricated closed trades); the six 2026-10-10 removals backfilled. Cron logs moved to `~curran/logs`; the Farside/Capitol jobs are still blocked (output-dir permissions, Playwright missing, Capitol Trades answers 429). Drive exporter moved into `ops/bridge/` with an installer. Behaviour: yes (audit only). Migrations/endpoints: none. Reference updated: §4, §7, §12. Supersedes v1.77.1.
+
 
 
 
@@ -407,9 +420,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.0 · 2026-10-10 · pass 71 · SC-45
 
 **Spec restructured; history moved to an archive.** Working spec is now sections 1–12 + the 10 newest changes (§13), ~40k chars (was 409k); all 66 change-log entries and 97 old §13 rows moved byte-for-byte to `docs/spec-archive/` (`INDEX.md`; Drive `FT-Bridge/spec/archive/`). Behaviour: no. Migrations/endpoints: none. Reference updated: §4, §7, §10, §12. Binding: each bump = `tools/spec_archive.py bump` (short entry here, full entry to archive) + affected §1–12 + `reference_reviewed` + `check`; archive text never edited. Drive `FT-master-spec` is now the whole working spec. Supersedes v1.76.0.
+
 
 
 
@@ -429,19 +444,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.75.2 · 2026-10-06 · pass 69 · SC-17
-
-**Statement fallback excludes copy-trade lots; Stocks-tab entry point.** The statement can't mark copied opens, so a full-history upload proposed FIG, MSFT, UNH, UPS (copy-trades); position IDs SC-42 has seen as copy lots are now skipped and counted. Added "Reconcile with eToro statement" to the Stocks toolbar. Behaviour: yes (fallback only). Endpoint: `/api/etoro/reconcile/preview` gains `copySkipped`. No migration. Binding: copy-trade positions never become FT holdings by any route. Supersedes v1.75.1.
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.79.1 -->
+<!-- END FT-master-spec v1.80.0 -->

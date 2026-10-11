@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"ft/internal/monitor"
 	"ft/internal/frameworks"
+	"ft/internal/market"
 	"ft/internal/marketdata"
 	"net/http"
 	"os"
@@ -47,9 +48,13 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 		out["oauth"] = s.oauth.Status(r.Context())
 	}
 
+	// SC-48 — provider usage: today's calls against each limit, plus a 7-day view.
+	out["providerDaily"], _ = s.store.ProviderDaily(r.Context(), 7)
+	out["usage"] = s.providerUsage(r.Context())
+
 	// API key presence — no values, just bools.
 	keys := []string{
-		"FT_FINNHUB_API_KEY", "FT_TWELVEDATA_API_KEY",
+		"FT_FINNHUB_API_KEY",
 		"NEWSAPI_API_KEY", "CRYPTOPANIC_API_KEY",
 		"FT_ANTHROPIC_API_KEY", "FT_COINGECKO_API_KEY", "FT_BARGO_API_KEY",
 		"FT_TELEGRAM_BOT_TOKEN", "FT_TELEGRAM_CHAT_ID",
@@ -205,4 +210,34 @@ func recentMonitorEvents(ctx context.Context, db *sql.DB) []map[string]any {
 		}
 	}
 	return out
+}
+
+// providerUsage is the per-provider "calls vs limit" lines for Diagnostics (SC-48).
+func (s *Server) providerUsage(ctx context.Context) map[string]any {
+	today := time.Now().UTC().Format("2006-01-02")
+	day := func(provider string) map[string]any {
+		var calls, ok, fail, f429 int
+		_ = s.store.DB.QueryRowContext(ctx,
+			`SELECT calls, ok, fail, fail_429 FROM provider_daily WHERE provider = ? AND day = ?`, provider, today).
+			Scan(&calls, &ok, &fail, &f429)
+		return map[string]any{"calls": calls, "ok": ok, "fail": fail, "fail429": f429}
+	}
+	fh := day("finnhub")
+	if hr := market.FinnhubHeadroom(); hr != nil {
+		fh["limitPerMin"], fh["remaining"], fh["seenAt"] = hr.Limit, hr.Remaining, hr.SeenAt
+	} else {
+		fh["limitPerMin"] = 60
+	}
+	yh := day("yahoo")
+	if c, _ := yh["calls"].(int); c > 0 {
+		yh["failRatePct"] = float64(yh["fail"].(int)) * 100 / float64(c)
+	}
+	var rows int
+	_ = s.store.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(rows_fetched), 0) FROM bargo_sync_runs WHERE date(started_at, 'unixepoch') = ?`, today).Scan(&rows)
+	return map[string]any{
+		"finnhub": fh,
+		"yahoo":   yh,
+		"bargo":   map[string]any{"rowsToday": rows, "rowsLimitPerDay": 1000},
+	}
 }
