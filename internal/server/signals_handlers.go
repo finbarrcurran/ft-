@@ -342,8 +342,8 @@ func (s *Server) handleRefreshCongress(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		if _, err := s.signals.IngestCongress(ctx); err != nil {
-			_ = err // IngestCongress already logs
+		if _, err := s.signals.RefreshCongress(ctx); err != nil {
+			_ = err // RefreshCongress already logs
 		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{

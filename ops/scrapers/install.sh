@@ -17,7 +17,7 @@ H=$(getent passwd "$U" | cut -d: -f6)
 install -d -m 755 -o "$U" -g "$U" "$H/logs" "$H/scripts"
 install -m 644 -o "$U" -g "$U" "$HERE"/farside-fetch.js "$HERE"/capitol-trades-fetch.js "$HERE"/package.json "$HERE"/package-lock.json "$H/scripts/"
 install -m 644 "$HERE/ft-farside-fetch.cron" /etc/cron.d/ft-farside-fetch
-install -m 644 "$HERE/ft-capitol-trades.cron" /etc/cron.d/ft-capitol-trades
+rm -f /etc/cron.d/ft-capitol-trades   # retired 2026-10-11: Congress data now comes from Bargo (SC-47)
 install -m 644 "$HERE/ft-scrapers.logrotate" /etc/logrotate.d/ft-scrapers
 
 usermod -aG ft "$U"
@@ -32,4 +32,4 @@ runuser -u "$U" -- npx --no-install playwright install chromium
 env "PATH=$PATH" npx --no-install playwright install-deps chromium
 echo "done. Run each job once by hand and read the log:"
 echo "  sudo -u $U bash -c 'cd ~/scripts && NODE_PATH=\$PWD/node_modules node farside-fetch.js'"
-echo "NOTE: capitoltrades.com answers 429 'Vercel Security Checkpoint' to automated clients since ~2026-08-14; that job is expected to log an error until a new source is chosen."
+echo "NOTE: the Capitol Trades cron is retired (site blocks automated clients); Congress data comes from Bargo inside FT (SC-47)."

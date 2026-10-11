@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.77.3 · 2026-10-11** — latest change: Statement-fallback fixes; scrapers restored (§13).
+> **Current version: v1.78.0 · 2026-10-11** — latest change: Bargo Congress feed, raw history, connectivity monitor (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.77.3 2026-10-11 -->
+<!-- reference_reviewed: v1.78.0 2026-10-11 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -37,7 +37,7 @@ Nineteen tabs, in nav order:
 | 3 | Crypto | 3, 9c, 12, SC-29 | Crypto holdings by wallet with classification (Core/Alt), current location, 12m vol, score; XLSX export |
 | 4 | Crypto Indicators | 9e, SC-20 | BTC-primary regime layer — Cowen 4-phase, Pal macro, ETF flows, F&G, stablecoin supply; indicator explainers |
 | 5 | Crypto Theses | 9l | 12-adapter repository + per-coin scored theses with lock / fork / cascade acknowledgement, and the crypto allocation table |
-| 6 | Signals | 9k, SC-23, SC-24 | Insider (SEC Form 4), Congress, executive-order, OGE 278-T, named political-figure tracker, 13F institutional tracker. Tab badge on alarms |
+| 6 | Signals | 9k, SC-23, SC-24 | Insider (SEC Form 4), Congress (Bargo feed, with a visible attribution line), executive-order, OGE 278-T, named political-figure tracker, 13F institutional tracker. Tab badge on alarms |
 | 7 | Performance | 9d, SC-17, SC-26, SC-30 | Leads with real eToro realised history (annual + YTD from statement imports), copy-vs-systematic split; closed-trade retrospective below. Hosts "Upload statement" and "Reconcile holdings" |
 | 8 | Screener | 9b, SC-21 | Stock screener ("+ watchlist") and the crypto market screener (CoinGecko top 250) |
 | 9 | Macro Regime & Sector Rotation | 9f, 9p | Macro regime band (growth × inflation, FRED-driven, playbook) above the 34-row sector taxonomy with multi-window returns, RS vs SPY, tag pills, weekly digest |
@@ -50,13 +50,13 @@ Nineteen tabs, in nav order:
 | 16 | News | 2 D6, 12 D10 | NewsAPI feed + stocks F&G chip + macro calendar cards |
 | 17 | Crypto News | 2 D6 | CryptoPanic feed + alternative.me F&G chip |
 | 18 | Registry | SC-28 | Document-control view of the methodology-notes registry and doctrine documents |
-| 19 | Settings | 3, 7, 9b, 9c, 9c.1, 11 | Portfolio risk dashboard, LLM spend dashboard, diagnostics + provider health, deleted-holdings restore, audit log, regime history |
+| 19 | Settings | 3, 7, 9b, 9c, 9c.1, 11 | Portfolio risk dashboard, LLM spend dashboard, diagnostics + provider health + connectivity monitor, deleted-holdings restore, audit log, regime history |
 
 Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills (Jordi / Cowen / Effective) · refresh status · refresh / import / save master / ⌘K palette / user / sign out.
 
 ## 3. Schema — every migration
 
-48 migrations applied (latest `0048_etoro_reconcile.sql`).
+49 migrations applied (latest `0049_bargo_congress_monitor.sql`).
 
 | # | File | Adds |
 |---|------|------|
@@ -107,6 +107,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0045 | `nexus` | SC-36 — `nexus_universe`, `nexus_ticker_map`, `nexus_technical`, `nexus_exhaustion`, `nexus_fundamentals` |
 | 0046 | `video_digest` | SC-43 — `video_sources` (seeded: jordi, cowen), `video_digests`, `video_mentions`, `video_quotes`, `video_frames`, `cowen_weekly_snapshot` |
 | 0047 | `etoro_sync` | SC-42 — `etoro_instruments`, `etoro_sync_runs`, `etoro_holdings_lots` (per-lot change history), `etoro_holdings_effective` (per ticker + direction) |
+| 0049 | `bargo_congress_monitor` | SC-47 — `congress_trades_raw` (every Congress trade ever received, unfiltered, unique on `source_key`), `bargo_sync_runs`, `monitor_state`, `monitor_events` |
 | 0048 | `etoro_reconcile` | SC-44 — `etoro_reconcile_proposals`; `amount_usd` on lots, `invested_usd` on effective, `values_updated` / `proposals_pending` on sync runs |
 
 **Holdings model, as it stands:** `stock_holdings` has no units column — it stores `invested_usd` and `avg_open_price` (in the listing's own currency); units live only in the eToro tables. Deletes are soft (`deleted_at`). Thesis links are `stock_holdings.thesis_link` (legacy URL) and `holding_theses` (in-app); both survive a soft-delete.
@@ -131,7 +132,8 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Weekly sector digest | Fri 22:00 | Top/bottom by RS, WoW movers → `sector_rotation_digests` |
 | AI Nexus daily | 22:30 | Universe + benchmark bars, Trend Score + Exhaustion |
 | AI Nexus weekly | Sun 22:45 | Forward PEG recompute |
-| Signals ingest | 23:00 / 23:10 / 23:20 | SEC Form 4 insiders (firehose + per-ticker), Congress, executive orders |
+| Signals ingest | 23:00 / 23:10 / 23:20 | SEC Form 4 insiders (firehose + per-ticker), Congress, executive orders. The 23:10 Congress step (SC-47) imports the legacy Capitol Trades file into `congress_trades_raw` once, syncs Bargo (a rolling window of recent transaction dates, 7-day slices; first run backfills 3 months; Sundays re-read 60 days because disclosures lag up to ~45 days), then turns recent raw rows into tiered `signal_events` |
+| Connectivity monitor | every 10 min (first run 5 min after start) | SC-47: reads each watched source's last success (`provider_health`, `bargo_sync_runs`, `etoro_sync_runs`, Farside file mtime, newest DB backup) and compares it with the silence that source is allowed (`internal/monitor/checks.go`). One Telegram message when a source goes stale, a reminder every 24 h while it stays stale, one on recovery; on first sight, already-stale sources are folded into a single "monitor is on" message. Known-dead feeds are flagged optional (shown, never alert). Alerts go straight to Telegram via `FT_TELEGRAM_BOT_TOKEN` / `FT_TELEGRAM_CHAT_ID`; with them unset events are recorded as undelivered |
 
 **On Jarvis, outside the FT process:**
 
@@ -143,7 +145,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | DB backup (cron, user `ft`) | 03:15 daily | `/opt/ft/bin/backup-db.sh` |
 | Jarvis config backup (cron) | Sun 03:30 | `/opt/ft/bin/backup-jarvis-config.sh` |
 | Whole-box backup (cron) | 03:30 daily | `jarvis_backup.sh` — restic to Backblaze B2 |
-| Capitol-trades fetch (cron, user `curran`) | 23:05 daily | Feeds the Congress signal ingest. **Blocked by the site** (429 "Vercel Security Checkpoint" since ~2026-08-14) — see §12. Logs to `~curran/logs/ft-capitol-trades.log` |
+| Capitol-trades fetch (cron) | **retired 2026-10-11** | Replaced by Bargo (SC-47). The `/etc/cron.d/ft-capitol-trades` entry was removed; `trades.json` (last written 2026-08-14) is kept only as history and was imported into `congress_trades_raw` |
 | Farside ETF-flow fetch (cron, user `curran`) | 00:25 daily | Playwright scraper → `/var/lib/ft/data/farside/etf-flow.json` (the Crypto Indicators ETF-flow chart reads it; the card falls back to a live fetch when it is older than 36 h). **Working again since 2026-10-11.** Logs to `~curran/logs/ft-farside-fetch.log`. Scripts, cron entries and installer in `ops/scrapers/` |
 | FT Telegram bot | see §6 | Proactive alert crons |
 
@@ -189,7 +191,7 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 
 **Thesis notes (Spec 11):** `GET/POST /api/notes` **T**, `PUT/DELETE /api/notes/{id}` **T**, `GET /api/notes/{stale,contradictions,resolve}` **T**
 
-**Diagnostics + lookup:** `GET /api/diagnostics` **T**, `GET /api/lookup/ticker?q=&kind=`
+**Diagnostics + lookup:** `GET /api/diagnostics` **T** (also returns the connectivity monitor: `monitor[]` per-source freshness, `monitorEvents[]` last 15 alerts, `monitorAlertsConfigured`), `GET /api/lookup/ticker?q=&kind=`
 
 **Sector rotation (9f):** `GET /api/sector-rotation/{metrics,sectors,digests}` **T**, `POST/DELETE /api/sector-rotation/ordering`, `POST /api/sector-rotation/refresh` **T**
 
@@ -257,6 +259,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 | Non-US stock quote | Yahoo (crumb dance) | — | Fragile; updates every few months |
 | Stock history (sparkline + 12m vol) | Yahoo `v8/chart` | — | 365-day window |
 | Stock fundamentals (beta, calendar, targets) | Yahoo `quoteSummary` | — | Patchy for non-US |
+| Congress trades | Bargo Congress API (`bargo.ai/free-apis/congress/v1`) | — | Free key (`FT_BARGO_API_KEY`, Bearer header): 100 requests + 1,000 rows/day, 250 rows/page; free tier serves only the last ~3 months, so FT keeps its own history in `congress_trades_raw`. Terms: visible attribution (Signals tab footer) and no bulk redistribution. A quota stop after some data is "partial", not a failure |
 | Broker positions, SL/TP, invested USD | eToro Public API (`public-api.etoro.com`) | manual `.xlsx` statement upload | Key pair in env; 60 req/60 s shared limit; one call per 30-min sync |
 | Crypto quote | CoinGecko `/simple/price` | serve-stale | Demo key via `FT_COINGECKO_API_KEY` (SC-18) |
 | Crypto history | CoinGecko `/market_chart` | — | Sequential w/ 2.5s gap |
@@ -277,7 +280,7 @@ All provider calls wrapped with `health.Record` (Spec 7) for diagnostics surfaci
 
 In `/etc/ft/env` (mode 0600, root:root). Names only — values never leave that file.
 
-**Set on Jarvis today:** `FT_FINNHUB_API_KEY`, `FT_TWELVEDATA_API_KEY`, `FT_GITHUB_TOKEN`, `FRED_API_KEY`, `NEWSAPI_API_KEY`, `FT_COINGECKO_API_KEY`, `FT_ANTHROPIC_API_KEY`, `FT_ETORO_API_KEY`, `FT_ETORO_USER_KEY`.
+**Set on Jarvis today:** `FT_FINNHUB_API_KEY`, `FT_TWELVEDATA_API_KEY`, `FT_GITHUB_TOKEN`, `FRED_API_KEY`, `NEWSAPI_API_KEY`, `FT_COINGECKO_API_KEY`, `FT_ANTHROPIC_API_KEY`, `FT_ETORO_API_KEY`, `FT_ETORO_USER_KEY`, `FT_BARGO_API_KEY` (SC-47). **Not yet set unless noted in §13:** `FT_TELEGRAM_BOT_TOKEN`, `FT_TELEGRAM_CHAT_ID` (needed by the connectivity monitor and the LLM budget alerts; the Telegram bot itself keeps its own copy in `/etc/ft-bot/env`).
 
 **eToro key pair — easy to swap by mistake:** `FT_ETORO_API_KEY` is the *Public Key* shown on eToro's settings page (sent as `x-api-key`); `FT_ETORO_USER_KEY` is the long key generated by "Create Your API Key" (sent as `x-user-key`). Swapped keys give a 401.
 
@@ -330,7 +333,7 @@ Current as of 2026-10-09:
 | SC-43 P2 | OCR of Cowen chart frames to fill the snapshot columns left NULL in P1 (200WMA, log band, dominance, ETH/BTC) | Not built |
 | SC-43 P3 / P4 | Regime read surfaced in the UI; digest query tool | Not built — `suggested_regime` / `regime_read` are stored but not exposed |
 | SC-04 batch automation | Thesis updates at scale | Parked pending Fin's decisions on model / scope / sourcing |
-| Cron scrapers (Farside, Capitol Trades) | Restore on the Lenovo, or replace | **Farside: fixed 2026-10-11** — the post-migration breakage had three independent causes: (1) cron logs pointed at `/var/log` (now `~curran/logs`); (2) `curran` could not reach/write `/var/lib/ft/data/{farside,capitol-trades}` (`curran` joined group `ft`, dirs `curran:ft` 2775 — `/var/lib/ft` itself stays 750 and `ft.db` is mode 644, so it is not opened to everyone); (3) Playwright and Chromium were not installed (`node_modules` and `~/.cache` are outside the backups; installed 2026-10-11, v1.60). All captured in `ops/scrapers/install.sh`; a logrotate rule keeps 8 weekly logs. **Capitol Trades is still blocked by the site:** since ~2026-08-14 it answers HTTP 429 / "Vercel Security Checkpoint" to automated clients, so `trades.json` is stale from 2026-08-14 and Congress signals end 2026-06-05; the scraper walks 25 pages and writes nothing if one fails. **Needs a new source or retirement.** Farside: the ETF-flow **card** stays live regardless (FT ignores a cache file older than 36 h and fetches directly), but the **chart** reads the cache file with no freshness check, so a stale file shows silently |
+| Cron scrapers (Farside) | Restore on the Lenovo, or replace | **Farside: fixed 2026-10-11** — the post-migration breakage had three independent causes: (1) cron logs pointed at `/var/log` (now `~curran/logs`); (2) `curran` could not reach/write `/var/lib/ft/data/{farside,capitol-trades}` (`curran` joined group `ft`, dirs `curran:ft` 2775 — `/var/lib/ft` itself stays 750 and `ft.db` is mode 644, so it is not opened to everyone); (3) Playwright and Chromium were not installed (`node_modules` and `~/.cache` are outside the backups; installed 2026-10-11, v1.60). All captured in `ops/scrapers/install.sh`; a logrotate rule keeps 8 weekly logs. **Capitol Trades: replaced by Bargo (SC-47, 2026-10-11)** — the cron was removed. Farside: the ETF-flow **card** stays live regardless (FT ignores a cache file older than 36 h and fetches directly), but the **chart** reads the cache file with no freshness check, so a stale file shows silently |
 | Manual eToro statement fallback | Retire or keep as break-glass | Kept (permanent break-glass). Fixed 2026-10-11: wallet scoping, live units, SU/SU.PA matching, audit rows (see §5). Remaining limit: a statement can't see partial closes (when live data exists it no longer proposes updates from the statement). Still open: the performance importer's handling of multi-year statements (whole statement attributed to the End-Date year), "Income from Refunds" in the Financial Summary, and its €-only reconciliation warning — ai to spec |
 | eToro crypto | First real eToro-held crypto position | Path is test-only; FT's EUR-based crypto refresh may recompute the USD cost fields SC-44 writes — check on first use |
 | `ft help` text | Bring the built-in usage text in line with §11 | Open, cosmetic |
@@ -349,13 +352,19 @@ Current as of 2026-10-09:
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.78.0 · 2026-10-11 · pass 75 · SC-47
+
+**Bargo Congress feed, raw history, connectivity monitor.** Congress trades now come from Bargo (free key; Capitol Trades cron retired) into a new unfiltered `congress_trades_raw` history table (migration 0049) that outlives Bargo's 3-month window; recent rows feed the Signals tab, which now carries Bargo's required attribution. A freshness monitor watches every external source (price APIs, Bargo, eToro sync, Farside, backups) and sends one Telegram alert per outage, a 24 h reminder and a recovery note; Diagnostics shows it. Needs `FT_TELEGRAM_*` in FT's env. Behaviour: yes. Migrations: 1. Reference updated: §2–5, §8, §9, §12. Supersedes v1.77.3.
+
 ### v1.77.3 · 2026-10-11 · pass 74 · SC-17
 
 **Statement-fallback fixes; scrapers restored.** The fallback now reconciles eToro-wallet crypto only, uses live SC-42 units (derived units only for USD listings, so no false RR.L/4063.T drift), matches `SU` to `SU.PA`, never applies a partial-close-blind statement over matching live data, and audits every applied change. The master-file import rejects eToro statements. Playwright installed; the Farside job works again (`ops/scrapers/`); Capitol Trades is still blocked by the site. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4, §5, §7, §12. Supersedes v1.77.2.
 
+
 ### v1.77.2 · 2026-10-10 · pass 73 · SC-44
 
 **Post-migration fixes.** SC-44's silent updates and approved adds/removals now write `holdings_audit` rows (actors `etoro-sync` / `fin`, no entry snapshot, so no fabricated closed trades); the six 2026-10-10 removals backfilled. Cron logs moved to `~curran/logs`; the Farside/Capitol jobs are still blocked (output-dir permissions, Playwright missing, Capitol Trades answers 429). Drive exporter moved into `ops/bridge/` with an installer. Behaviour: yes (audit only). Migrations/endpoints: none. Reference updated: §4, §7, §12. Supersedes v1.77.1.
+
 
 
 ### v1.77.1 · 2026-10-10 · pass 72 · SC-45
@@ -364,9 +373,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.0 · 2026-10-10 · pass 71 · SC-45
 
 **Spec restructured; history moved to an archive.** Working spec is now sections 1–12 + the 10 newest changes (§13), ~40k chars (was 409k); all 66 change-log entries and 97 old §13 rows moved byte-for-byte to `docs/spec-archive/` (`INDEX.md`; Drive `FT-Bridge/spec/archive/`). Behaviour: no. Migrations/endpoints: none. Reference updated: §4, §7, §10, §12. Binding: each bump = `tools/spec_archive.py bump` (short entry here, full entry to archive) + affected §1–12 + `reference_reviewed` + `check`; archive text never edited. Drive `FT-master-spec` is now the whole working spec. Supersedes v1.76.0.
+
 
 
 
@@ -378,9 +389,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.75.2 · 2026-10-06 · pass 69 · SC-17
 
 **Statement fallback excludes copy-trade lots; Stocks-tab entry point.** The statement can't mark copied opens, so a full-history upload proposed FIG, MSFT, UNH, UPS (copy-trades); position IDs SC-42 has seen as copy lots are now skipped and counted. Added "Reconcile with eToro statement" to the Stocks toolbar. Behaviour: yes (fallback only). Endpoint: `/api/etoro/reconcile/preview` gains `copySkipped`. No migration. Binding: copy-trade positions never become FT holdings by any route. Supersedes v1.75.1.
+
 
 
 
@@ -392,9 +405,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.75.0 · 2026-09-27 · pass 67 · SC-44
 
 **Automatic holdings reconcile from eToro.** After each SC-42 sync, matched holdings' eToro-owned values (`invested_usd` from eToro's own USD amount, `avg_open_price`) update silently; adds/removals queue in `etoro_reconcile_proposals` and apply only on approval (removals soft-delete, thesis kept). Crypto reconciles only against `wallet='eToro'`. Behaviour: yes. Migration 0048. Endpoints: `/api/etoro/reconcile/proposals{,/{id}/approve,/{id}/dismiss}`. Binding (Fin): eToro owns units/invested/avg; FT owns stop/TP, sl_method, notes, tags, thesis links; thesis-linked removal allowed on approval (differs from SC-17). Supersedes v1.74.1.
+
 
 
 
@@ -406,15 +421,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.74.0 · 2026-09-26 · pass 65 · SC-42
-
-**eToro direct sync: holdings and broker SL/TP.** FT polls eToro's Public API (key pair, every 30 min, no LLM) into per-lot change history and per-ticker effective levels (longs: highest stop, lowest take-profit; shorts mirrored). Behaviour: yes. Migration 0047. Endpoints: `GET/POST /api/etoro/sync`. Binding (Fin): eToro levels shown alongside FT's own SL/TP, alerts unchanged; copy-trade lots stored but excluded from levels; manual upload kept as fallback; an empty portfolio is treated as an API glitch. Supersedes v1.73.1.
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.77.3 -->
+<!-- END FT-master-spec v1.78.0 -->

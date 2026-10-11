@@ -19,6 +19,7 @@ import (
 	"ft/internal/cryptoindicators"
 	"ft/internal/cryptotheses"
 	"ft/internal/frameworks"
+	"ft/internal/monitor"
 	"ft/internal/health"
 	"ft/internal/llm"
 	"ft/internal/macro"
@@ -241,6 +242,10 @@ func runServe() {
 	// process shutdown.
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	defer bgCancel()
+
+	// SC-47 — connectivity monitor: one Telegram alert when an external source
+	// goes stale, a reminder every 24 h, and one when it recovers.
+	go (&monitor.Monitor{DB: st.DB, Checks: monitor.DefaultChecks(st.DB), Notify: &monitor.Telegram{}}).Run(bgCtx)
 	go func() {
 		t := time.NewTicker(1 * time.Hour)
 		defer t.Stop()
@@ -369,7 +374,8 @@ func runServe() {
 		scheduleAt(bgCtx, 23, 10, func() {
 			ctx, cancel := context.WithTimeout(bgCtx, 10*time.Minute)
 			defer cancel()
-			inserted, err := sigSvc.IngestCongress(ctx)
+			// SC-47 — Bargo feed into the raw history table, then signals.
+			inserted, err := sigSvc.RefreshCongress(ctx)
 			if err != nil {
 				slog.Error("signals: congress ingest", "err", err)
 			}

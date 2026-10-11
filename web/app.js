@@ -5499,6 +5499,29 @@ function renderDiagnosticsSection(d) {
     ? `<div class="diag-warn">⚠ ${missing.length} exchange${missing.length === 1 ? '' : 's'} have no holidays defined for ${hols[0]?.year}. Refresh JSON files in <code>internal/marketdata/holidays/</code>.</div>`
     : '';
 
+  // SC-47 — connectivity monitor (freshness vs allowed silence, per source).
+  const monRows = (d.monitor || []).map(m => {
+    const tone = m.status === 'ok' ? 'gain' : (m.status === 'down' ? 'loss' : 'dim');
+    const pill = m.status === 'ok' ? '✓ ok' : (m.status === 'down' ? '❌ stale' : '— stale (not alerting)');
+    const last = m.ageSec != null ? fmtAgo(m.ageSec) : 'never';
+    const allowed = m.maxAgeSec >= 86400 ? `${Math.round(m.maxAgeSec / 86400)}d` : `${Math.round(m.maxAgeSec / 3600)}h`;
+    const det = m.detail ? `<div class="diag-err">${escapeHTML(m.detail)}</div>` : '';
+    return `<tr><td><strong>${escapeHTML(m.label)}</strong></td><td><span class="${tone}">${pill}</span></td><td class="dim">${last}</td><td class="dim">${allowed}${det}</td></tr>`;
+  }).join('');
+  const monEvents = (d.monitorEvents || []).map(e =>
+    `<li><span class="dim">${new Date(e.ts * 1000).toLocaleString()}</span> · ${escapeHTML(e.kind)} · ${escapeHTML(e.source)}${e.delivered ? '' : ' <span class="amber-text">(not delivered)</span>'}</li>`
+  ).join('');
+  const monAlerts = d.monitorAlertsConfigured
+    ? '<span class="gain">✓ Telegram alerts on</span>'
+    : '<span class="loss">⚠ Telegram not configured for FT (FT_TELEGRAM_BOT_TOKEN / FT_TELEGRAM_CHAT_ID missing) — nothing is being sent</span>';
+  const monitorHTML = d.monitor ? `
+      <h4 class="diag-h4">Connectivity monitor <span class="dim" style="font-size:0.78rem; font-weight:normal">${monAlerts}</span></h4>
+      <div class="tablewrap"><table class="holdings"><thead><tr>
+        <th>Source</th><th>Status</th><th>Last success</th><th>Allowed silence</th>
+      </tr></thead><tbody>${monRows}</tbody></table></div>
+      ${monEvents ? `<ul class="diag-kv" style="margin-top:0.5rem">${monEvents}</ul>` : ''}
+  ` : '';
+
   return `
     <section class="settings-block">
       <h3 class="settings-h3" style="display:flex; justify-content:space-between; align-items:center">
@@ -5526,6 +5549,8 @@ function renderDiagnosticsSection(d) {
           </table>
         </div>
       </div>
+
+      ${monitorHTML}
 
       <h4 class="diag-h4">Provider health</h4>
       <div class="tablewrap"><table class="holdings"><thead><tr>
@@ -9951,7 +9976,7 @@ async function renderSignals() {
           <summary class="dim" style="font-size:0.78rem;cursor:pointer">individual triggers</summary>
           <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
             <button class="btn-ghost" id="signals-refresh"            title="SEC EDGAR Form 4">⟳ Insiders</button>
-            <button class="btn-ghost" id="signals-refresh-congress"   title="House + Senate Stock Watcher">⟳ Congress</button>
+            <button class="btn-ghost" id="signals-refresh-congress"   title="Bargo Congress feed">⟳ Congress</button>
             <button class="btn-ghost" id="signals-refresh-eo"         title="Federal Register">⟳ EO</button>
             <button class="btn-ghost" id="signals-refresh-committees" title="unitedstates/congress-legislators">⟳ Committees</button>
           </div>
@@ -9989,6 +10014,7 @@ async function renderSignals() {
 
       <div class="ci-footer dim">
         Spec 9k Phase A + B — insider + congressional + EO. SC-24 named-figure tracker (OGE 278-T + linked tickers + EO cross-link). Telegram routing ships in v1.12.0.
+        <br>Congress data: <a href="https://www.bargo.ai/free-apis/congress" target="_blank" rel="noopener noreferrer">Bargo</a> (built from official House and Senate disclosures; informational only, not investment advice). Disclosures can lag trades by up to ~45 days.
       </div>
     </div>
   `;

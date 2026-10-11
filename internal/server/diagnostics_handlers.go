@@ -15,6 +15,9 @@
 package server
 
 import (
+	"context"
+	"database/sql"
+	"ft/internal/monitor"
 	"ft/internal/frameworks"
 	"ft/internal/marketdata"
 	"net/http"
@@ -33,11 +36,18 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	providers, _ := s.store.ListProviderHealth(r.Context())
 	out["providers"] = providers
 
+	// SC-47 — connectivity monitor: live freshness per external source, recent
+	// transitions, and whether Telegram delivery is configured.
+	mon := &monitor.Monitor{DB: s.store.DB, Checks: monitor.DefaultChecks(s.store.DB)}
+	out["monitor"] = mon.Snapshot(r.Context())
+	out["monitorEvents"] = recentMonitorEvents(r.Context(), s.store.DB)
+	out["monitorAlertsConfigured"] = os.Getenv("FT_TELEGRAM_BOT_TOKEN") != "" && os.Getenv("FT_TELEGRAM_CHAT_ID") != ""
+
 	// API key presence — no values, just bools.
 	keys := []string{
 		"FT_FINNHUB_API_KEY", "FT_TWELVEDATA_API_KEY",
 		"NEWSAPI_API_KEY", "CRYPTOPANIC_API_KEY",
-		"FT_ANTHROPIC_API_KEY", "FT_COINGECKO_API_KEY",
+		"FT_ANTHROPIC_API_KEY", "FT_COINGECKO_API_KEY", "FT_BARGO_API_KEY",
 		"FT_TELEGRAM_BOT_TOKEN", "FT_TELEGRAM_CHAT_ID",
 	}
 	apiKeys := make([]map[string]any, 0, len(keys))
@@ -168,6 +178,27 @@ func holidayCoverage(year int) []map[string]any {
 			"year":     year,
 			"count":    count,
 		})
+	}
+	return out
+}
+
+// recentMonitorEvents returns the last 15 connectivity transitions/alerts.
+func recentMonitorEvents(ctx context.Context, db *sql.DB) []map[string]any {
+	out := []map[string]any{}
+	rows, err := db.QueryContext(ctx, `
+		SELECT ts, source, kind, COALESCE(detail,''), delivered
+		  FROM monitor_events ORDER BY id DESC LIMIT 15`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ts int64
+		var src, kind, detail string
+		var delivered int
+		if rows.Scan(&ts, &src, &kind, &detail, &delivered) == nil {
+			out = append(out, map[string]any{"ts": ts, "source": src, "kind": kind, "detail": detail, "delivered": delivered == 1})
+		}
 	}
 	return out
 }
