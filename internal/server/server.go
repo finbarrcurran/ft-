@@ -17,6 +17,7 @@ import (
 	"ft/internal/etorosync"
 	"ft/internal/llm"
 	"ft/internal/macroregime"
+	"ft/internal/oauth"
 	"ft/internal/nexus"
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
@@ -36,6 +37,9 @@ import (
 const sessionCookieName = "ft_session"
 
 type Server struct {
+	oauth            *oauth.Service                   // SC-41b OAuth server for the claude.ai connector (nil when FT_BASE_URL is unset)
+	loginFail        *oauth.Limiter                   // failed logins per client IP
+	loginAll         *oauth.Limiter                   // failed logins overall
 	cfg              *config.Config
 	store            *store.Store
 	refresh          *refresh.Service
@@ -81,6 +85,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 	s.videoDigest = videodigest.New(st.DB, llmSvc, os.Getenv("FT_VIDEO_DIGEST_ROOT")) // SC-43 P1
 	s.etoroSync = etorosync.New(st, os.Getenv("FT_ETORO_API_BASE"),
 		os.Getenv("FT_ETORO_API_KEY"), os.Getenv("FT_ETORO_USER_KEY")) // SC-42
+	s.initOAuth()
 	s.routes()
 	return s
 }
@@ -380,6 +385,12 @@ func (s *Server) routes() {
 	// SC-41 — Claude â FT MCP connector (read-only). Gated by requireReadToken,
 	// not requireUserOrToken â see middleware.go.
 	s.mountMCP()
+
+	// SC-41b — OAuth discovery, registration, authorize, token. Registered before the
+	// SPA catch-all so /.well-known/* and /register never return HTML.
+	if s.oauth != nil {
+		s.oauth.Mount(s.mux)
+	}
 
 	// Static frontend (catch-all; must be registered last).
 	s.mux.Handle("/", web.Handler())

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"ft/internal/auth"
+	"ft/internal/oauth"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -89,23 +90,41 @@ func (s *Server) requireReadToken(next http.HandlerFunc) http.HandlerFunc {
 		// debugging (a rejected request previously left zero trace; only a
 		// successful tool call logged anything, deep inside mcp_handlers.go).
 		log := slog.With("path", r.URL.Path, "method", r.Method, "remote", r.RemoteAddr, "ua", r.Header.Get("User-Agent"))
+		// SC-41b: a 401 must point the client at the OAuth metadata, or claude.ai
+		// cannot start the sign-in (it ignores the header on any other status).
+		unauth := func(reason, msg string) {
+			log.Info("mcp request rejected", "reason", reason)
+			if s.oauth != nil {
+				w.Header().Set("WWW-Authenticate", s.oauth.WWWAuthenticate())
+			}
+			writeError(w, http.StatusUnauthorized, msg)
+		}
 		hdr := r.Header.Get("Authorization")
 		if !strings.HasPrefix(hdr, "Bearer ") {
-			log.Info("mcp request rejected", "reason", "no bearer header")
-			writeError(w, http.StatusUnauthorized, "not authenticated")
+			unauth("no bearer header", "not authenticated")
 			return
 		}
 		token := strings.TrimSpace(strings.TrimPrefix(hdr, "Bearer "))
 		if token == "" {
-			log.Info("mcp request rejected", "reason", "empty bearer token")
-			writeError(w, http.StatusUnauthorized, "empty bearer token")
+			unauth("empty bearer token", "empty bearer token")
+			return
+		}
+		// OAuth access token (claude.ai connector) — read scope only, bound to this resource.
+		if s.oauth != nil && strings.HasPrefix(token, oauth.AccessPrefix) {
+			uid, ok := s.oauth.ValidateAccess(r.Context(), token)
+			if !ok {
+				unauth("invalid or expired oauth token", "invalid token")
+				return
+			}
+			log.Info("mcp request accepted", "auth", "oauth")
+			ctx := context.WithValue(r.Context(), ctxUserID, uid)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 		hash := auth.HashServiceToken(token)
 		st, userID, err := s.store.FindServiceTokenByHash(r.Context(), hash)
 		if err != nil {
-			log.Info("mcp request rejected", "reason", "invalid token")
-			writeError(w, http.StatusUnauthorized, "invalid token")
+			unauth("invalid token", "invalid token")
 			return
 		}
 		if !hasScope(st.Scopes, "read") {

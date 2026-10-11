@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.78.1 · 2026-10-11** — latest change: Drive library mirror and bridge alerting (§13).
+> **Current version: v1.79.0 · 2026-10-12** — latest change: OAuth for the claude.ai connector; login rate limiting (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.78.1 2026-10-11 -->
+<!-- reference_reviewed: v1.79.0 2026-10-11 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -56,7 +56,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 
 ## 3. Schema — every migration
 
-49 migrations applied (latest `0049_bargo_congress_monitor.sql`).
+50 migrations applied (latest `0050_oauth.sql`).
 
 | # | File | Adds |
 |---|------|------|
@@ -107,6 +107,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0045 | `nexus` | SC-36 — `nexus_universe`, `nexus_ticker_map`, `nexus_technical`, `nexus_exhaustion`, `nexus_fundamentals` |
 | 0046 | `video_digest` | SC-43 — `video_sources` (seeded: jordi, cowen), `video_digests`, `video_mentions`, `video_quotes`, `video_frames`, `cowen_weekly_snapshot` |
 | 0047 | `etoro_sync` | SC-42 — `etoro_instruments`, `etoro_sync_runs`, `etoro_holdings_lots` (per-lot change history), `etoro_holdings_effective` (per ticker + direction) |
+| 0050 | `oauth` | SC-41b — `oauth_clients`, `oauth_codes`, `oauth_tokens` (hashes only; refresh tokens rotate, families revoked on reuse) |
 | 0049 | `bargo_congress_monitor` | SC-47 — `congress_trades_raw` (every Congress trade ever received, unfiltered, unique on `source_key`), `bargo_sync_runs`, `monitor_state`, `monitor_events` |
 | 0048 | `etoro_reconcile` | SC-44 — `etoro_reconcile_proposals`; `amount_usd` on lots, `invested_usd` on effective, `values_updated` / `proposals_pending` on sync runs |
 
@@ -216,6 +217,8 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 
 **MCP connector (SC-41):** `/mcp` — JSON-RPC, bearer token whose scope contains `read` (minted with `ft token create-mcp`). Six read-only tools: `get_theses`, `get_scorecards`, `get_gap_report`, `get_alerts`, `get_performance`, `get_watchlist`. Each returns what the matching dashboard endpoint returns (same demo-mode gating) inside an envelope with `queriedAt`. No write tool exists.
 
+**OAuth for the claude.ai connector (SC-41b, v1.79.0):** `/mcp` also accepts an OAuth access token (`ft_oat_…`, 1 h, scope `read`, bound to `https://ft.curranhouse.dev/mcp`) issued by FT's own single-user OAuth 2.1 server, because the claude.ai connector dialog has no field for a static bearer. Routes (no cookie; each authenticates itself): `GET /.well-known/oauth-protected-resource[/…]` (RFC 9728), `GET /.well-known/oauth-authorization-server` (RFC 8414), `POST /register` (RFC 7591; redirect URIs limited to `https://claude.ai/api/mcp/auth_callback` and loopback; 50-client cap, 10 registrations/h/IP), `GET|POST /authorize` (Fin approves with his FT email + password; PKCE S256 required; single-use code, 60 s), `POST /token` (form-encoded; 1 h access tokens, rotating 30-day refresh tokens; a re-presented spent refresh token revokes its family and alerts). An unauthenticated `/mcp` call now answers 401 with `WWW-Authenticate: Bearer resource_metadata=…, scope="read"`; unknown `/.well-known/*` paths return JSON 404 (they used to return the SPA page). **Login hardening (same release):** `POST /api/auth/login` and `/authorize` share a limiter — 5 failed attempts per client IP per 15 min and 30 overall per hour, then 429 with `Retry-After`, never a permanent lock; failures are logged and the first lockout sends a Telegram alert. The static `ft_mcp_` tokens keep working. Kill switches: `ft oauth revoke-all`, `ft oauth revoke-client`, `ft token revoke`; Diagnostics shows client and sign-in counts. **Cloudflare:** FT cannot apply the recommended WAF rule itself (no API token); it must be set in the dashboard (restrict `/mcp`, `/token`, `/register`, `/.well-known/*` to `160.79.104.0/21`, and rate-limit `/api/auth/login`).
+
 ## 6. FT Telegram bot
 
 *(carried over — the service is running; commands and schedules were not re-verified in the 2026-10-09 pass.)*
@@ -319,10 +322,12 @@ ft video-digest-reground                  SC-43 re-ground stored digest timestam
 ft token create --user-id N --name X      mint a bearer token (plaintext shown once)
 ft token create-mcp ...                   mint a read-scoped token for the MCP connector (SC-41)
 ft token list                             list tokens (no plaintext)
+ft token revoke --id N [--user-id N]      revoke a service token
+ft oauth status | revoke-all | revoke-client --id ID | create-client [--name N] [--redirect URI] [--secret]   SC-41b OAuth sign-ins
 ft help
 ```
 
-`ft help`'s built-in text is older than this list — it omits the `nexus-*`, `video-digest-reground` and `token create-mcp` commands.
+`ft help` was brought in line with this list in v1.79.0.
 
 ## 12. What's deferred — known queue
 
@@ -353,13 +358,19 @@ Current as of 2026-10-09:
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.79.0 · 2026-10-12 · pass 77 · SC-41b
+
+**OAuth for the claude.ai connector; login rate limiting.** FT now runs its own single-user OAuth 2.1 server (discovery, registration, authorize with Fin's password, token with PKCE and rotating refresh tokens) so claude.ai can connect to `/mcp` with the URL alone; the 401 carries the OAuth discovery header and `/.well-known/*` no longer returns the SPA page. Login and authorize are now rate limited (5 failures per IP per 15 min) with a Telegram alert; migration 0050; `ft oauth` and `ft token revoke` commands; `ft help` aligned. Behaviour: yes. Migrations: 1. Reference updated: §3, §5, §11. Supersedes v1.78.1.
+
 ### v1.78.1 · 2026-10-11 · pass 76 · SC-47
 
 **Drive library mirror and bridge alerting.** The research library (specs incl. the 9l chain, handovers, scoring logs, crypto adapters and theses) is mirrored one-way to Drive `FT-Bridge/library/` every 10 minutes (changed docs only), with an INDEX of freshness and two DB-generated live tallies. Both Drive mirrors now report success to the connectivity monitor, so a failing mirror alerts over Telegram. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.78.0.
 
+
 ### v1.78.0 · 2026-10-11 · pass 75 · SC-47
 
 **Bargo Congress feed, raw history, connectivity monitor.** Congress trades now come from Bargo (free key; Capitol Trades cron retired) into a new unfiltered `congress_trades_raw` history table (migration 0049) that outlives Bargo's 3-month window; recent rows feed the Signals tab, which now carries Bargo's required attribution. A freshness monitor watches every external source (price APIs, Bargo, eToro sync, Farside, backups) and sends one Telegram alert per outage, a 24 h reminder and a recovery note; Diagnostics shows it. Needs `FT_TELEGRAM_*` in FT's env. Behaviour: yes. Migrations: 1. Reference updated: §2–5, §8, §9, §12. Supersedes v1.77.3.
+
 
 
 ### v1.77.3 · 2026-10-11 · pass 74 · SC-17
@@ -368,9 +379,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.2 · 2026-10-10 · pass 73 · SC-44
 
 **Post-migration fixes.** SC-44's silent updates and approved adds/removals now write `holdings_audit` rows (actors `etoro-sync` / `fin`, no entry snapshot, so no fabricated closed trades); the six 2026-10-10 removals backfilled. Cron logs moved to `~curran/logs`; the Farside/Capitol jobs are still blocked (output-dir permissions, Playwright missing, Capitol Trades answers 429). Drive exporter moved into `ops/bridge/` with an installer. Behaviour: yes (audit only). Migrations/endpoints: none. Reference updated: §4, §7, §12. Supersedes v1.77.1.
+
 
 
 
@@ -383,9 +396,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.0 · 2026-10-10 · pass 71 · SC-45
 
 **Spec restructured; history moved to an archive.** Working spec is now sections 1–12 + the 10 newest changes (§13), ~40k chars (was 409k); all 66 change-log entries and 97 old §13 rows moved byte-for-byte to `docs/spec-archive/` (`INDEX.md`; Drive `FT-Bridge/spec/archive/`). Behaviour: no. Migrations/endpoints: none. Reference updated: §4, §7, §10, §12. Binding: each bump = `tools/spec_archive.py bump` (short entry here, full entry to archive) + affected §1–12 + `reference_reviewed` + `check`; archive text never edited. Drive `FT-master-spec` is now the whole working spec. Supersedes v1.76.0.
+
 
 
 
@@ -401,9 +416,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.75.2 · 2026-10-06 · pass 69 · SC-17
 
 **Statement fallback excludes copy-trade lots; Stocks-tab entry point.** The statement can't mark copied opens, so a full-history upload proposed FIG, MSFT, UNH, UPS (copy-trades); position IDs SC-42 has seen as copy lots are now skipped and counted. Added "Reconcile with eToro statement" to the Stocks toolbar. Behaviour: yes (fallback only). Endpoint: `/api/etoro/reconcile/preview` gains `copySkipped`. No migration. Binding: copy-trade positions never become FT holdings by any route. Supersedes v1.75.1.
+
 
 
 
@@ -419,17 +436,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.75.0 · 2026-09-27 · pass 67 · SC-44
-
-**Automatic holdings reconcile from eToro.** After each SC-42 sync, matched holdings' eToro-owned values (`invested_usd` from eToro's own USD amount, `avg_open_price`) update silently; adds/removals queue in `etoro_reconcile_proposals` and apply only on approval (removals soft-delete, thesis kept). Crypto reconciles only against `wallet='eToro'`. Behaviour: yes. Migration 0048. Endpoints: `/api/etoro/reconcile/proposals{,/{id}/approve,/{id}/dismiss}`. Binding (Fin): eToro owns units/invested/avg; FT owns stop/TP, sl_method, notes, tags, thesis links; thesis-linked removal allowed on approval (differs from SC-17). Supersedes v1.74.1.
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.78.1 -->
+<!-- END FT-master-spec v1.79.0 -->

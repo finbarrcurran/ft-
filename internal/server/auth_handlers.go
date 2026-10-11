@@ -116,10 +116,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "email and password are required")
 		return
 	}
+	if s.loginBlocked(w, r) { // SC-41b: no more unlimited guessing
+		return
+	}
 	u, hash, err := s.store.FindUserByEmail(r.Context(), strings.TrimSpace(req.Email))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			// Always respond with the same message — don't leak which half is wrong.
+			s.loginFailed(r)
 			writeError(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
@@ -127,9 +131,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := auth.VerifyPassword(hash, req.Password); err != nil {
+		s.loginFailed(r)
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
+	s.loginFail.Reset(clientIP(r))
 	s.issueSession(w, r, u.ID)
 	s.store.TouchUserLastLogin(r.Context(), u.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"user": userToResp(u)})

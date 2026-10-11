@@ -69,9 +69,11 @@ docs = {}      # drive_path (with .md) -> text
 meta = {}      # drive_path -> dict(updated, commit, source)
 
 def header(path, repo_path, commit, cdate, note=""):
+    # No repo HEAD here: it would change on every commit and re-upload every document.
+    # The INDEX carries the HEAD; each file carries only its own last commit.
     return ("---\nft_library_file: %s\nsource: %s\nsource_commit: %s\nsource_commit_date: %s\n"
-            "repo: finbarrcurran/cross_sector_research (private), library HEAD %s\n%s---\n\n"
-            % (path, repo_path, commit, cdate, HEAD, note))
+            "repo: finbarrcurran/cross_sector_research (private)\n%s---\n\n"
+            % (path, repo_path, commit, cdate, note))
 
 for dp, rp, kind in entries:
     text = open(os.path.join(REPO, rp), encoding="utf-8", errors="replace").read()

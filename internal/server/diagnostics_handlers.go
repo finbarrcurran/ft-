@@ -43,6 +43,10 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	out["monitorEvents"] = recentMonitorEvents(r.Context(), s.store.DB)
 	out["monitorAlertsConfigured"] = os.Getenv("FT_TELEGRAM_BOT_TOKEN") != "" && os.Getenv("FT_TELEGRAM_CHAT_ID") != ""
 
+	if s.oauth != nil {
+		out["oauth"] = s.oauth.Status(r.Context())
+	}
+
 	// API key presence — no values, just bools.
 	keys := []string{
 		"FT_FINNHUB_API_KEY", "FT_TWELVEDATA_API_KEY",

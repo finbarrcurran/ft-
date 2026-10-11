@@ -11,6 +11,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 	"ft/internal/cryptotheses"
 	"ft/internal/frameworks"
 	"ft/internal/monitor"
+	"ft/internal/oauth"
 	"ft/internal/health"
 	"ft/internal/llm"
 	"ft/internal/macro"
@@ -82,6 +85,8 @@ func main() {
 		runNexusBackfill(os.Args[2:])
 	case "nexus-compute":
 		runNexusCompute(os.Args[2:])
+	case "oauth":
+		runOAuth(os.Args[2:])
 	case "video-digest-reground":
 		runVideoDigestReground()
 		return
@@ -157,12 +162,21 @@ USAGE
   ft serve                 run server (explicit)
   ft seed [--user-id N]    load Fin's real 23 stocks + 13 crypto into the DB
   ft daily [--user-id N]   run the Spec 3 D8/D10/D11 daily job once (sparklines + calendar + beta)
-  ft token create --user-id N --name NAME    mint a new ft_st_… service token
-  ft token list [--user-id N]                list service tokens (no plaintext)
+  ft token create --user-id N --name NAME      mint a new ft_st_… service token
+  ft token create-mcp --user-id N --name NAME  mint a read-only ft_mcp_… token (scopes=[read], for /mcp)
+  ft token list [--user-id N]                  list service tokens (no plaintext)
   ft backfill-bars [--user-id N] [--range 2y]  fetch 2y daily OHLC for all holdings (Spec 9c)
-  ft perf-derive [--user-id N]                  derive closed_trades + regen snapshots (Spec 9d)
-  ft sector-backfill [--months 14]              one-off Spec 9f 14-month ETF snapshot backfill
-  ft sector-ingest                              one Spec 9f daily sector ingest (manual trigger)
+  ft perf-derive [--user-id N]                 derive closed_trades + regen snapshots (Spec 9d)
+  ft sector-backfill [--months 14]             one-off Spec 9f 14-month ETF snapshot backfill
+  ft sector-ingest                             one Spec 9f daily sector ingest (manual trigger)
+  ft nexus-ingest --dir DIR [--as-of DATE]     ingest AI-Nexus .xlsx snapshots (SC-36)
+  ft nexus-backfill [--range 2y] [--gap-ms N]  fetch daily bars for the Nexus universe (SC-36)
+  ft nexus-compute [--as-of DATE]              compute Nexus Trend + Exhaustion (SC-36)
+  ft nexus-fundamentals [--as-of DATE]         snapshot Nexus Forward PEG fundamentals (SC-36)
+  ft video-digest-reground                     re-ground video-digest quotes against transcripts (SC-43)
+  ft token revoke --id N [--user-id N]         revoke a service token
+  ft oauth status | revoke-all | revoke-client --id ID | create-client --name N --redirect URI [--secret]
+                                               manage the claude.ai connector's OAuth sign-ins (SC-41b)
   ft help                  print this usage
 
 ENVIRONMENT
@@ -175,6 +189,10 @@ ENVIRONMENT
   FT_REFRESH_INTERVAL  background market refresh        (default 15m)
   NEWSAPI_API_KEY      optional, for stock news adapter
   CRYPTOPANIC_API_KEY  optional, for crypto news adapter
+  FT_BARGO_API_KEY     Bargo Congress feed key (SC-47; keyless works at a lower limit)
+  FT_TELEGRAM_BOT_TOKEN, FT_TELEGRAM_CHAT_ID   connectivity-monitor and LLM-budget alerts
+
+The full list of variables is in the master spec, section 9.
 `)
 }
 
@@ -863,6 +881,17 @@ func runToken(args []string) {
 		fmt.Println("pointed at https://ft.curranhouse.dev/mcp — it can reach ONLY /mcp's six")
 		fmt.Println("read tools, and is rejected with 403 on any write route elsewhere in FT.")
 		fmt.Println()
+	case "revoke":
+		fs := flag.NewFlagSet("token revoke", flag.ExitOnError)
+		userID := fs.Int64("user-id", 1, "user id who owns the token")
+		id := fs.Int64("id", 0, "token id (see `ft token list`)")
+		_ = fs.Parse(args)
+		if *id == 0 {
+			fmt.Fprintln(os.Stderr, "--id is required")
+			os.Exit(2)
+		}
+		must("revoke token", st.RevokeServiceToken(context.Background(), *userID, *id))
+		fmt.Printf("revoked token %d (user %d) at %s\n", *id, *userID, time.Now().UTC().Format(time.RFC3339))
 	case "list":
 		fs := flag.NewFlagSet("token list", flag.ExitOnError)
 		userID := fs.Int64("user-id", 1, "user id")
@@ -1135,4 +1164,65 @@ func runVideoDigestReground() {
 	must("reground", err)
 	fmt.Printf("digests %d | mentions %d (moved %d, no timestamp %d) | quotes %d (moved %d)\n",
 		res.Digests, res.Mentions, res.MentionsMoved, res.MentionsUngrounded, res.Quotes, res.QuotesMoved)
+}
+
+// runOAuth manages the SC-41b OAuth state (the claude.ai connector).
+func runOAuth(args []string) {
+	sub := "status"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	base := strings.TrimRight(cfg.BaseURL, "/")
+	svc := oauth.New(st.DB, oauth.Config{Issuer: base, Resource: base + "/mcp"}, nil, nil)
+	ctx := context.Background()
+
+	switch sub {
+	case "status":
+		s := svc.Status(ctx)
+		fmt.Printf("clients: %d   active sign-ins: %d\n", s.Clients, s.ActiveTokens)
+		if s.LastUsedUnix != nil {
+			fmt.Printf("last used: %s\n", time.Unix(*s.LastUsedUnix, 0).UTC().Format(time.RFC3339))
+		}
+	case "revoke-all":
+		n, err := svc.RevokeAll(ctx)
+		must("revoke", err)
+		fmt.Printf("revoked %d OAuth token(s) at %s\n", n, time.Now().UTC().Format(time.RFC3339))
+	case "revoke-client":
+		fs := flag.NewFlagSet("oauth revoke-client", flag.ExitOnError)
+		id := fs.String("id", "", "client id")
+		_ = fs.Parse(args)
+		if *id == "" {
+			fmt.Fprintln(os.Stderr, "--id is required")
+			os.Exit(2)
+		}
+		must("revoke client", svc.RevokeClient(ctx, *id))
+		fmt.Printf("revoked client %s and its tokens at %s\n", *id, time.Now().UTC().Format(time.RFC3339))
+	case "create-client":
+		fs := flag.NewFlagSet("oauth create-client", flag.ExitOnError)
+		name := fs.String("name", "claude.ai", "client name shown on the consent page")
+		redirect := fs.String("redirect", oauth.ClaudeCallback, "redirect URI")
+		withSecret := fs.Bool("secret", false, "also generate a client secret (for the connector dialog's optional field)")
+		_ = fs.Parse(args)
+		secret := ""
+		if *withSecret {
+			b := make([]byte, 24)
+			_, _ = rand.Read(b)
+			secret = hex.EncodeToString(b)
+		}
+		id, err := svc.RegisterClient(ctx, *name, []string{*redirect}, secret, "manual")
+		must("create client", err)
+		fmt.Println("client id    :", id)
+		if secret != "" {
+			fmt.Println("client secret:", secret, "(shown once; only the hash is stored)")
+		}
+	default:
+		fmt.Fprintln(os.Stderr, "usage: ft oauth status | revoke-all | revoke-client --id ID | create-client [--name N] [--redirect URI] [--secret]")
+		os.Exit(2)
+	}
 }
