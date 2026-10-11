@@ -100,6 +100,11 @@ func DefaultChecks(db *sql.DB) []Check {
 		// Cron-fed file: Farside ETF flows (nightly 00:25).
 		{Source: "farside", Label: "Farside ETF-flow file", MaxAge: 50 * h, Probe: fileProbe("/var/lib/ft/data/farside/etf-flow.json")},
 
+		// Google Drive bridge (SC-45 spec mirror, SC-47 library): the exporters touch a marker
+		// file on every successful run, including "nothing changed" runs (every 10 minutes).
+		{Source: "drive_spec", Label: "Drive spec mirror", MaxAge: 2 * h, Probe: fileProbe("/var/lib/ft/data/bridge/spec.ok")},
+		{Source: "drive_library", Label: "Drive library mirror", MaxAge: 2 * h, Probe: fileProbe("/var/lib/ft/data/bridge/library.ok")},
+
 		// Nightly DB backup (cron 03:15).
 		{Source: "db_backup", Label: "Nightly DB backup", MaxAge: 30 * h, Probe: fileProbe("/var/backups/ft/ft-*.db")},
 	}

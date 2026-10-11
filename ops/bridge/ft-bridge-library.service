@@ -1,0 +1,8 @@
+[Unit]
+Description=SC-47: mirror the FT research library to Google Drive (FT-Bridge/library)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ft-bridge-library

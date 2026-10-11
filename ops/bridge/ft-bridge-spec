@@ -25,7 +25,11 @@ sqlite3 -readonly "$DB" "SELECT writefile('$W/body.md', markdown_current) FROM s
 [ -s body.md ] || { echo "empty spec export — not uploading"; exit 1; }
 
 HASH=$( (echo "$VER"; cat body.md; cat "$ARCH"/*.md; sha256sum "$0") | sha256sum | cut -d' ' -f1)
+# Success marker for FT's connectivity monitor (touched on every good run, changed or not).
+OKDIR=/var/lib/ft/data/bridge
+mark_ok() { install -d -m 755 -o ft -g ft "$OKDIR"; touch "$OKDIR/spec.ok"; chown ft:ft "$OKDIR/spec.ok"; }
 if [ -f last.sha ] && [ "$(cat last.sha)" = "$HASH" ] && [ "${1:-}" != "--force" ]; then
+  mark_ok
   exit 0
 fi
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -113,4 +117,5 @@ chgrp -R "$RUSER" out; chmod 750 out/archive; chmod 640 out/*.txt out/archive/*.
 # created (drive.file), so this never touches anything else in the folder.
 runuser -u "$RUSER" -- rclone sync --drive-import-formats txt --drive-export-formats txt "$W/out" ftbridge:spec
 echo "$HASH" > last.sha
+mark_ok
 echo "uploaded FT spec v$VER at $NOW ($(find out -name '*.txt' | wc -l) docs)"

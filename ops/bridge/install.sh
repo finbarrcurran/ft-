@@ -10,13 +10,13 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 RUSER=${RUSER:-curran}                       # owns the rclone remote
 id "$RUSER" >/dev/null
 
-install -m 755 -o root -g root "$HERE/ft-bridge-spec" /usr/local/sbin/ft-bridge-spec
-install -m 644 "$HERE/ft-bridge-spec.service" "$HERE/ft-bridge-spec.timer" /etc/systemd/system/
+install -m 755 -o root -g root "$HERE/ft-bridge-spec" "$HERE/ft-bridge-library" /usr/local/sbin/
+install -m 644 "$HERE/ft-bridge-spec.service" "$HERE/ft-bridge-spec.timer" "$HERE/ft-bridge-library.service" "$HERE/ft-bridge-library.timer" /etc/systemd/system/
 install -d -m 755 -o "$RUSER" -g "$RUSER" "/home/$RUSER/scripts/ft_bridge"
 install -m 750 -o "$RUSER" -g "$RUSER" "$HERE"/user-scripts/*.sh "/home/$RUSER/scripts/ft_bridge/"
 systemctl daemon-reload
-systemctl enable --now ft-bridge-spec.timer
-echo "installed: /usr/local/sbin/ft-bridge-spec, ft-bridge-spec.{service,timer}, ~$RUSER/scripts/ft_bridge/*.sh"
+systemctl enable --now ft-bridge-spec.timer ft-bridge-library.timer
+echo "installed: /usr/local/sbin/ft-bridge-{spec,library}, ft-bridge-{spec,library}.{service,timer}, ~$RUSER/scripts/ft_bridge/*.sh"
 
 if runuser -u "$RUSER" -- rclone listremotes 2>/dev/null | grep -q '^ftbridge:$'; then
   echo "rclone remote 'ftbridge' is present for $RUSER — the mirror will upload on its next tick."

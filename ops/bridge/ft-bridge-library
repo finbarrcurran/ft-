@@ -1,0 +1,213 @@
+#!/bin/bash
+# SC-47 work order B/C — mirror the FT research library to Google Drive (FT-Bridge/library).
+# One-way (repo / DB -> Drive); Claude reads, never edits. Runs as root from
+# ft-bridge-library.timer (reads the FT DB and the research clone), then uploads as
+# curran, who owns the rclone remote (scope drive.file — never widened).
+#
+# Layout on Drive (all Google Docs imported from text, like FT-Bridge/spec):
+#   library/FT-library-INDEX              every file, last-updated, source commit, freshness vs repo HEAD
+#   library/specs/                        shipped specs incl. the 9l chain   (repo ft_specs/)
+#   library/handovers/                    build handovers, status docs        (repo handovers/)
+#   library/scoring/                      stock + crypto scoring logs, methodology registry, and the
+#                                         GENERATED live tallies (numbers of record, from the DB)
+#   library/crypto/                       crypto log; adapters/ and theses/  (repo crypto/)
+# FT-Bridge/spec/archive is a different folder and is never touched here.
+#
+# Change detection: a sha per staged document in $W/library.state; only changed documents are
+# uploaded, vanished ones deleted. Success touches /var/lib/ft/data/bridge/library.ok, which
+# FT's connectivity monitor watches (stale -> Telegram alert).
+set -euo pipefail
+# one run at a time (a first full upload takes minutes; the timer fires every 10)
+exec 9>/var/lock/ft-bridge-library.lock
+flock -n 9 || { echo "another library sync is running"; exit 0; }
+DB=/var/lib/ft/ft.db
+REPO=/var/lib/ft/research
+FTSRC=/opt/ft/src
+W=/var/lib/ft_bridge/library
+OKDIR=/var/lib/ft/data/bridge
+RUSER=curran
+[ -d "$REPO/.git" ] || { echo "research clone $REPO missing — not syncing"; exit 1; }
+install -d -m 750 -o root -g "$RUSER" /var/lib/ft_bridge "$W"
+GIT="git -c safe.directory=$REPO -C $REPO"
+HEAD=$($GIT rev-parse --short HEAD)
+
+rm -rf "$W/out" && install -d -m 750 -o root -g "$RUSER" "$W/out"
+REPO="$REPO" DB="$DB" FTSRC="$FTSRC" HEAD="$HEAD" W="$W" python3 - <<'PY'
+import os, re, sqlite3, subprocess, hashlib, datetime, json
+
+REPO, DB, FTSRC, HEAD, W = (os.environ[k] for k in ("REPO", "DB", "FTSRC", "HEAD", "W"))
+OUT = os.path.join(W, "out")
+now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+ESC = set("\\*_`#[]<>|!~{}")
+def esc_len(t): return len(t) + sum(1 for c in t if c in ESC)
+def git(*a, repo=REPO):
+    return subprocess.run(["git", "-c", f"safe.directory={repo}", "-C", repo, *a],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+# Which repo files go where. (folder on Drive, repo glob root, filter)
+SOURCES = [
+    ("specs",          "ft_specs",        lambda n: n.endswith(".md") and n.startswith("FT_")),
+    ("handovers",      "handovers",       lambda n: n.endswith(".md")),
+    ("crypto/adapters","crypto/adapters", lambda n: n.endswith(".md")),
+    ("crypto/theses",  "crypto/theses",   lambda n: n.endswith(".md")),
+]
+SCORING = [("scoring", "theses/_scoring_log.md"), ("scoring", "crypto/_crypto_scoring_log.md"),
+           ("scoring", "theses/_methodology_notes_registry.md"), ("crypto", "crypto/_crypto_scoring_log.md")]
+
+entries = []   # (drive_path, repo_path or None, kind)
+for folder, root, ok in SOURCES:
+    d = os.path.join(REPO, root)
+    if os.path.isdir(d):
+        for n in sorted(os.listdir(d)):
+            if ok(n):
+                entries.append((f"{folder}/{n}", f"{root}/{n}", "repo"))
+for folder, rp in SCORING:
+    if os.path.exists(os.path.join(REPO, rp)):
+        entries.append((f"{folder}/{os.path.basename(rp)}", rp, "repo"))
+
+docs = {}      # drive_path (with .md) -> text
+meta = {}      # drive_path -> dict(updated, commit, source)
+
+def header(path, repo_path, commit, cdate, note=""):
+    return ("---\nft_library_file: %s\nsource: %s\nsource_commit: %s\nsource_commit_date: %s\n"
+            "repo: finbarrcurran/cross_sector_research (private), library HEAD %s\n%s---\n\n"
+            % (path, repo_path, commit, cdate, HEAD, note))
+
+for dp, rp, kind in entries:
+    text = open(os.path.join(REPO, rp), encoding="utf-8", errors="replace").read()
+    commit, cdate = (git("log", "-1", "--format=%h|%cI", "--", rp).split("|") + ["", ""])[:2]
+    docs[dp] = header(dp, rp, commit or "uncommitted", cdate or "") + text
+    meta[dp] = dict(updated=cdate, commit=commit, source=rp)
+
+# ---------------------------------------------------------------- live tallies (generated, from the DB)
+con = sqlite3.connect("file:%s?mode=ro" % DB, uri=True)
+con.row_factory = sqlite3.Row
+spec_ver = (con.execute("SELECT current_version FROM sector_scorecards WHERE code='master-spec'").fetchone() or ["?"])[0]
+try:
+    ft_commit = git("rev-parse", "--short", "HEAD", repo=FTSRC)
+except Exception:
+    ft_commit = "unknown"
+
+def gen_header(name, what):
+    return ("---\nft_library_file: scoring/%s\nGENERATED — DO NOT EDIT. Numbers of record, produced from the live FT database by "
+            "the library exporter; the hand-written narrative logs stay in git.\nsource: %s\nft_spec_version: %s\nft_commit: %s\n"
+            "generated_at: %s\n---\n\n" % (name, what, spec_ver, ft_commit, now))
+
+def md_table(headers, rows):
+    out = ["| " + " | ".join(headers) + " |", "|" + "|".join("---" for _ in headers) + "|"]
+    for r in rows:
+        out.append("| " + " | ".join("" if v is None else str(v).replace("|", "/") for v in r) + " |")
+    return "\n".join(out)
+
+rows = con.execute("""SELECT ticker, company_name, adapter, sub_type, score, max_score, status, version, locked_date
+                        FROM theses_index ORDER BY adapter, ticker, version""").fetchall()
+cnt = {}
+for r in rows: cnt[r["status"]] = cnt.get(r["status"], 0) + 1
+st = "# FT stock thesis tally (live)\n\n"
+st += "**Totals:** " + ", ".join(f"{v} {k}" for k, v in sorted(cnt.items())) + f" — {len(rows)} rows in `theses_index`.\n\n"
+st += "Band is not stored for stock theses (only the score), so none is shown.\n\n## By adapter (locked rows)\n\n"
+by = {}
+for r in rows:
+    if r["status"] == "locked":
+        by.setdefault(r["adapter"], []).append(r)
+st += md_table(["adapter", "locked", "avg score", "min", "max"],
+               [(a, len(v), "%.1f" % (sum(x["score"] or 0 for x in v) / len(v)), min(x["score"] or 0 for x in v), max(x["score"] or 0 for x in v))
+                for a, v in sorted(by.items())]) + "\n\n## All theses\n\n"
+st += md_table(["ticker", "company", "adapter", "sub-type", "score", "status", "version", "locked", "superseded"],
+               [(r["ticker"], r["company_name"], r["adapter"], r["sub_type"],
+                 "%s/%s" % (r["score"], r["max_score"]) if r["score"] is not None else "—",
+                 r["status"], "v%s" % r["version"], r["locked_date"], "yes" if r["status"] == "superseded" else "")
+                for r in rows]) + "\n"
+docs["scoring/scoring_log_live.md"] = gen_header("scoring_log_live", "table theses_index") + st
+meta["scoring/scoring_log_live.md"] = dict(updated="generated", commit="DB", source="theses_index")
+
+crows = con.execute("""SELECT t.coin_symbol, t.coin_name, a.slug adapter, t.scorecard_type, t.total_score, t.max_score, t.band,
+                              t.status, t.version, t.pillar_pass_gate_failed ppg, t.active_veto, t.locked_at
+                         FROM crypto_theses t JOIN crypto_adapters a ON a.id = t.primary_adapter_id
+                        ORDER BY t.id""").fetchall()
+ccnt = {}
+for r in crows: ccnt[r["status"]] = ccnt.get(r["status"], 0) + 1
+bands = {}
+for r in crows: bands[r["band"]] = bands.get(r["band"], 0) + 1
+ct = "# FT crypto thesis tally (live)\n\n"
+ct += "**Totals:** " + ", ".join(f"{v} {k}" for k, v in sorted(ccnt.items())) + f" — {len(crows)} rows in `crypto_theses`.\n\n"
+ct += "**By band:** " + ", ".join(f"{k} {v}" for k, v in sorted(bands.items())) + "\n\n## Adapters\n\n"
+ct += md_table(["adapter", "status", "version", "scorecard"],
+               [(r["slug"], r["status"], r["current_version"], r["scorecard_type"])
+                for r in con.execute("SELECT slug,status,current_version,scorecard_type FROM crypto_adapters ORDER BY id")]) + "\n\n## By adapter (theses)\n\n"
+byc = {}
+for r in crows: byc.setdefault(r["adapter"], []).append(r)
+ct += md_table(["adapter", "theses", "avg score"],
+               [(a, len(v), "%.1f" % (sum(x["total_score"] for x in v) / len(v))) for a, v in sorted(byc.items())]) + "\n\n## All theses\n\n"
+ct += md_table(["symbol", "name", "adapter", "framework", "score", "band", "status", "version", "PPG failed", "veto", "locked"],
+               [(r["coin_symbol"], r["coin_name"], r["adapter"], r["scorecard_type"], "%s/%s" % (r["total_score"], r["max_score"]),
+                 r["band"], r["status"], r["version"], "yes" if r["ppg"] else "", r["active_veto"],
+                 datetime.datetime.fromtimestamp(r["locked_at"], datetime.timezone.utc).strftime("%Y-%m-%d") if r["locked_at"] else "")
+                for r in crows]) + "\n"
+docs["scoring/crypto_scoring_log_live.md"] = gen_header("crypto_scoring_log_live", "tables crypto_theses, crypto_adapters") + ct
+meta["scoring/crypto_scoring_log_live.md"] = dict(updated="generated", commit="DB", source="crypto_theses")
+
+# ---------------------------------------------------------------- INDEX (freshness vs repo HEAD)
+repo_date = git("log", "-1", "--format=%cI")
+idx = ("---\nft_library_file: FT-library-INDEX\ngenerated_at: %s\nrepo_head: %s (%s)\nft_spec_version: %s\nft_commit: %s\n---\n\n"
+       "# FT library — index\n\nOne-way copy (repo and database -> Drive); read only. `source_commit` is the last commit that touched "
+       "the file; compare `repo_head` with GitHub to check the library is current. Files marked GENERATED come straight from the "
+       "database and are the numbers of record.\n\n" % (now, HEAD, repo_date, spec_ver, ft_commit))
+folders = {}
+for dp in sorted(docs):
+    folders.setdefault(dp.rsplit("/", 1)[0], []).append(dp)
+for f in sorted(folders):
+    idx += "## library/%s/ (%d)\n\n" % (f, len(folders[f]))
+    idx += md_table(["file", "last updated", "source commit", "source"],
+                    [(dp.rsplit("/", 1)[1][:-3], meta[dp]["updated"], meta[dp]["commit"], meta[dp]["source"]) for dp in folders[f]]) + "\n\n"
+docs["FT-library-INDEX.md"] = idx
+meta["FT-library-INDEX.md"] = dict(updated=now, commit=HEAD, source="generated")
+
+TAIL = "[end of Drive copy — if this line is clipped, the content above is still complete]"
+state = {}
+for dp, text in docs.items():
+    text = text.rstrip("\n") + "\n\n" + TAIL + "\n"
+    p = os.path.join(OUT, dp[:-3] + ".txt")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    open(p, "w", encoding="utf-8").write(text)
+    if esc_len(text) > 90000:
+        print("WARN: %s is ~%s chars after escaping — may be cut off by the Drive reader" % (dp, format(esc_len(text), ",")))
+    # change detection ignores the generation timestamp
+    stable = re.sub(r"^generated_at: .*$", "", text, flags=re.M)
+    state[dp[:-3]] = hashlib.sha256(stable.encode()).hexdigest()
+json.dump(state, open(os.path.join(W, "new.state"), "w"), indent=0, sort_keys=True)
+print("staged %d documents" % len(state))
+PY
+chgrp -R "$RUSER" "$W/out"; find "$W/out" -type d -exec chmod 750 {} +; find "$W/out" -type f -exec chmod 640 {} +
+
+# Upload only what changed; delete what vanished. rclone sees only files it created (drive.file).
+RUN() { runuser -u "$RUSER" -- "$@"; }
+FORCE=0; [ "${1:-}" = "--force" ] && FORCE=1
+FORCE=$FORCE python3 - "$W" <<'PY' > "$W/plan.txt"
+import json, os, sys
+W = sys.argv[1]
+new = json.load(open(W + "/new.state"))
+old = json.load(open(W + "/library.state")) if os.path.exists(W + "/library.state") else {}
+force = os.environ.get("FORCE") == "1"
+for k, v in sorted(new.items()):
+    if force or old.get(k) != v: print("PUT", k)
+for k in sorted(set(old) - set(new)): print("DEL", k)
+PY
+PUTS=0; DELS=0; FAIL=0
+while read -r op name; do
+  [ -n "$op" ] || continue
+  if [ "$op" = PUT ]; then
+    # `copy` + --files-from (not `copyto`): rclone only strips the .txt of a converted Doc in directory mode.
+    d=$(dirname "$name"); b=$(basename "$name"); [ "$d" = "." ] && d=""
+    printf '%s\n' "$b.txt" > "$W/one.list"; chgrp "$RUSER" "$W/one.list"; chmod 640 "$W/one.list"
+    if RUN rclone copy --drive-import-formats txt --drive-export-formats txt --files-from "$W/one.list" "$W/out/$d" "ftbridge:library/$d" >>"$W/rclone.log" 2>&1; then PUTS=$((PUTS+1)); else FAIL=$((FAIL+1)); echo "upload failed: $name"; fi
+  else
+    # a vanished doc: Drive stores it without the .txt
+    if RUN rclone deletefile "ftbridge:library/$name" >>"$W/rclone.log" 2>&1; then DELS=$((DELS+1)); else FAIL=$((FAIL+1)); echo "delete failed: $name"; fi
+  fi
+done < "$W/plan.txt"
+if [ "$FAIL" -gt 0 ]; then echo "library sync: $FAIL failure(s) — state not advanced, will retry"; exit 1; fi
+mv "$W/new.state" "$W/library.state"
+install -d -m 755 -o ft -g ft "$OKDIR"
+touch "$OKDIR/library.ok"; chown ft:ft "$OKDIR/library.ok"
+echo "library synced at repo $HEAD: $PUTS uploaded, $DELS deleted ($(wc -l < "$W/library.state") docs tracked)"
