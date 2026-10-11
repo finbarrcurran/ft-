@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.79.0 · 2026-10-12** — latest change: OAuth for the claude.ai connector; login rate limiting (§13).
+> **Current version: v1.79.1 · 2026-10-12** — latest change: Decisions applied (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.79.0 2026-10-11 -->
+<!-- reference_reviewed: v1.79.1 2026-10-11 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -141,7 +141,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Job | Schedule | What |
 |-----|----------|------|
 | `ft-bridge-spec.timer` | every 10 min | SC-45: exports the working spec (live DB row) and the archive (`docs/spec-archive/`) to Google Drive (`FT-Bridge/spec`, `FT-Bridge/spec/archive`) when either changes. Source and installer in `ops/bridge/` (`sudo ops/bridge/install.sh`) |
-| `ft-bridge-library.timer` | every 10 min | SC-47: mirrors the research library to Google Drive `FT-Bridge/library/` (one-way, Claude reads only): `specs/` (repo `ft_specs/`), `handovers/`, `scoring/` (stock + crypto logs, methodology registry, and the GENERATED `scoring_log_live` / `crypto_scoring_log_live` tallies built from `theses_index` / `crypto_theses`), `crypto/` (log, `adapters/`, `theses/`) and `FT-library-INDEX` (per-file last-updated + source commit + repo HEAD). Uploads only documents whose content changed (so a thesis lock/upload or a DB change shows within 10 min); `flock` prevents overlap. Source `ops/bridge/ft-bridge-library`; both bridge exporters touch `/var/lib/ft/data/bridge/{spec,library}.ok` on success, which the connectivity monitor watches (stale > 2 h → Telegram) |
+| `ft-bridge-library.timer` | every 10 min | SC-47: mirrors the research library to Google Drive `FT-Bridge/library/` (one-way, Claude reads only): `specs/` (repo `ft_specs/`), `handovers/`, `theses/<adapter>/` (per-ticker locked stock theses, added v1.79.1), `scoring/` (stock + crypto logs, methodology registry, and the GENERATED `scoring_log_live` / `crypto_scoring_log_live` tallies built from `theses_index` / `crypto_theses`), `crypto/` (log, `adapters/`, `theses/`) and `FT-library-INDEX` (per-file last-updated + source commit + repo HEAD). Uploads only documents whose content changed (so a thesis lock/upload or a DB change shows within 10 min); `flock` prevents overlap. Source `ops/bridge/ft-bridge-library`; both bridge exporters touch `/var/lib/ft/data/bridge/{spec,library}.ok` on success, which the connectivity monitor watches (stale > 2 h → Telegram) |
 | `video-digest.timer` | Sun 20:00 + Mon 08:00 Europe/Dublin | SC-43 P0: fetches new Jordi/Cowen videos into `/var/lib/video_digest` |
 | `ft-backup.timer`, `ft-restore-verify.timer` | systemd timers | SC-37 backup / DR and restore verification |
 | DB backup (cron, user `ft`) | 03:15 daily | `/opt/ft/bin/backup-db.sh` |
@@ -358,18 +358,25 @@ Current as of 2026-10-09:
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.79.1 · 2026-10-12 · pass 78 · SC-47
+
+**Decisions applied.** AVGO and RR.L re-tagged, connector token #12 revoked, OpenClaw's dead FT skill retired; the eToro sync transaction is now `BEGIN IMMEDIATE` (fixes the intermittent `database is locked (517)`); the ETH thesis prose in the DB replaced by the amended original (scores unchanged); the unused legacy PPG gate removed; per-ticker stock theses added to the Drive library. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.79.0.
+
 ### v1.79.0 · 2026-10-12 · pass 77 · SC-41b
 
 **OAuth for the claude.ai connector; login rate limiting.** FT now runs its own single-user OAuth 2.1 server (discovery, registration, authorize with Fin's password, token with PKCE and rotating refresh tokens) so claude.ai can connect to `/mcp` with the URL alone; the 401 carries the OAuth discovery header and `/.well-known/*` no longer returns the SPA page. Login and authorize are now rate limited (5 failures per IP per 15 min) with a Telegram alert; migration 0050; `ft oauth` and `ft token revoke` commands; `ft help` aligned. Behaviour: yes. Migrations: 1. Reference updated: §3, §5, §11. Supersedes v1.78.1.
+
 
 ### v1.78.1 · 2026-10-11 · pass 76 · SC-47
 
 **Drive library mirror and bridge alerting.** The research library (specs incl. the 9l chain, handovers, scoring logs, crypto adapters and theses) is mirrored one-way to Drive `FT-Bridge/library/` every 10 minutes (changed docs only), with an INDEX of freshness and two DB-generated live tallies. Both Drive mirrors now report success to the connectivity monitor, so a failing mirror alerts over Telegram. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.78.0.
 
 
+
 ### v1.78.0 · 2026-10-11 · pass 75 · SC-47
 
 **Bargo Congress feed, raw history, connectivity monitor.** Congress trades now come from Bargo (free key; Capitol Trades cron retired) into a new unfiltered `congress_trades_raw` history table (migration 0049) that outlives Bargo's 3-month window; recent rows feed the Signals tab, which now carries Bargo's required attribution. A freshness monitor watches every external source (price APIs, Bargo, eToro sync, Farside, backups) and sends one Telegram alert per outage, a 24 h reminder and a recovery note; Diagnostics shows it. Needs `FT_TELEGRAM_*` in FT's env. Behaviour: yes. Migrations: 1. Reference updated: §2–5, §8, §9, §12. Supersedes v1.77.3.
+
 
 
 
@@ -380,9 +387,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.2 · 2026-10-10 · pass 73 · SC-44
 
 **Post-migration fixes.** SC-44's silent updates and approved adds/removals now write `holdings_audit` rows (actors `etoro-sync` / `fin`, no entry snapshot, so no fabricated closed trades); the six 2026-10-10 removals backfilled. Cron logs moved to `~curran/logs`; the Farside/Capitol jobs are still blocked (output-dir permissions, Playwright missing, Capitol Trades answers 429). Drive exporter moved into `ops/bridge/` with an installer. Behaviour: yes (audit only). Migrations/endpoints: none. Reference updated: §4, §7, §12. Supersedes v1.77.1.
+
 
 
 
@@ -397,9 +406,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.0 · 2026-10-10 · pass 71 · SC-45
 
 **Spec restructured; history moved to an archive.** Working spec is now sections 1–12 + the 10 newest changes (§13), ~40k chars (was 409k); all 66 change-log entries and 97 old §13 rows moved byte-for-byte to `docs/spec-archive/` (`INDEX.md`; Drive `FT-Bridge/spec/archive/`). Behaviour: no. Migrations/endpoints: none. Reference updated: §4, §7, §10, §12. Binding: each bump = `tools/spec_archive.py bump` (short entry here, full entry to archive) + affected §1–12 + `reference_reviewed` + `check`; archive text never edited. Drive `FT-master-spec` is now the whole working spec. Supersedes v1.76.0.
+
 
 
 
@@ -417,19 +428,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.75.2 · 2026-10-06 · pass 69 · SC-17
 
 **Statement fallback excludes copy-trade lots; Stocks-tab entry point.** The statement can't mark copied opens, so a full-history upload proposed FIG, MSFT, UNH, UPS (copy-trades); position IDs SC-42 has seen as copy lots are now skipped and counted. Added "Reconcile with eToro statement" to the Stocks toolbar. Behaviour: yes (fallback only). Endpoint: `/api/etoro/reconcile/preview` gains `copySkipped`. No migration. Binding: copy-trade positions never become FT holdings by any route. Supersedes v1.75.1.
 
-
-
-
-
-
-
-### v1.75.1 · 2026-09-27 · pass 68 · SC-17
-
-**Statement fallback guards against incomplete statements.** The upload is `.xlsx` only (CSV-only is the separate transactions import). A short-range statement rebuilt 0 holdings silently and would have proposed closing everything. The preview now checks the statement's dates against the oldest/newest open eToro lot; if incomplete, closure and drift rows are withheld server-side, with a banner. Behaviour: yes (fallback only). Endpoint: `preview` gains `coverage`. No migration. Binding: statements must run from account opening to today. Supersedes v1.75.0.
 
 
 
@@ -441,4 +444,4 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.79.0 -->
+<!-- END FT-master-spec v1.79.1 -->

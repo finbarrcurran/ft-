@@ -14,7 +14,7 @@
 //   - AdapterEnvelope (parsed JSON wrapper around crypto_adapters row)
 //   - ThesisEnvelope (parsed JSON wrapper around crypto_theses row)
 //   - KillCriterion (one row of an adapter's kill_criteria_json)
-//   - Computed-field helpers: ComputeBand, ComputePillarPassGate, ComputeDelta,
+//   - Computed-field helpers: ComputeBand, ComputeDelta,
 //     RecommendedActionFromDelta
 //   - Validate() methods that the API layer should call before INSERT/UPDATE
 
@@ -531,41 +531,6 @@ func ComputeBand(score int, sc ScorecardType) Band {
 	default:
 		return BandExit
 	}
-}
-
-// ComputePillarPassGate returns true if the pillar pass gate PASSES.
-// Per Spec 9l Decision #12:
-//   - For alts: Q1 >= 1, Q2 >= 1, Q6 >= 1, Q9 >= 1, no pillar = 0
-//   - For BTC: no formal pass gate defined; we apply "no pillar = 0" only
-//
-// A failed pass gate caps the band at next-step-down from Strong
-// (handled in the band-application layer, not here).
-func ComputePillarPassGate(scores PillarScores, sc ScorecardType) bool {
-	for _, v := range scores {
-		if v == 0 {
-			return false
-		}
-	}
-	if sc == ScorecardMonetary12 {
-		// "no pillar = 0" is the only formal BTC gate criterion.
-		return true
-	}
-	// alt_18 gate
-	for _, key := range []string{"Q1", "Q2", "Q6", "Q9"} {
-		if scores[key] < 1 {
-			return false
-		}
-	}
-	return true
-}
-
-// ApplyPassGate caps the band one step down if the gate failed and the
-// computed band is Strong. Other bands are unaffected.
-func ApplyPassGate(band Band, gatePassed bool) Band {
-	if gatePassed || band != BandStrong {
-		return band
-	}
-	return BandAccumulate
 }
 
 // ----- Delta + recommended action ---------------------------------------

@@ -338,7 +338,16 @@ func (s *Service) Sync(ctx context.Context) Result {
 		res.Error = ErrNotConfigured.Error()
 		return finish()
 	}
-	fail := func(err error) Result { res.Status, res.Error = "failed", err.Error(); return finish() }
+	// tx is the BEGIN IMMEDIATE transaction (opened below). It holds the write lock, so it
+	// must be rolled back BEFORE finish() writes the run row, or that write would wait on it.
+	var tx *immediateTx
+	fail := func(err error) Result {
+		if tx != nil {
+			tx.Rollback()
+		}
+		res.Status, res.Error = "failed", err.Error()
+		return finish()
+	}
 
 	var pf portfolioResp
 	if err := s.get(ctx, "/api/v1/trading/info/portfolio", &pf); err != nil {
@@ -375,8 +384,11 @@ func (s *Service) Sync(ctx context.Context) Result {
 	}
 
 	now := s.Now().Unix()
-	tx, err := s.DB.BeginTx(ctx, nil)
+	// BEGIN IMMEDIATE (see immediate.go): a deferred read-then-write transaction
+	// intermittently failed with "database is locked (517)".
+	tx, err = beginImmediate(ctx, s.DB)
 	if err != nil {
+		tx = nil
 		return fail(err)
 	}
 	defer tx.Rollback()
@@ -462,7 +474,7 @@ type openLot struct {
 	leverage   sql.NullFloat64
 }
 
-func openLots(ctx context.Context, tx *sql.Tx) (map[int64]openLot, error) {
+func openLots(ctx context.Context, tx queryer) (map[int64]openLot, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id, position_id, units, amount_usd, stop_loss, take_profit, is_tsl, leverage
 		FROM etoro_holdings_lots WHERE superseded_at IS NULL AND closed_at IS NULL`)
 	if err != nil {

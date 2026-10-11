@@ -11,6 +11,7 @@
 #   library/scoring/                      stock + crypto scoring logs, methodology registry, and the
 #                                         GENERATED live tallies (numbers of record, from the DB)
 #   library/crypto/                       crypto log; adapters/ and theses/  (repo crypto/)
+#   library/theses/<adapter>/             per-ticker stock theses, locked files (repo theses/<adapter>/)
 # FT-Bridge/spec/archive is a different folder and is never touched here.
 #
 # Change detection: a sha per staged document in $W/library.state; only changed documents are
@@ -61,6 +62,15 @@ for folder, root, ok in SOURCES:
         for n in sorted(os.listdir(d)):
             if ok(n):
                 entries.append((f"{folder}/{n}", f"{root}/{n}", "repo"))
+# Per-ticker stock theses (low priority; they sort last in the upload plan): theses/<adapter>/<TICKER>_vN_locked.md
+tdir = os.path.join(REPO, "theses")
+if os.path.isdir(tdir):
+    for ad in sorted(os.listdir(tdir)):
+        d = os.path.join(tdir, ad)
+        if os.path.isdir(d):
+            for n in sorted(os.listdir(d)):
+                if n.endswith("_locked.md"):
+                    entries.append((f"theses/{ad}/{n}", f"theses/{ad}/{n}", "repo"))
 for folder, rp in SCORING:
     if os.path.exists(os.path.join(REPO, rp)):
         entries.append((f"{folder}/{os.path.basename(rp)}", rp, "repo"))

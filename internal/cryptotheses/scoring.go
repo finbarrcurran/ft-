@@ -10,8 +10,12 @@
 //       otherwise round to nearest
 //   - v0.5.1 #4 tie-breaking convention (per v0.6.1 §A, locked retroactively
 //     2026-05-30 evening): round DOWN on exact 0.5/1.5 ties.
-//   - PPG cap (per Spec 9l §15): single one-band-below penalty if Q1/Q2/Q6/Q9 < 1
-//     OR if any pillar = 0. NOT stacked — multi-pillar failure = single cap.
+//   - PPG cap (per Spec 9l §15): any pillar scoring 0 drops the band ONE step, once
+//     (never below Exit; multi-pillar failure is still a single cap). Pillar scores are
+//     integers 0-2, so "Q1/Q2/Q6/Q9 < 1" means 0 and is already covered; the explicit
+//     Q-gate labels in ComputeRawAndFinalBand are audit labels only. (The legacy
+//     ComputePillarPassGate/ApplyPassGate pair, which only capped a Strong band, was
+//     removed 2026-10-11: it was never used by a write path.)
 //   - VETO trigger (per Spec 9l §20): forces band = Exit regardless of pillar math.
 //
 // The legacy ApplyV05Rounding helper in types.go is now wired to ComputePillarScore
