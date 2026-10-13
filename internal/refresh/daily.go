@@ -29,16 +29,16 @@ import (
 
 // DailyResult summarises a daily-job run.
 type DailyResult struct {
-	StartedAt        time.Time
-	FinishedAt       time.Time
-	StocksProcessed  int
-	StocksHistoryOK  int
-	CryptoProcessed  int
-	CryptoHistoryOK  int
-	CalendarOK       int
-	BetaOK           int
-	PrunedRows       int64
-	Errors           []string
+	StartedAt       time.Time
+	FinishedAt      time.Time
+	StocksProcessed int
+	StocksHistoryOK int
+	CryptoProcessed int
+	CryptoHistoryOK int
+	CalendarOK      int
+	BetaOK          int
+	PrunedRows      int64
+	Errors          []string
 }
 
 // RunDailyJob populates price_history for every active holding the user owns,
@@ -405,4 +405,3 @@ func annualizedVolPct(closes []float64, annualizationDays int) (float64, bool) {
 func logRatio(a, b float64) float64 {
 	return math.Log(a / b)
 }
-

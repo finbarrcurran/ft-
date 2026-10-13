@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"ft/internal/heatmap"
 	"ft/internal/market"
+	"ft/internal/marketdata"
 	"ft/internal/store"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -30,10 +32,56 @@ type Result struct {
 // Service holds the dependencies for a refresh run. New one per app instance.
 type Service struct {
 	Store *store.Store
+
+	hmMu sync.Mutex
+	hm   map[string]*hmState // per exchange: heatmap refresh bookkeeping
+}
+
+// hmState tracks when an exchange's heatmap tiles were last refreshed, and whether that
+// happened while it was open (so one final refresh after the close still captures the
+// closing prints).
+type hmState struct {
+	last      time.Time
+	whileOpen bool
 }
 
 func New(st *store.Store) *Service {
-	return &Service{Store: st}
+	return &Service{Store: st, hm: map[string]*hmState{}}
+}
+
+// heatmapInterval is the minimum gap between heatmap refreshes of an open exchange
+// (work order 2026-10-13: every 30 minutes, not every 15). Slightly under 30 min so the
+// 15-minute cycle's jitter never skips a whole extra cycle.
+const heatmapInterval = 28 * time.Minute
+
+// heatmapDue says whether an exchange's heatmap tiles should be refreshed now:
+//   - open: at most every 30 minutes;
+//   - closed: once after the close (to capture closing prints), then never until it opens;
+//   - never refreshed yet (startup): yes, so the heatmap is populated.
+// Closed exchanges keep their last live values untouched.
+func (s *Service) heatmapDue(exchange string, open bool, now time.Time) bool {
+	s.hmMu.Lock()
+	defer s.hmMu.Unlock()
+	st := s.hm[exchange]
+	if st == nil || st.last.IsZero() {
+		return true
+	}
+	if open {
+		return now.Sub(st.last) >= heatmapInterval
+	}
+	return st.whileOpen // closed: one final pass after having refreshed while open
+}
+
+func (s *Service) heatmapDone(exchange string, open bool, now time.Time) {
+	s.hmMu.Lock()
+	defer s.hmMu.Unlock()
+	st := s.hm[exchange]
+	if st == nil {
+		st = &hmState{}
+		s.hm[exchange] = st
+	}
+	st.last = now
+	st.whileOpen = open
 }
 
 // RefreshAll fetches FX → stocks → crypto and writes results back, all owned
@@ -134,12 +182,26 @@ func (s *Service) RefreshAll(ctx context.Context, userID int64) *Result {
 				heatmapOnly = append(heatmapOnly, tk)
 			}
 		}
-		if len(heatmapOnly) > 0 {
-			hmQuotes := market.FetchStockQuotesYahoo(ctx, heatmapOnly) // SC-48: Yahoo, not Finnhub (60/min)
+		// Market-hours aware, per exchange (marketdata.ExchangeForTicker / Status): open
+		// exchanges refresh every ~30 min, a closed one gets one last pass after the close,
+		// and otherwise keeps its previous live values.
+		now := time.Now()
+		byEx := map[string][]string{}
+		for _, tk := range heatmapOnly {
+			ex := marketdata.ExchangeForTicker(tk)
+			byEx[ex] = append(byEx[ex], tk)
+		}
+		for ex, tickers := range byEx {
+			open := marketdata.Status(ex, now).Open
+			if !s.heatmapDue(ex, open, now) {
+				continue
+			}
+			hmQuotes := market.FetchStockQuotesYahoo(ctx, tickers) // SC-48: Yahoo, not Finnhub (60/min)
 			for _, q := range hmQuotes {
 				heatmap.SetLiveQuote(q.Ticker, q.Price, q.ChangePct)
 				r.HeatmapUpdated++
 			}
+			s.heatmapDone(ex, open, now)
 		}
 	}
 

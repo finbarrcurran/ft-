@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.80.1 · 2026-10-13** — latest change: Scheduler fix (§13).
+> **Current version: v1.81.0 · 2026-10-13** — latest change: RSS cut-over, heatmap, theses (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.80.1 2026-10-11 -->
+<!-- reference_reviewed: v1.81.0 2026-10-11 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -263,7 +263,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 |--------|---------|----------|-------|
 | US stock quote (holdings) | Finnhub `/quote` | Yahoo | Free tier **60 calls/min** (read from the `x-ratelimit-*` response headers, shown in Diagnostics). FT gates calls ≥ 1.1 s apart with jitter, backs off 30 s on a 429, caches 5 min, collapses duplicate requests, and **skips tickers with an exchange suffix** (`.L .PA .DE .T`: not served by the free tier). A rejected or skipped ticker falls to Yahoo. |
 | Non-US stock quote | Yahoo (crumb dance) | — | Unofficial; fragile by nature |
-| Heatmap tiles (~80 S&P sample) | Yahoo (direct) | previous live values kept | Sequential, 150 ms apart; the batch stops after 5 consecutive failures. They no longer touch Finnhub (SC-48) |
+| Heatmap tiles (~80 S&P sample) | Yahoo (direct) | previous live values kept | Sequential, 150 ms apart; the batch stops after 5 consecutive failures. Refreshed **every ~30 minutes while the tile's exchange is open**, once more after the close (closing prints), and not at all while closed (`internal/refresh`, uses `marketdata.Status`); all 80 tiles are US, so this is the US session. They never touch Finnhub |
 | Stock history (sparkline + 12m vol) | Yahoo `v8/chart` | — | 365-day window |
 | Stock fundamentals (beta, calendar, targets) | Yahoo `quoteSummary` | — | Patchy for non-US |
 | ~~Twelve Data~~ | **retired 2026-10-12 (SC-48)** | | Its free plan is US-only and capped at 800 credits/day; FT spent ~3,400/day on it and every call failed (Yahoo supplied the data). No key use remains; the variable may stay in env unused |
@@ -276,7 +276,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 | FX EUR→USD | Frankfurter (`api.frankfurter.dev/v1`) | stored rate, then static 1.08 | No key; moved from `frankfurter.app` (v1.80.0) |
 | Stocks Fear & Greed | CNN `production.dataviz.cnn.io` | stale cache ≤ 6 h | Unofficial; answers HTTP 418 unless a cnn.com `Referer`/`Origin` is sent (sent since v1.80.0). Fragile: the daily warm-up alerts if it still fails |
 | Crypto Fear & Greed | alternative.me | stale cache | Stable |
-| News (stocks) | NewsAPI **or** free publisher RSS | stale cache | Switch `meta.market_news_source`: `newsapi` (default; Developer plan, 100 req/day, development-use terms) or `rss` (CNBC, MarketWatch, Nasdaq, BBC Business; no key; headline + source + link only). `/api/news/market?source=rss` previews RSS without switching. RSS candidates await Fin's approval |
+| News (stocks) | **Free publisher RSS** (cut over 2026-10-13) | stale cache | **Tier A (displayed):** CNBC Top News, BBC Business, Nasdaq Markets. **Tier B (backup, fetched every run so its health is measured, displayed only when < 2 tier-A feeds are healthy or < 10 tier-A items are under 24 h old):** MarketWatch Top Stories, The Guardian Business. No key. Headline, source, time, link out, plus the feed's own summary snippet (≤ ~200 chars) when it supplies one; no article body is fetched or stored. Merge deduped by URL and normalised title, newest first, per-feed attribution, a dead feed never blanks the tab; per-feed health `rss_market_<key>` in the monitor (one alert per outage names the feed). A feed can be dropped without a deploy: `meta.market_news_disabled_feeds` (comma-separated keys: cnbc, bbc, nasdaq, marketwatch, guardian). **NewsAPI is no longer called** (`meta.market_news_source` = `rss`; setting it back to `newsapi` re-enables the old path, kept for about two weeks, planned removal ~2026-10-27). Terms: see §13 entry |
 | News (crypto) | Publisher RSS (CoinDesk, Cointelegraph, The Block, Decrypt) | stale cache | No key. (CryptoPanic and CryptoCompare are no longer used; CryptoCompare's stale health row was removed) |
 | Sector ETFs | Yahoo daily closes | — | 36 ETFs × 1 call/day |
 | Insider / 13F filings | SEC EDGAR | — | Daily ingest; 13F on demand |
@@ -355,20 +355,26 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 | 9e (old numbering) | Correlation matrix tracking | **Not built** (no matrix code; the only correlation in FT is the score-vs-outcome calibration, SC-38). Original rationale (30+ positions) not re-checked |
 | 9h | Real-time technicals monitoring (Finnhub WebSocket level breaks) | **Not built** (no WebSocket code). Note Finnhub's free tier is rate-limited to 60 calls/min (§8) |
 | 9i | *(label corrected)* The repo spec `FT_Spec_9i` is "Three-Framework Integration Architecture v1 (draft)". The crypto scoring engine shipped as D25 (§3, §5); the stock-side status of 9i was **not verified** | Mixed; see note |
-| 16 | Alert strategy overhaul | **Not verified.** SC-35 (Percoco levels + alert intelligence, §5) shipped later and may have superseded part of it |
-| 13 (numbering collision) | "Test coverage" vs "Score automation engine" — rename one | **Not verified**; no spec file with either title exists in the repo |
+| 16 | Alert strategy overhaul | **Closed as unverified (2026-10-13):** no record of it in the archive or backlog; SC-35 (Percoco levels + alert intelligence, §5) shipped later. Reopen only if Fin names it |
+| 13 (numbering collision) | "Test coverage" vs "Score automation engine" — rename one | **Closed as unverified (2026-10-13):** the archive records Spec 13 = test coverage as shipped (v1.4, 2026-05-18); no second "Score automation engine" 13 exists in the archive, backlog or repo. The only numbering collision on record is SC-36 vs SC-40, resolved in v1.61.0 |
 
 ## 13. Recent changes and the archive
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.81.0 · 2026-10-13 · pass 81 · SC-48
+
+**RSS cut-over, heatmap, theses.** Market News now reads free publisher RSS (CNBC, BBC Business, Nasdaq as primary; MarketWatch and The Guardian as measured backups) with per-feed health; NewsAPI is no longer called. The heatmap tiles refresh every ~30 minutes while their market is open instead of every 15 around the clock. The six crypto theses with empty text were restored from their originals (scores unchanged). §12 rows 16 and 13 closed as unverified. Behaviour: yes. Migrations: none. Reference updated: §8, §12. Supersedes v1.80.1.
+
 ### v1.80.1 · 2026-10-13 · pass 80 · SC-47
 
 **Scheduler fix.** Four scheduled jobs had never run because `scheduleAt` blocked after the first job in each group: the Bargo/Congress ingest, the executive-order ingest, the quarterly legislator refresh and the weekly Nexus fundamentals. Each job now has its own goroutine, with a regression test. The Bargo alert was a true positive; the key, quota and monitor rule are fine. Behaviour: yes. Migrations: none. Reference updated: §4. Supersedes v1.80.0.
 
+
 ### v1.80.0 · 2026-10-12 · pass 79 · SC-48
 
 **Data-provider fixes.** Finnhub is rate-gated, cached and limited to US holdings; heatmap tiles use Yahoo; Twelve Data retired; CNN Fear & Greed works again (Referer fix); a daily warm-up keeps the request-driven feeds fresh and alerts if one fails; market-news RSS is built but not yet switched on; per-provider daily call counters and usage lines in Diagnostics; a startup alert for missing provider keys; budget-alert path tested. Behaviour: yes. Migrations: 1. Reference updated: §8, §12. Supersedes v1.79.1.
+
 
 
 ### v1.79.1 · 2026-10-12 · pass 78 · SC-47
@@ -377,9 +383,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.79.0 · 2026-10-12 · pass 77 · SC-41b
 
 **OAuth for the claude.ai connector; login rate limiting.** FT now runs its own single-user OAuth 2.1 server (discovery, registration, authorize with Fin's password, token with PKCE and rotating refresh tokens) so claude.ai can connect to `/mcp` with the URL alone; the 401 carries the OAuth discovery header and `/.well-known/*` no longer returns the SPA page. Login and authorize are now rate limited (5 failures per IP per 15 min) with a Telegram alert; migration 0050; `ft oauth` and `ft token revoke` commands; `ft help` aligned. Behaviour: yes. Migrations: 1. Reference updated: §3, §5, §11. Supersedes v1.78.1.
+
 
 
 
@@ -392,9 +400,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.78.0 · 2026-10-11 · pass 75 · SC-47
 
 **Bargo Congress feed, raw history, connectivity monitor.** Congress trades now come from Bargo (free key; Capitol Trades cron retired) into a new unfiltered `congress_trades_raw` history table (migration 0049) that outlives Bargo's 3-month window; recent rows feed the Signals tab, which now carries Bargo's required attribution. A freshness monitor watches every external source (price APIs, Bargo, eToro sync, Farside, backups) and sends one Telegram alert per outage, a 24 h reminder and a recovery note; Diagnostics shows it. Needs `FT_TELEGRAM_*` in FT's env. Behaviour: yes. Migrations: 1. Reference updated: §2–5, §8, §9, §12. Supersedes v1.77.3.
+
 
 
 
@@ -411,9 +421,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.2 · 2026-10-10 · pass 73 · SC-44
 
 **Post-migration fixes.** SC-44's silent updates and approved adds/removals now write `holdings_audit` rows (actors `etoro-sync` / `fin`, no entry snapshot, so no fabricated closed trades); the six 2026-10-10 removals backfilled. Cron logs moved to `~curran/logs`; the Farside/Capitol jobs are still blocked (output-dir permissions, Playwright missing, Capitol Trades answers 429). Drive exporter moved into `ops/bridge/` with an installer. Behaviour: yes (audit only). Migrations/endpoints: none. Reference updated: §4, §7, §12. Supersedes v1.77.1.
+
 
 
 
@@ -434,21 +446,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.77.0 · 2026-10-10 · pass 71 · SC-45
-
-**Spec restructured; history moved to an archive.** Working spec is now sections 1–12 + the 10 newest changes (§13), ~40k chars (was 409k); all 66 change-log entries and 97 old §13 rows moved byte-for-byte to `docs/spec-archive/` (`INDEX.md`; Drive `FT-Bridge/spec/archive/`). Behaviour: no. Migrations/endpoints: none. Reference updated: §4, §7, §10, §12. Binding: each bump = `tools/spec_archive.py bump` (short entry here, full entry to archive) + affected §1–12 + `reference_reviewed` + `check`; archive text never edited. Drive `FT-master-spec` is now the whole working spec. Supersedes v1.76.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.80.1 -->
+<!-- END FT-master-spec v1.81.0 -->

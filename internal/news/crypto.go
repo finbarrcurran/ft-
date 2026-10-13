@@ -55,9 +55,10 @@ type rssChannel struct {
 	Items []rssItem `xml:"item"`
 }
 type rssItem struct {
-	Title   string `xml:"title"`
-	Link    string `xml:"link"`
-	PubDate string `xml:"pubDate"`
+	Title       string `xml:"title"`
+	Link        string `xml:"link"`
+	PubDate     string `xml:"pubDate"`
+	Description string `xml:"description"`
 }
 
 // pubDateFormats covers the variants RSS feeds actually emit.

@@ -25,23 +25,39 @@ const newsTTL = 60 * time.Minute
 //   4. If everything fails, return an empty feed with source="unconfigured".
 func (s *Server) handleMarketNews(w http.ResponseWriter, r *http.Request) {
 	// SC-48: the market-news source is switchable. `meta.market_news_source` = "newsapi"
-	// (default) or "rss" (free publisher feeds; NewsAPI is then never called).
+	// (the old default) or "rss" (free publisher feeds; NewsAPI is then never called).
 	// `?source=rss` previews the RSS feeds without switching or touching the cache.
+	// `meta.market_news_disabled_feeds` (comma-separated feed keys) drops a publisher.
+	rssFetch := func(ctx context.Context) ([]news.Article, error) {
+		return news.FetchMarketNewsRSS(ctx, s.disabledMarketFeeds(ctx))
+	}
 	if r.URL.Query().Get("source") == "rss" {
-		arts, err := news.FetchMarketNewsRSS(r.Context())
+		arts, err := rssFetch(r.Context())
 		if err != nil {
 			slog.Warn("market news rss preview", "err", err)
 		}
-		feed := news.Feed{Articles: arts, FetchedAt: time.Now().UTC(), Source: "rss"}
-		writeJSON(w, http.StatusOK, feed)
+		writeJSON(w, http.StatusOK, news.Feed{Articles: arts, FetchedAt: time.Now().UTC(), Source: "rss"})
 		return
 	}
 	if v, _ := s.store.GetMeta(r.Context(), "market_news_source"); v == "rss" {
-		s.handleNews(w, r, "market", "rss", news.FetchMarketNewsRSS)
+		s.handleNews(w, r, "market", "rss", rssFetch)
 		return
 	}
 	s.handleNews(w, r, "market", "newsapi", news.FetchMarketNews)
 }
+
+// disabledMarketFeeds reads the comma-separated feed keys switched off in meta.
+func (s *Server) disabledMarketFeeds(ctx context.Context) map[string]bool {
+	out := map[string]bool{}
+	v, _ := s.store.GetMeta(ctx, "market_news_disabled_feeds")
+	for _, k := range strings.Split(v, ",") {
+		if k = strings.TrimSpace(strings.ToLower(k)); k != "" {
+			out[k] = true
+		}
+	}
+	return out
+}
+
 func (s *Server) handleCryptoNews(w http.ResponseWriter, r *http.Request) {
 	s.handleNews(w, r, "crypto", "rss", news.FetchCryptoNews)
 }

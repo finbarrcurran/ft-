@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"database/sql"
+	"ft/internal/news"
 	"os"
 	"path/filepath"
 	"time"
@@ -73,7 +74,7 @@ func fileProbe(glob string) Probe {
 // shown in Diagnostics but never alert.
 func DefaultChecks(db *sql.DB) []Check {
 	const h = time.Hour
-	return []Check{
+	checks := []Check{
 		// Free-tier price/market APIs (called many times a day; the limits are
 		// tight, so a long silence — not individual 429s — is the signal).
 		{Source: "yahoo", Label: "Yahoo Finance (prices)", MaxAge: 12 * h, Probe: providerProbe(db, "yahoo")},
@@ -85,10 +86,10 @@ func DefaultChecks(db *sql.DB) []Check {
 		// 06:30 UTC warm-up (internal/server/warmup.go) keeps them fresh, so 36 h is the
 		// right allowance; before SC-48 they sat on a 72 h rule nobody satisfied.
 		{Source: "cnn_feargreed", Label: "CNN Fear & Greed", MaxAge: 36 * h, Probe: providerProbe(db, "cnn_feargreed")},
-		{Source: "newsapi", Label: "NewsAPI (market news)", MaxAge: 36 * h, Probe: providerProbe(db, "newsapi")},
 		{Source: "rss_crypto", Label: "Crypto RSS news", MaxAge: 36 * h, Probe: providerProbe(db, "rss_crypto")},
-		// Market-news RSS (SC-48): optional until the switch `market_news_source` = rss is flipped.
-		{Source: "rss_market", Label: "Market-news RSS", MaxAge: 36 * h, Optional: true, Probe: providerProbe(db, "rss_market")},
+		// Market news (RSS cut-over 2026-10-13; NewsAPI is no longer called or monitored).
+		// Tier A feeds are displayed and alert on their own; tier B feeds are a measured
+		// backup (optional: shown, never alert). One alert per outage names the feed.
 
 		// Congress feed (SC-47): daily 23:10 UTC sync. A quota stop with data
 		// stored is 'partial' and still counts as a success.
@@ -110,4 +111,18 @@ func DefaultChecks(db *sql.DB) []Check {
 		// Nightly DB backup (cron 03:15).
 		{Source: "db_backup", Label: "Nightly DB backup", MaxAge: 30 * h, Probe: fileProbe("/var/backups/ft/ft-*.db")},
 	}
+	return append(checks, marketFeedChecks(db)...)
 }
+
+// marketFeedChecks adds one check per market-news RSS feed (tier A alert, tier B optional).
+func marketFeedChecks(db *sql.DB) []Check {
+	var out []Check
+	for _, f := range news.MarketFeedList() {
+		out = append(out, Check{
+			Source: "rss_market_" + f.Key, Label: f.Name + " (market news RSS)", MaxAge: 36 * time.Hour,
+			Optional: f.Tier != "A", Probe: providerProbe(db, "rss_market_"+f.Key),
+		})
+	}
+	return out
+}
+
