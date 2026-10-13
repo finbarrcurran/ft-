@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.80.0 · 2026-10-12** — latest change: Data-provider fixes (§13).
+> **Current version: v1.80.1 · 2026-10-13** — latest change: Scheduler fix (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.80.0 2026-10-11 -->
+<!-- reference_reviewed: v1.80.1 2026-10-11 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -133,9 +133,10 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Weekly sector digest | Fri 22:00 | Top/bottom by RS, WoW movers → `sector_rotation_digests` |
 | AI Nexus daily | 22:30 | Universe + benchmark bars, Trend Score + Exhaustion |
 | AI Nexus weekly | Sun 22:45 | Forward PEG recompute |
-| Signals ingest | 23:00 / 23:10 / 23:20 | SEC Form 4 insiders (firehose + per-ticker), Congress, executive orders. The 23:10 Congress step (SC-47) imports the legacy Capitol Trades file into `congress_trades_raw` once, syncs Bargo (a rolling window of recent transaction dates, 7-day slices; first run backfills 3 months; Sundays re-read 60 days because disclosures lag up to ~45 days), then turns recent raw rows into tiered `signal_events` |
+| Signals ingest | 23:00 / 23:10 / 23:20 (+ quarterly legislators 02:00) | SEC Form 4 insiders (firehose + per-ticker), Congress, executive orders. The 23:10 Congress step (SC-47) imports the legacy Capitol Trades file into `congress_trades_raw` once, syncs Bargo (a rolling window of recent transaction dates, 7-day slices; first run backfills 3 months; Sundays re-read 60 days because disclosures lag up to ~45 days). **Before v1.80.1 only the 23:00 insider job ever ran** (see the scheduler note below), then turns recent raw rows into tiered `signal_events` |
 | Connectivity monitor | every 10 min (first run 5 min after start) | SC-47: reads each watched source's last success (`provider_health`, `bargo_sync_runs`, `etoro_sync_runs`, Farside file mtime, newest DB backup) and compares it with the silence that source is allowed (`internal/monitor/checks.go`). One Telegram message when a source goes stale, a reminder every 24 h while it stays stale, one on recovery; on first sight, already-stale sources are folded into a single "monitor is on" message. Known-dead feeds are flagged optional (shown, never alert). Alerts go straight to Telegram via `FT_TELEGRAM_BOT_TOKEN` / `FT_TELEGRAM_CHAT_ID`; with them unset events are recorded as undelivered |
 | Feed warm-up | 06:30 daily | SC-48: runs the real handlers for CNN Fear & Greed, crypto Fear & Greed, market news and crypto news once (same path as a user request, cache and stale fallback included) so request-driven feeds stay fresh; one Telegram alert naming any that still fail. Startup (30 s after boot): one Telegram alert naming any missing required provider variable (names only) |
+| Scheduler note | — | `scheduleAt` (cmd/ft/main.go) runs each job in its own goroutine since v1.80.1. It used to block, so in a goroutine that armed several jobs only the first ever fired: the Congress/Bargo ingest (23:10), the executive-order ingest (23:20), the quarterly legislator refresh (02:00) and the weekly Nexus fundamentals job (Sunday 22:45) had never run on schedule since v1.11.0 (Congress and EO data were only ever refreshed by manual buttons or one-off runs). A regression test arms three jobs in a row and requires all to fire |
 
 **On Jarvis, outside the FT process:**
 
@@ -361,13 +362,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.80.1 · 2026-10-13 · pass 80 · SC-47
+
+**Scheduler fix.** Four scheduled jobs had never run because `scheduleAt` blocked after the first job in each group: the Bargo/Congress ingest, the executive-order ingest, the quarterly legislator refresh and the weekly Nexus fundamentals. Each job now has its own goroutine, with a regression test. The Bargo alert was a true positive; the key, quota and monitor rule are fine. Behaviour: yes. Migrations: none. Reference updated: §4. Supersedes v1.80.0.
+
 ### v1.80.0 · 2026-10-12 · pass 79 · SC-48
 
 **Data-provider fixes.** Finnhub is rate-gated, cached and limited to US holdings; heatmap tiles use Yahoo; Twelve Data retired; CNN Fear & Greed works again (Referer fix); a daily warm-up keeps the request-driven feeds fresh and alerts if one fails; market-news RSS is built but not yet switched on; per-provider daily call counters and usage lines in Diagnostics; a startup alert for missing provider keys; budget-alert path tested. Behaviour: yes. Migrations: 1. Reference updated: §8, §12. Supersedes v1.79.1.
 
+
 ### v1.79.1 · 2026-10-12 · pass 78 · SC-47
 
 **Decisions applied.** AVGO and RR.L re-tagged, connector token #12 revoked, OpenClaw's dead FT skill retired; the eToro sync transaction is now `BEGIN IMMEDIATE` (fixes the intermittent `database is locked (517)`); the ETH thesis prose in the DB replaced by the amended original (scores unchanged); the unused legacy PPG gate removed; per-ticker stock theses added to the Drive library. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.79.0.
+
 
 
 ### v1.79.0 · 2026-10-12 · pass 77 · SC-41b
@@ -376,9 +383,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.78.1 · 2026-10-11 · pass 76 · SC-47
 
 **Drive library mirror and bridge alerting.** The research library (specs incl. the 9l chain, handovers, scoring logs, crypto adapters and theses) is mirrored one-way to Drive `FT-Bridge/library/` every 10 minutes (changed docs only), with an INDEX of freshness and two DB-generated live tallies. Both Drive mirrors now report success to the connectivity monitor, so a failing mirror alerts over Telegram. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.78.0.
+
 
 
 
@@ -391,9 +400,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.3 · 2026-10-11 · pass 74 · SC-17
 
 **Statement-fallback fixes; scrapers restored.** The fallback now reconciles eToro-wallet crypto only, uses live SC-42 units (derived units only for USD listings, so no false RR.L/4063.T drift), matches `SU` to `SU.PA`, never applies a partial-close-blind statement over matching live data, and audits every applied change. The master-file import rejects eToro statements. Playwright installed; the Farside job works again (`ops/scrapers/`); Capitol Trades is still blocked by the site. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4, §5, §7, §12. Supersedes v1.77.2.
+
 
 
 
@@ -410,9 +421,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.1 · 2026-10-10 · pass 72 · SC-45
 
 **Archive INDEX polish and end-marker hardening.** Both readers clip the last 10–40 characters of a Drive Doc, so the Drive copies now end with a short tail line after the END marker (exporter only); a marker line that has started counts as complete. INDEX: look in both tables; EIGEN entry resolves to v1.22.7; titles cut on word boundaries. Behaviour: no. Migrations/endpoints: none. Reference updated: §7. Binding: archive text stays byte-for-byte; INDEX is generated. ai's reads confirmed the 40.7k spec and 50k parts need no re-split. Supersedes v1.77.0.
+
 
 
 
@@ -433,20 +446,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.76.0 · 2026-10-09 · pass 70 · SC-45
-
-**Sections 1–12 rewritten from the build; Drive bridge recorded.** Reference had drifted since ~v1.5x (12 of 19 tabs, migrations to 0033) because bumps only added change-log entries. Re-derived from code and Jarvis; bot, most providers and older deferred items marked *carried over*. SC-45: rclone `drive.file` bridge to `FT-Bridge/`, 10-min spec mirror. Behaviour: no. Migrations/endpoints: none. Binding: a bump must update affected §1–12 and the `reference_reviewed` marker in the same commit. Supersedes v1.75.2.
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.80.0 -->
+<!-- END FT-master-spec v1.80.1 -->

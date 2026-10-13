@@ -949,6 +949,18 @@ func must(what string, err error) {
 // hardcoded; keeping a small generic helper here for additional cron
 // slots.)
 func scheduleAt(ctx context.Context, hour, minute int, fn func()) {
+	// Runs in its own goroutine. It used to block forever, so in a goroutine that armed
+	// several jobs in a row (signals: 23:00 / 23:10 / 23:20 / 02:00; Nexus: 22:30 / 22:45)
+	// only the FIRST ever ran. Found 2026-10-13: the Bargo/Congress ingest, the executive-
+	// order ingest, the quarterly legislator refresh and the weekly Nexus fundamentals job
+	// had never fired on schedule since v1.11.0.
+	go scheduleLoop(ctx, hour, minute, fn)
+}
+
+// schedAfter is time.After; tests replace it.
+var schedAfter = time.After
+
+func scheduleLoop(ctx context.Context, hour, minute int, fn func()) {
 	for {
 		now := time.Now().UTC()
 		next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.UTC)
@@ -960,7 +972,7 @@ func scheduleAt(ctx context.Context, hour, minute int, fn func()) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(wait):
+		case <-schedAfter(wait):
 		}
 		fn()
 	}
