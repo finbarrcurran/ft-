@@ -169,17 +169,35 @@ func readFarsideFromPath(path string) (Reading, bool) {
 	return Reading{Value: &sum, AsOf: asOf}, true
 }
 
-// newestRowDate returns the newest "date" among the cached rows (the scraper writes them
-// newest-first, but the maximum is taken so ordering never matters). mtime and
-// fetchedAt say when the file was written, NOT how fresh the data is (SC-49).
-func newestRowDate(f farsideCachedFile) string {
-	newest := ""
-	for _, r := range f.Rows {
-		if r.Date > newest { // ISO dates compare lexically
-			newest = r.Date
-		}
+// FlowRow is one day of the ETF-flow series.
+type FlowRow struct {
+	Date   string  // YYYY-MM-DD
+	TotalM float64 // USD millions
+}
+
+// EffectiveAsOf is the date the ETF-flow data is really current to. Farside lists the current
+// day with totalM = 0 until it publishes, so a newest row of exactly 0 whose next-older row is
+// NON-zero is a placeholder and is ignored (a genuine all-ETF zero day is practically
+// impossible; the 90-day history contains none). Rows may arrive in any order. Mtime and
+// fetchedAt say when the file was written, not how fresh the data is (SC-49).
+func EffectiveAsOf(rows []FlowRow) string {
+	if len(rows) == 0 {
+		return ""
 	}
-	return newest
+	r := append([]FlowRow(nil), rows...)
+	sort.Slice(r, func(i, j int) bool { return r[i].Date > r[j].Date }) // ISO dates: newest first
+	if len(r) > 1 && r[0].TotalM == 0 && r[1].TotalM != 0 {
+		return r[1].Date
+	}
+	return r[0].Date
+}
+
+func newestRowDate(f farsideCachedFile) string {
+	rows := make([]FlowRow, 0, len(f.Rows))
+	for _, x := range f.Rows {
+		rows = append(rows, FlowRow{Date: x.Date, TotalM: x.TotalM})
+	}
+	return EffectiveAsOf(rows)
 }
 
 // parseFarsideAsCSV tries to read the body as CSV. The first cell of the

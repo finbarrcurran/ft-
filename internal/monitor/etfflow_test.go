@@ -112,3 +112,32 @@ func TestETFFlowAlertsOnceAndRecovers(t *testing.T) {
 		t.Fatalf("expected a recovery note, got %v", n.msgs)
 	}
 }
+
+// SC-49 follow-up: a trailing zero placeholder row (Farside lists today as 0 until it publishes)
+// must not make the data look one day fresher than it is.
+func TestETFFlowEvalIgnoresTrailingZeroRow(t *testing.T) {
+	if err := marketdata.LoadHolidays(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 14, 13, 0, 0, 0, time.UTC) // Wednesday
+	dir := t.TempDir()
+	path := filepath.Join(dir, "etf-flow.json")
+	// Friday 10-09 has real data; Monday 10-12 is a 0 placeholder (it was never published).
+	body := `{"fetchedAt":"2026-10-14T00:25:00Z","rolling7dM":1,"rows":[{"date":"2026-10-12","totalM":0},{"date":"2026-10-09","totalM":21.1}]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := ReadETFFlowState(path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.AsOf != "2026-10-09" || st.AgeTradingDays != 3 || st.Level != "amber" {
+		t.Fatalf("the zero row must be ignored: as-of %s age %d level %q", st.AsOf, st.AgeTradingDays, st.Level)
+	}
+	// A genuine non-zero newest row is used as is.
+	body = `{"fetchedAt":"2026-10-14T00:25:00Z","rolling7dM":1,"rows":[{"date":"2026-10-13","totalM":-8},{"date":"2026-10-09","totalM":21.1}]}`
+	_ = os.WriteFile(path, []byte(body), 0o644)
+	if st, _ := ReadETFFlowState(path, now); st.AsOf != "2026-10-13" || st.AgeTradingDays != 1 {
+		t.Fatalf("a real newest row must be used: %+v", st)
+	}
+}

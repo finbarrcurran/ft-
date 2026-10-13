@@ -14,6 +14,8 @@ import (
 // DB access; pure scoring/composite math is in scoring.go / composite.go.
 type Service struct {
 	DB *sql.DB
+	// ETFFlowPath overrides the Farside cache file location (tests); empty = the production path.
+	ETFFlowPath string
 }
 
 // New constructs a Service.
@@ -316,7 +318,10 @@ func (s *Service) ETFFlowHistory(ctx context.Context, days int) ([]ETFFlowPoint,
 	if days < 1 {
 		days = 30
 	}
-	const cachePath = "/var/lib/ft/data/farside/etf-flow.json"
+	cachePath := "/var/lib/ft/data/farside/etf-flow.json"
+	if s.ETFFlowPath != "" {
+		cachePath = s.ETFFlowPath
+	}
 	raw, err := os.ReadFile(cachePath)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -191,21 +191,10 @@ func (s *Server) handleCryptoIndicatorsBTCHistory(w http.ResponseWriter, r *http
 		mapStoreError(w, err)
 		return
 	}
-	out := map[string]any{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"history": rows,
 		"days":    days,
-	}
-	// SC-49: the chart's own freshness = its last bar's date. The chart never hides stale
-	// data; the page shows the date and the same badge the card uses.
-	if len(rows) > 0 {
-		asOf := rows[len(rows)-1].Date
-		out["asOf"] = asOf
-		if age, err := marketdata.USTradingDaysSince(asOf, time.Now()); err == nil {
-			out["ageTradingDays"] = age
-			out["staleLevel"] = marketdata.StaleLevel(age)
-		}
-	}
-	writeJSON(w, http.StatusOK, out)
+	})
 }
 
 // POST /api/crypto-indicators/backfill?days=730  (v1.20)
@@ -285,10 +274,26 @@ func (s *Server) handleCryptoIndicatorsETFFlowHistory(w http.ResponseWriter, r *
 		mapStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"history": rows,
 		"days":    days,
-	})
+	}
+	// SC-49: the chart's own freshness = the effective as-of date of its series (a trailing
+	// zero placeholder row is ignored). The chart never hides stale data; the page shows the
+	// date and the same badge the card uses.
+	if len(rows) > 0 {
+		flow := make([]providers.FlowRow, 0, len(rows))
+		for _, r := range rows {
+			flow = append(flow, providers.FlowRow{Date: r.Date, TotalM: r.TotalM})
+		}
+		asOf := providers.EffectiveAsOf(flow)
+		out["asOf"] = asOf
+		if age, err := marketdata.USTradingDaysSince(asOf, time.Now()); err == nil {
+			out["ageTradingDays"] = age
+			out["staleLevel"] = marketdata.StaleLevel(age)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // parsePositiveInt parses a query-string integer in (0, max]. Returns

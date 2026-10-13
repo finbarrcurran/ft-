@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"ft/internal/cryptoindicators/providers"
 	"ft/internal/marketdata"
 )
 
@@ -35,18 +36,18 @@ func ReadETFFlowState(path string, now time.Time) (*ETFFlowState, error) {
 	var f struct {
 		FetchedAt time.Time `json:"fetchedAt"`
 		Rows      []struct {
-			Date string `json:"date"`
+			Date   string  `json:"date"`
+			TotalM float64 `json:"totalM"`
 		} `json:"rows"`
 	}
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	newest := ""
+	rows := make([]providers.FlowRow, 0, len(f.Rows))
 	for _, r := range f.Rows {
-		if r.Date > newest {
-			newest = r.Date
-		}
+		rows = append(rows, providers.FlowRow{Date: r.Date, TotalM: r.TotalM})
 	}
+	newest := providers.EffectiveAsOf(rows) // a trailing zero placeholder row is ignored
 	if newest == "" {
 		return nil, fmt.Errorf("no rows in %s", path)
 	}

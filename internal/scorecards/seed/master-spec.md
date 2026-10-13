@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.83.1 · 2026-10-13** — latest change: eToro statements re-imported (§13).
+> **Current version: v1.83.2 · 2026-10-13** — latest change: ETF-flow trailing zero row ignored; chart freshness fixed (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.83.1 2026-10-11 -->
+<!-- reference_reviewed: v1.83.2 2026-10-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -285,7 +285,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 | Sector ETFs | Yahoo daily closes | — | 36 ETFs × 1 call/day |
 | Insider / 13F filings | SEC EDGAR | — | Daily ingest; 13F on demand |
 | Video digests | Anthropic API via the governor | — | Haiku; packages come from the Jarvis yt-dlp pipeline |
-| ETF flows (crypto) | Farside via the Playwright cron | live HTTP for the card after 36 h | **Freshness (SC-49):** the card and the chart show the data's own date ("as of …" / "latest data …"); a badge appears by US trading days since that date (none ≤ 2, amber 3–4, red ≥ 5; never hides data); computed server-side from `crypto_indicators.data_as_of` (card) and the chart's last bar, so both use `marketdata.USTradingDaysSince`/`StaleLevel`. The 36 h file-age rule stays a *fetch* decision only. Settings → Diagnostics shows newest row, age and scraper last success. The cache file holds ONE series (BTC spot-ETF aggregate, newest-first, 90 rows), so one as-of covers card and chart; there is no ETH-flow series |
+| ETF flows (crypto) | Farside via the Playwright cron | live HTTP for the card after 36 h | **Freshness (SC-49):** the card and the chart show the data's own date ("as of …" / "latest data …"); a badge appears by US trading days since that date (none ≤ 2, amber 3–4, red ≥ 5; never hides data); computed server-side from `crypto_indicators.data_as_of` (card) and the chart's last bar, so both use `marketdata.USTradingDaysSince`/`StaleLevel`. The 36 h file-age rule stays a *fetch* decision only. Settings → Diagnostics shows newest row, age and scraper last success. The cache file holds ONE series (BTC spot-ETF aggregate, newest-first, 90 rows), so one as-of covers card and chart; there is no ETH-flow series. **Trailing zero row (v1.83.2):** Farside lists the current day with `totalM = 0` until it publishes; when the newest row is 0 and the next-older is non-zero, the newest is ignored for the as-of date (`providers.EffectiveAsOf`, used by the card, the chart endpoint and the monitor). The chart endpoint `/api/crypto-indicators/etf-flow/history` returns `asOf`, `ageTradingDays`, `staleLevel` |
 
 **Request-driven feeds** (CNN F&G, both news feeds, alternative.me) are only fetched when a tab/card is opened and cached 60 minutes; a **daily 06:30 UTC warm-up** (`internal/server/warmup.go`) runs the real handlers once so they stay fresh, and sends a Telegram alert for any that still fail. The monitor allows them 36 h. All provider calls go through `health.Record` (Spec 7), which also feeds the per-day counters. **At startup** FT sends one Telegram alert naming any missing required provider variable (names only).
 
@@ -367,13 +367,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.83.2 · 2026-10-13 · pass 86 · SC-51
+
+**ETF-flow trailing zero row ignored; chart freshness fixed.** A newest Farside row with `totalM = 0` followed by a non-zero row is a not-yet-published placeholder and is ignored for the as-of date (card, chart badge and monitor share one rule). Also fixes a v1.82.0 slip: the chart's `asOf`/age/badge fields had been attached to the BTC-history handler, so the ETF chart never showed them; now on `/api/crypto-indicators/etf-flow/history`, with a handler test. Behaviour: yes. Migrations: none. Reference updated: §3, §8. Supersedes v1.83.1.
+
 ### v1.83.1 · 2026-10-13 · pass 85 · SC-50
 
 **eToro statements re-imported.** The performance rows were repaired by re-importing four statements through the new merge (backup first); 2026 now covers 2026-01-01 to 2026-10-09, and USD closed-position P&L and dividends match eToro's own 5-30→10-11 summary to the cent. New CLI `ft etoro-import [--dry-run]`. Behaviour: yes. Migrations: none. Reference updated: §11. Supersedes v1.83.0.
 
+
 ### v1.83.0 · 2026-10-13 · pass 84 · SC-50
 
 **Performance importer.** Multi-year statements are split into per-year buckets by each position's own close date; positions are stored by eToro Position ID so re-imports and overlapping statements never double-count; a narrower statement can no longer erase a wider year; reconciliation is shown in USD and EUR; every Financial Summary line is classified or flagged, and interest, refunds and other income appear as "Income & other". Also fixes a bug that read bracketed losses `(11.50)` as 0 in the Closed Positions sheet. Migration 0053. Behaviour: yes. Reference updated: §3, §5. Supersedes v1.82.0.
+
 
 
 ### v1.82.0 · 2026-10-13 · pass 83 · SC-49
@@ -382,9 +388,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.81.1 · 2026-10-13 · pass 82 · SC-48
 
 **RSS User-Agent fix.** Nasdaq's feed reset connections whose User-Agent contained a URL; the RSS fetcher now sends a plain `FT-Dashboard` UA, which all nine feeds accept. Behaviour: yes. Migrations: none. Reference updated: §8. Supersedes v1.81.0.
+
 
 
 
@@ -397,9 +405,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.80.1 · 2026-10-13 · pass 80 · SC-47
 
 **Scheduler fix.** Four scheduled jobs had never run because `scheduleAt` blocked after the first job in each group: the Bargo/Congress ingest, the executive-order ingest, the quarterly legislator refresh and the weekly Nexus fundamentals. Each job now has its own goroutine, with a regression test. The Bargo alert was a true positive; the key, quota and monitor rule are fine. Behaviour: yes. Migrations: none. Reference updated: §4. Supersedes v1.80.0.
+
 
 
 
@@ -416,9 +426,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.79.1 · 2026-10-12 · pass 78 · SC-47
 
 **Decisions applied.** AVGO and RR.L re-tagged, connector token #12 revoked, OpenClaw's dead FT skill retired; the eToro sync transaction is now `BEGIN IMMEDIATE` (fixes the intermittent `database is locked (517)`); the ETH thesis prose in the DB replaced by the amended original (scores unchanged); the unused legacy PPG gate removed; per-ticker stock theses added to the Drive library. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.79.0.
+
 
 
 
@@ -439,21 +451,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.78.1 · 2026-10-11 · pass 76 · SC-47
-
-**Drive library mirror and bridge alerting.** The research library (specs incl. the 9l chain, handovers, scoring logs, crypto adapters and theses) is mirrored one-way to Drive `FT-Bridge/library/` every 10 minutes (changed docs only), with an INDEX of freshness and two DB-generated live tallies. Both Drive mirrors now report success to the connectivity monitor, so a failing mirror alerts over Telegram. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.78.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.83.1 -->
+<!-- END FT-master-spec v1.83.2 -->
