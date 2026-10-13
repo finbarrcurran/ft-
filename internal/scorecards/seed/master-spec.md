@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.83.0 · 2026-10-13** — latest change: Performance importer (§13).
+> **Current version: v1.83.1 · 2026-10-13** — latest change: eToro statements re-imported (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.83.0 2026-10-11 -->
+<!-- reference_reviewed: v1.83.1 2026-10-11 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -332,6 +332,7 @@ ft token create --user-id N --name X      mint a bearer token (plaintext shown o
 ft token create-mcp ...                   mint a read-scoped token for the MCP connector (SC-41)
 ft token list                             list tokens (no plaintext)
 ft token revoke --id N [--user-id N]      revoke a service token
+ft etoro-import [--user-id N] [--dry-run] FILE.xlsx...   import eToro statements (merged by Position ID, SC-50); --dry-run only parses and prints the reconciliation
 ft oauth status | revoke-all | revoke-client --id ID | create-client [--name N] [--redirect URI] [--secret]   SC-41b OAuth sign-ins
 ft help
 ```
@@ -366,13 +367,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.83.1 · 2026-10-13 · pass 85 · SC-50
+
+**eToro statements re-imported.** The performance rows were repaired by re-importing four statements through the new merge (backup first); 2026 now covers 2026-01-01 to 2026-10-09, and USD closed-position P&L and dividends match eToro's own 5-30→10-11 summary to the cent. New CLI `ft etoro-import [--dry-run]`. Behaviour: yes. Migrations: none. Reference updated: §11. Supersedes v1.83.0.
+
 ### v1.83.0 · 2026-10-13 · pass 84 · SC-50
 
 **Performance importer.** Multi-year statements are split into per-year buckets by each position's own close date; positions are stored by eToro Position ID so re-imports and overlapping statements never double-count; a narrower statement can no longer erase a wider year; reconciliation is shown in USD and EUR; every Financial Summary line is classified or flagged, and interest, refunds and other income appear as "Income & other". Also fixes a bug that read bracketed losses `(11.50)` as 0 in the Closed Positions sheet. Migration 0053. Behaviour: yes. Reference updated: §3, §5. Supersedes v1.82.0.
 
+
 ### v1.82.0 · 2026-10-13 · pass 83 · SC-49
 
 **ETF-flow freshness guard.** The ETF-flow card and chart now show the data's own date and an amber/red badge by US trading days (3–4 / 5+), the monitor judges the newest row's date (not the file's time) and names whether the scraper or the source is at fault, and Diagnostics shows the age. Migration 0052. Behaviour: yes. Reference updated: §3, §4, §8. Supersedes v1.81.1.
+
 
 
 ### v1.81.1 · 2026-10-13 · pass 82 · SC-48
@@ -381,9 +388,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.81.0 · 2026-10-13 · pass 81 · SC-48
 
 **RSS cut-over, heatmap, theses.** Market News now reads free publisher RSS (CNBC, BBC Business, Nasdaq as primary; MarketWatch and The Guardian as measured backups) with per-feed health; NewsAPI is no longer called. The heatmap tiles refresh every ~30 minutes while their market is open instead of every 15 around the clock. The six crypto theses with empty text were restored from their originals (scores unchanged). §12 rows 16 and 13 closed as unverified. Behaviour: yes. Migrations: none. Reference updated: §8, §12. Supersedes v1.80.1.
+
 
 
 
@@ -396,9 +405,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.80.0 · 2026-10-12 · pass 79 · SC-48
 
 **Data-provider fixes.** Finnhub is rate-gated, cached and limited to US holdings; heatmap tiles use Yahoo; Twelve Data retired; CNN Fear & Greed works again (Referer fix); a daily warm-up keeps the request-driven feeds fresh and alerts if one fails; market-news RSS is built but not yet switched on; per-provider daily call counters and usage lines in Diagnostics; a startup alert for missing provider keys; budget-alert path tested. Behaviour: yes. Migrations: 1. Reference updated: §8, §12. Supersedes v1.79.1.
+
 
 
 
@@ -415,9 +426,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.79.0 · 2026-10-12 · pass 77 · SC-41b
 
 **OAuth for the claude.ai connector; login rate limiting.** FT now runs its own single-user OAuth 2.1 server (discovery, registration, authorize with Fin's password, token with PKCE and rotating refresh tokens) so claude.ai can connect to `/mcp` with the URL alone; the 401 carries the OAuth discovery header and `/.well-known/*` no longer returns the SPA page. Login and authorize are now rate limited (5 failures per IP per 15 min) with a Telegram alert; migration 0050; `ft oauth` and `ft token revoke` commands; `ft help` aligned. Behaviour: yes. Migrations: 1. Reference updated: §3, §5, §11. Supersedes v1.78.1.
+
 
 
 
@@ -438,21 +451,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.78.0 · 2026-10-11 · pass 75 · SC-47
-
-**Bargo Congress feed, raw history, connectivity monitor.** Congress trades now come from Bargo (free key; Capitol Trades cron retired) into a new unfiltered `congress_trades_raw` history table (migration 0049) that outlives Bargo's 3-month window; recent rows feed the Signals tab, which now carries Bargo's required attribution. A freshness monitor watches every external source (price APIs, Bargo, eToro sync, Farside, backups) and sends one Telegram alert per outage, a 24 h reminder and a recovery note; Diagnostics shows it. Needs `FT_TELEGRAM_*` in FT's env. Behaviour: yes. Migrations: 1. Reference updated: §2–5, §8, §9, §12. Supersedes v1.77.3.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.83.0 -->
+<!-- END FT-master-spec v1.83.1 -->

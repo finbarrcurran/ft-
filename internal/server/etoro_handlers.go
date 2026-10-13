@@ -111,7 +111,7 @@ func (s *Server) handleEtoroImportApply(w http.ResponseWriter, r *http.Request) 
 	// SC-50: merge, never replace. Positions and dividends are keyed by Position ID, the
 	// whole-period lines are kept per statement period, and the per-year rows are re-derived
 	// (a year is only REPLACED when the imported statements cover it).
-	res, err := s.store.ApplyEtoroStatement(r.Context(), userID, etoroStatementToStore(pending.Statement))
+	res, err := s.store.ApplyEtoroStatement(r.Context(), userID, EtoroStatementToStore(pending.Statement))
 	if err != nil {
 		mapStoreError(w, err)
 		return
@@ -162,8 +162,8 @@ func etoroPeriodSummary(p etoro.Period) map[string]any {
 	}
 }
 
-// etoroStatementToStore maps the parsed statement onto the store's position-level types.
-func etoroStatementToStore(st *etoro.Statement) store.EtoroStatementData {
+// EtoroStatementToStore maps the parsed statement onto the store's position-level types.
+func EtoroStatementToStore(st *etoro.Statement) store.EtoroStatementData {
 	lines, _ := json.Marshal(st.Period.Lines)
 	p := st.Period
 	d := store.EtoroStatementData{

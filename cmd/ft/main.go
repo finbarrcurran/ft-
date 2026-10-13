@@ -10,6 +10,7 @@
 package main
 
 import (
+	"ft/internal/etoro"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -89,6 +90,8 @@ func main() {
 		runOAuth(os.Args[2:])
 	case "llm-alert-test":
 		runLLMAlertTest()
+	case "etoro-import":
+		runEtoroImport(os.Args[2:])
 	case "video-digest-reground":
 		runVideoDigestReground()
 		return
@@ -180,6 +183,7 @@ USAGE
   ft oauth status | revoke-all | revoke-client --id ID | create-client --name N --redirect URI [--secret]
                                                manage the claude.ai connector's OAuth sign-ins (SC-41b)
   ft llm-alert-test                            send one TEST budget alert through Telegram (delivery check, no spend)
+  ft etoro-import [--user-id N] [--dry-run] FILE.xlsx...   import eToro statements (merged by Position ID; SC-50)
   ft help                  print this usage
 
 ENVIRONMENT
@@ -1268,4 +1272,51 @@ func runLLMAlertTest() {
 		os.Exit(1)
 	}
 	fmt.Println("delivered: check Telegram for the \"TEST - FT LLM budget alert path\" message")
+}
+
+// runEtoroImport imports eToro statement .xlsx files in the order given (SC-50): the same merge the
+// Performance tab's Upload statement uses. --dry-run only parses and prints.
+func runEtoroImport(args []string) {
+	fs := flag.NewFlagSet("etoro-import", flag.ExitOnError)
+	userID := fs.Int64("user-id", 1, "user id")
+	dry := fs.Bool("dry-run", false, "parse and print only; write nothing")
+	_ = fs.Parse(args)
+	if fs.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "usage: ft etoro-import [--user-id N] [--dry-run] FILE.xlsx...")
+		os.Exit(2)
+	}
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	ctx := context.Background()
+	for _, path := range fs.Args() {
+		f, err := os.Open(path)
+		must("open "+path, err)
+		stmt, err := etoro.Parse(f, filepath.Base(path), time.Now())
+		f.Close()
+		must("parse "+path, err)
+		p := stmt.Period
+		fmt.Printf("\n== %s  (%s to %s)\n", stmt.FileName, p.RangeStart, p.RangeEnd)
+		fmt.Printf("   %d closed positions, %d dividend rows; reconciliation: P&L delta $%.2f / EUR %.2f, net-vs-classified delta $%.2f / EUR %.2f, unclassified $%.2f\n",
+			len(stmt.Positions), len(stmt.Dividends), p.ReconPnLDeltaUSD, p.ReconPnLDeltaEUR, p.ReconNetDeltaUSD, p.ReconNetDeltaEUR, p.UnclassifiedUSD)
+		for _, w := range stmt.Warnings {
+			fmt.Println("   WARNING:", w)
+		}
+		if *dry {
+			continue
+		}
+		res, err := st.ApplyEtoroStatement(ctx, *userID, server.EtoroStatementToStore(stmt))
+		must("apply "+path, err)
+		fmt.Printf("   applied: positions new %d / known %d, dividends new %d / known %d, period %s\n",
+			res.PositionsNew, res.PositionsKnown, res.DividendsNew, res.DividendsKnown, res.PeriodAction)
+		for _, y := range res.Years {
+			fmt.Printf("   %d: %s - %s\n", y.Year, y.Action, y.Note)
+		}
+		for _, w := range res.Warnings {
+			fmt.Println("   WARNING:", w)
+		}
+	}
 }
