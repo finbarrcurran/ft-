@@ -209,6 +209,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/etoro/import/preview", s.requireUser(s.handleEtoroImportPreview))
 	s.mux.HandleFunc("POST /api/etoro/import/apply", s.requireUser(s.handleEtoroImportApply))
 	s.mux.HandleFunc("GET /api/etoro/performance", s.requireUser(s.handleEtoroPerformance))
+	s.mux.HandleFunc("GET /api/etoro/trade-stats", s.requireUser(s.handleEtoroTradeStats)) // SC-51
 	s.mux.HandleFunc("GET /api/etoro/sync", s.requireUser(s.handleEtoroSyncStatus))                                          // SC-42
 	s.mux.HandleFunc("POST /api/etoro/sync", s.requireUser(s.handleEtoroSyncRun))                                            // SC-42
 	s.mux.HandleFunc("GET /api/etoro/reconcile/proposals", s.requireUser(s.handleEtoroProposals))                            // SC-44

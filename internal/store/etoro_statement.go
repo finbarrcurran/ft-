@@ -31,6 +31,8 @@ type EtoroPosition struct {
 	IsCopy     bool
 	ProfitUSD  float64
 	ProfitEUR  float64
+	OpenDate   string  // YYYY-MM-DD; "" = unknown (SC-51)
+	AmountUSD  float64 // invested amount; 0 = unknown (SC-51)
 }
 
 // EtoroDividend is one dividend row.
@@ -115,12 +117,14 @@ func (s *Store) ApplyEtoroStatement(ctx context.Context, userID int64, d EtoroSt
 			return nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO etoro_closed_positions (user_id, position_id, close_date, year, asset_type, is_copy, profit_usd, profit_eur, source_file, imported_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?)
+			INSERT INTO etoro_closed_positions (user_id, position_id, close_date, year, asset_type, is_copy, profit_usd, profit_eur, source_file, imported_at, open_date, amount_usd)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(user_id, position_id) DO UPDATE SET
 			  close_date = excluded.close_date, year = excluded.year, asset_type = excluded.asset_type, is_copy = excluded.is_copy,
-			  profit_usd = excluded.profit_usd, profit_eur = excluded.profit_eur, source_file = excluded.source_file, imported_at = excluded.imported_at`,
-			userID, p.PositionID, p.CloseDate, p.Year, p.AssetType, boolToInt(p.IsCopy), p.ProfitUSD, p.ProfitEUR, d.FileName, now); err != nil {
+			  profit_usd = excluded.profit_usd, profit_eur = excluded.profit_eur, source_file = excluded.source_file, imported_at = excluded.imported_at,
+			  open_date = COALESCE(excluded.open_date, open_date), amount_usd = COALESCE(excluded.amount_usd, amount_usd)`,
+			userID, p.PositionID, p.CloseDate, p.Year, p.AssetType, boolToInt(p.IsCopy), p.ProfitUSD, p.ProfitEUR, d.FileName, now,
+			nullIfEmpty(p.OpenDate), nullIfZero(p.AmountUSD)); err != nil {
 			return nil, err
 		}
 		if known {

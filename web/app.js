@@ -2533,6 +2533,135 @@ let etoroStrategyView = (() => {
   } catch (_) { return 'all'; }
 })();
 
+// SC-51 Part A — trade statistics view state (scope, year, small-position filter).
+const etoroTrade = { scope: 'discretionary', year: null, minAmount: 0 };
+
+const TS_DEFS = {
+  n: 'Number of closed positions in the selected scope and period (break-even trades included).',
+  winRate: 'Winners ÷ all trades. A break-even trade (profit exactly 0) counts in the total, not as a winner.',
+  avgWinner: 'Gross profit of winning trades ÷ number of winners.',
+  avgLoser: 'Gross loss of losing trades ÷ number of losers (negative).',
+  payoff: 'Payoff ratio = average winner ÷ |average loser|.',
+  pf: 'Profit factor = gross wins ÷ |gross losses|.',
+  exp: 'Expectancy = total P&L ÷ number of trades: what an average trade has returned.',
+  hold: 'Median calendar days between open and close (same day = 0). Only positions with a known open date count.',
+  best: 'Largest single winning trade.',
+  worst: 'Largest single losing trade.',
+  top5: 'Share of total P&L made by the five largest winners (can exceed 100% when losses offset). Hidden when total P&L is not positive.',
+};
+
+function tsNum(v, f) { return v == null ? '—' : f(v); }
+function tsPct(v) { return `${(v * 100).toFixed(1)}%`; }
+function tsX(v) { return v.toFixed(2); }
+
+function tsStatsGrid(s) {
+  const m = (k, label, val, cls) =>
+    `<div class="ts-metric" title="${escapeHTML(TS_DEFS[k])}"><div class="ts-label">${label}</div><div class="ts-val num ${cls || ''}">${val}</div></div>`;
+  const tone = (v) => (v > 0 ? 'gain' : v < 0 ? 'loss' : '');
+  const holdNote = s.medianHoldDays != null && s.holdKnown < s.n ? ` <span class="dim">(${s.holdKnown} of ${s.n})</span>` : '';
+  return `<div class="ts-grid ${s.smallSample ? 'ts-small' : ''}">
+    ${m('n', 'Trades', String(s.n))}
+    ${m('winRate', 'Win rate', tsNum(s.winRate, tsPct))}
+    ${m('avgWinner', 'Avg winner', tsNum(s.avgWinner, (v) => etoroMoney(v, 'USD')), 'gain')}
+    ${m('avgLoser', 'Avg loser', tsNum(s.avgLoser, (v) => etoroMoney(v, 'USD')), 'loss')}
+    ${m('payoff', 'Payoff ratio', tsNum(s.payoffRatio, tsX))}
+    ${m('pf', 'Profit factor', tsNum(s.profitFactor, tsX))}
+    ${m('exp', 'Expectancy / trade', tsNum(s.expectancy, (v) => etoroMoney(v, 'USD')), tone(s.expectancy))}
+    ${m('hold', 'Median hold', tsNum(s.medianHoldDays, (v) => `${Number.isInteger(v) ? v : v.toFixed(1)} d`) + holdNote)}
+    ${m('best', 'Largest winner', tsNum(s.largestWinner, (v) => etoroMoney(v, 'USD')), 'gain')}
+    ${m('worst', 'Largest loser', tsNum(s.largestLoser, (v) => etoroMoney(v, 'USD')), 'loss')}
+    ${m('top5', 'Top-5 winners’ share', tsNum(s.top5WinnersShare, tsPct))}
+  </div>`;
+}
+
+function tsBreakdownTable(title, rows, keyLabel) {
+  if (!rows || !rows.length) return '';
+  const body = rows.map((r) => {
+    const s = r.stats;
+    return `<tr class="${s.smallSample ? 'ts-small' : ''}">
+      <td>${escapeHTML(String(r.key))}</td>
+      <td class="num">${s.n}${s.smallSample ? ' <span class="dim" title="small sample">*</span>' : ''}</td>
+      <td class="num">${tsNum(s.winRate, tsPct)}</td>
+      <td class="num ${s.totalUsd > 0 ? 'gain' : s.totalUsd < 0 ? 'loss' : ''}">${etoroMoney(s.totalUsd, 'USD')}</td>
+      <td class="num">${tsNum(s.expectancy, (v) => etoroMoney(v, 'USD'))}</td>
+      <td class="num">${tsNum(s.profitFactor, tsX)}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="ts-break"><div class="ts-break-title dim">${title}</div>
+    <table class="ts-table"><thead><tr><th>${keyLabel}</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">P&amp;L</th><th class="num">Expectancy</th><th class="num">Profit factor</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function renderEtoroTradeStatsHTML(res) {
+  if (res.demo) return '';
+  const s = res.stats;
+  const yearOpts = ['all', ...(res.years || []).slice().reverse().map(String)];
+  const sel = (v, cur) => (String(v) === String(cur) ? 'selected' : '');
+  const scopeBtn = (k, label) => `<button class="etoro-strat-btn ts-scope ${res.scope === k ? 'active' : ''}" data-scope="${k}">${label}</button>`;
+  const minOpts = [0, 10, 50, 100];
+  const filterNote = res.minAmountUsd > 0
+    ? `<div class="ts-note dim">Excluding positions under ${etoroMoney(res.minAmountUsd, 'USD')} invested: ${res.excludedN} trade${res.excludedN === 1 ? '' : 's'} (${etoroMoney(res.excludedUsd, 'USD')}) left out, so the total no longer matches the year table.</div>` : '';
+  const unknownNote = res.amountUnknown > 0
+    ? `<div class="ts-note dim">${res.amountUnknown} position${res.amountUnknown === 1 ? ' has' : 's have'} no stored invested amount (older import); re-upload a statement that covers them to fill it in.</div>` : '';
+  let body;
+  if (s.n === 0) {
+    body = `<div class="ts-empty dim">No trades in this scope and period.</div>`;
+  } else {
+    const small = s.smallSample ? `<div class="ts-small-note">small sample (n=${s.n}) — statistics shown greyed</div>` : '';
+    body = `${small}${tsStatsGrid(s)}
+      <div class="ts-total num">Total closed-trade P&amp;L <strong class="${s.totalUsd > 0 ? 'gain' : s.totalUsd < 0 ? 'loss' : ''}">${etoroMoney(s.totalUsd, 'USD')}</strong>
+        <span class="dim" title="Matches the closed-trade P&amp;L of the same scope and period in the year table (USD).">· ${s.wins} won · ${s.losses} lost · ${s.breakEven} break-even</span></div>
+      ${tsBreakdownTable('By asset class', (res.byAsset || []).map((a) => ({ key: a.assetType, stats: a.stats })), 'Asset')}
+      ${res.year === 'all' ? tsBreakdownTable('By year', (res.byYear || []).map((y) => ({ key: y.year, stats: y.stats })), 'Year') : ''}`;
+  }
+  return `<div class="ts-panel">
+    <div class="ts-head">
+      <h4 class="cvs-title">Trade statistics <span class="dim">· USD · closed positions only</span></h4>
+      <p class="dim cvs-sub">From the stored closed positions. Dividends, interest, refunds and other income are not trades and are not included. Hover a figure for its definition.</p>
+      <div class="ts-controls">
+        <div class="etoro-strat-toggle" role="tablist" aria-label="Scope">${scopeBtn('discretionary', 'Discretionary')}${scopeBtn('copy', 'Copy / CFD')}${scopeBtn('all', 'All')}</div>
+        <label class="dim">Period <select class="ts-year">${yearOpts.map((y) => `<option value="${y}" ${sel(y, res.year)}>${y === 'all' ? 'All years' : y}</option>`).join('')}</select></label>
+        <label class="dim" title="Leave out very small positions. Off by default.">Exclude under <select class="ts-min">${minOpts.map((v) => `<option value="${v}" ${sel(v, res.minAmountUsd)}>${v === 0 ? 'off' : '$' + v}</option>`).join('')}</select></label>
+      </div>
+    </div>
+    ${body}${filterNote}${unknownNote}
+  </div>`;
+}
+
+async function loadEtoroTradeStats(years) {
+  const host = $('#etoro-trade-stats');
+  if (!host) return;
+  if (etoroTrade.year == null) {
+    const ytd = (years || []).find((y) => y.isYtd);
+    etoroTrade.year = ytd ? String(ytd.year) : 'all';
+  }
+  try {
+    const qs = `scope=${encodeURIComponent(etoroTrade.scope)}&year=${encodeURIComponent(etoroTrade.year)}&minAmount=${etoroTrade.minAmount}`;
+    const res = await api(`/api/etoro/trade-stats?${qs}`);
+    host.innerHTML = renderEtoroTradeStatsHTML(res);
+    for (const b of host.querySelectorAll('.ts-scope')) {
+      b.addEventListener('click', () => { etoroTrade.scope = b.dataset.scope; loadEtoroTradeStats(years); });
+    }
+    const ys = host.querySelector('.ts-year');
+    if (ys) ys.addEventListener('change', () => { etoroTrade.year = ys.value; loadEtoroTradeStats(years); });
+    const ms = host.querySelector('.ts-min');
+    if (ms) ms.addEventListener('change', () => { etoroTrade.minAmount = Number(ms.value) || 0; loadEtoroTradeStats(years); });
+  } catch (e) {
+    host.innerHTML = `<div class="ts-empty dim">Trade statistics unavailable: ${escapeHTML(String(e.message || e))}</div>`;
+  }
+}
+
+// SC-51 Part B — coverage of the imported statements ({has,start,end,nextStart,ageDays,stale}).
+let etoroCoverage = null;
+
+function etoroCoverageLabel() {
+  const c = etoroCoverage;
+  if (!c || !c.has) return '';
+  const chip = c.stale
+    ? ` <span class="cov-chip" title="The last imported statement ended ${c.ageDays} days ago (nudge after ${35} days). Upload a statement starting ${escapeHTML(c.nextStart)}.">⚠ ${c.ageDays} days old — upload a statement starting ${escapeHTML(c.nextStart)}</span>`
+    : '';
+  return `<div class="cov-label dim" title="Latest End Date of any imported statement (not the newest close date). Coverage starts ${escapeHTML(c.start)}.">Statement data through <strong>${escapeHTML(c.end)}</strong>${chip}</div>`;
+}
+
 const etoroImportState = { step: 'idle', preview: null, error: null };
 
 // SC-22 D22.7 — the performance history renders collapsed on every page load
@@ -2700,7 +2829,6 @@ function renderCopyVsSystematicPanel(years, ccy) {
       </div>
       ${chart}
       <div class="cvs-verdict">${verdict}</div>
-      <div class="cvs-tier2-note dim">Win rate, trade count and avg winner/loser need per-trade closed-position data, which isn't persisted — omitted rather than estimated.</div>
     </div>`;
 }
 
@@ -2719,6 +2847,7 @@ async function renderEtoroPerformance(currency) {
   }
 
   const years = (data && data.years) || [];
+  etoroCoverage = (data && data.coverage) || null;
   const uploadBtn = `<button class="btn-secondary etoro-upload-btn" id="etoro-upload-btn">Upload statement</button>`;
   const reconcileBtn = `<button class="btn-secondary etoro-recon-btn" id="etoro-reconcile-btn" title="Reconstruct current open positions from a statement and reconcile against your live holdings">Reconcile holdings</button>`;
 
@@ -2782,7 +2911,7 @@ async function renderEtoroPerformance(currency) {
         </div>
         <div class="etoro-ytd-sub num dim">
           dividends ${etoroMoney(ccyPick(ytd, 'dividends', ccy), ccy)} ·
-          fees ${etoroMoney(ccyPick(ytd, 'fees', ccy), ccy)} ·
+          <span ${ytd.year === 2026 ? 'title="may include up to $14.76 already counted in 2025 (overlapping statements)" class="ts-tip"' : ''}>fees ${etoroMoney(ccyPick(ytd, 'fees', ccy), ccy)}${ytd.year === 2026 ? ' ⓘ' : ''}</span> ·
           income &amp; other ${etoroMoney(ccyPick(ytd, 'interest', ccy) + ccyPick(ytd, 'refunds', ccy) + ccyPick(ytd, 'otherIncome', ccy), ccy)}
           <span class="dim" title="interest + refunds + airdrops/staking/corporate actions/stocks lending/index adjustments: whole-period lines, not per-trade results">(ⓘ)</span> ·
           net ${etoroMoney(ccyPick(ytd, 'net', ccy), ccy)}
@@ -2869,14 +2998,18 @@ async function renderEtoroPerformance(currency) {
     <div class="etoro-perf-head">
       <div class="etoro-perf-controls">${stratToggle}${reconcileBtn}${uploadBtn}</div>
     </div>
+    ${etoroCoverageLabel()}
     ${ytdCard}
     ${copyVsSystematic}
+    <div id="etoro-trade-stats"></div>
     ${yearBlocks}`;
   el.innerHTML = perfCollapsibleShell(`eToro · ${ccy}`, perfBody);
   wirePerfCollapse(el, currency);
 
+  loadEtoroTradeStats(years);
+
   // Wire strategy toggle.
-  for (const btn of el.querySelectorAll('.etoro-strat-btn')) {
+  for (const btn of el.querySelectorAll('.etoro-strat-btn:not(.ts-scope)')) {
     btn.addEventListener('click', () => {
       etoroStrategyView = btn.dataset.strat;
       try { localStorage.setItem('ft.etoroStrategyView', etoroStrategyView); } catch (_) {}
@@ -2934,6 +3067,7 @@ function renderEtoroModalBody() {
         <input type="file" id="etoro-file" accept=".xlsx" hidden />
         <p>Drop an eToro <strong>.xlsx</strong> statement here, or <button class="link-btn" id="etoro-pick">choose a file</button>.</p>
       </div>
+      ${etoroCoverage && etoroCoverage.has ? `<p class="dim" style="font-size:0.82rem">Statement data through ${escapeHTML(etoroCoverage.end)}. <strong>Next statement should start ${escapeHTML(etoroCoverage.nextStart)}.</strong></p>` : ''}
       ${st.error ? `<div class="error">${escapeHTML(st.error)}</div>` : ''}`;
     foot.innerHTML = `<button class="btn-secondary" id="etoro-cancel">Cancel</button>`;
     const input = $('#etoro-file');
@@ -2992,6 +3126,17 @@ function renderEtoroModalBody() {
   }).join('');
   // SC-50: reconciliation in BOTH currencies, and every non-trade line classified or flagged.
   const pr = p.period || {};
+  // SC-51 Part B: where this statement starts relative to the imported coverage.
+  const sc = p.startCheck || { kind: 'first' };
+  const isGap = sc.kind === 'gap';
+  const startCheckHTML = isGap
+    ? `<div class="etoro-recon-box bad" style="margin:0.5rem 0; font-size:0.85rem"><strong>Gap in coverage.</strong> ${escapeHTML(sc.message)}
+         <br><label><input type="checkbox" id="etoro-gap-confirm"> I understand — import anyway</label></div>`
+    : sc.kind === 'overlap'
+      ? `<div class="etoro-recon-box bad" style="margin:0.5rem 0; font-size:0.85rem"><strong>Overlap.</strong> ${escapeHTML(sc.message)}</div>`
+      : sc.kind === 'clean'
+        ? `<div class="etoro-recon-box ok" style="margin:0.5rem 0; font-size:0.85rem">✓ Starts ${escapeHTML(sc.expectedStart)}, right after the imported coverage.</div>`
+        : '';
   const fmtD = (v, c) => (c === 'EUR' ? '€' : '$') + Number(v || 0).toFixed(2);
   const reconLine = pr.rangeStart ? `
     <div class="etoro-recon-box ${(Math.abs(pr.reconPnlDeltaUsd || 0) > 1 || Math.abs(pr.reconPnlDeltaEur || 0) > 1 || Math.abs(pr.reconNetDeltaUsd || 0) > 0.005 || Math.abs(pr.reconNetDeltaEur || 0) > 0.005) ? 'bad' : 'ok'}" style="margin:0.5rem 0; font-size:0.85rem">
@@ -3004,11 +3149,14 @@ function renderEtoroModalBody() {
   body.innerHTML = `
     <p class="dim" style="font-size:0.82rem">${escapeHTML(p.fileName)} — ${p.positions || 0} closed positions, ${p.dividends || 0} dividend rows. Positions are matched by their eToro Position ID, so re-importing or overlapping statements never double-counts.</p>
     ${yearSummaries}
+    ${startCheckHTML}
     ${reconLine}
     ${warns ? `<ul class="etoro-warns">${warns}</ul>` : ''}`;
   foot.innerHTML = `
     <button class="btn-secondary" id="etoro-back">Back</button>
-    <button class="btn-primary" id="etoro-apply">Apply</button>`;
+    <button class="btn-primary" id="etoro-apply" ${isGap ? 'disabled' : ''}>Apply</button>`;
+  const gapBox = $('#etoro-gap-confirm');
+  if (gapBox) gapBox.addEventListener('change', () => { $('#etoro-apply').disabled = !gapBox.checked; });
   $('#etoro-back').addEventListener('click', () => { etoroImportState.step = 'idle'; renderEtoroModalBody(); });
   $('#etoro-apply').addEventListener('click', applyEtoroImport);
 }
@@ -3035,10 +3183,11 @@ async function handleEtoroFile(file) {
 }
 
 async function applyEtoroImport() {
+  const confirmGap = !!($('#etoro-gap-confirm') && $('#etoro-gap-confirm').checked);
   etoroImportState.step = 'applying';
   renderEtoroModalBody();
   try {
-    etoroImportState.applyResult = await api('/api/etoro/import/apply', { method: 'POST' });
+    etoroImportState.applyResult = await api('/api/etoro/import/apply', { method: 'POST', body: JSON.stringify({ confirmGap }) });
     etoroImportState.step = 'applied';
   } catch (err) {
     etoroImportState.error = err.message;

@@ -11,6 +11,7 @@
 package server
 
 import (
+	"strconv"
 	"encoding/json"
 	"ft/internal/etoro"
 	"ft/internal/store"
@@ -87,7 +88,14 @@ func (s *Server) handleEtoroImportPreview(w http.ResponseWriter, r *http.Request
 
 	storePendingEtoro(userID, &pendingEtoro{Statement: st, Stored: time.Now()})
 
+	// SC-51: where this statement starts relative to what is already imported.
+	cov, err := s.store.EtoroCoverageFor(r.Context(), userID, time.Now())
+	if mapStoreError(w, err) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"coverage":      cov,
+		"startCheck":    store.ClassifyStatementStart(cov, st.Period.RangeStart),
 		"fileName":   st.FileName,
 		"years":      st.Years,
 		"warnings":   st.Warnings,
@@ -101,6 +109,26 @@ func (s *Server) handleEtoroImportPreview(w http.ResponseWriter, r *http.Request
 // POST /api/etoro/import/apply — applies the staged statement.
 func (s *Server) handleEtoroImportApply(w http.ResponseWriter, r *http.Request) {
 	userID, _ := userIDFromContext(r.Context())
+
+	// SC-51: a statement that starts after the coverage end leaves days with no data; apply
+	// only on explicit confirmation (the staged statement stays available for the retry).
+	var body struct {
+		ConfirmGap bool `json:"confirmGap"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	pendingEtorosMu.Lock()
+	peek := pendingEtoros[userID]
+	pendingEtorosMu.Unlock()
+	if peek != nil && peek.Statement != nil && time.Since(peek.Stored) <= pendingEtoroTTL {
+		cov, err := s.store.EtoroCoverageFor(r.Context(), userID, time.Now())
+		if mapStoreError(w, err) {
+			return
+		}
+		if sc := store.ClassifyStatementStart(cov, peek.Statement.Period.RangeStart); sc.Kind == "gap" && !body.ConfirmGap {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": sc.Message + " Confirm to import anyway.", "needsConfirm": true, "startCheck": sc})
+			return
+		}
+	}
 
 	pending := popPendingEtoro(userID)
 	if pending == nil || pending.Statement == nil {
@@ -147,7 +175,47 @@ func (s *Server) handleEtoroPerformance(w http.ResponseWriter, r *http.Request) 
 	if mapStoreError(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"years": years})
+	cov, err := s.store.EtoroCoverageFor(r.Context(), userID, time.Now())
+	if mapStoreError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"years": years, "coverage": cov})
+}
+
+// handleEtoroTradeStats — SC-51 Part A. Reads closed positions only (USD); never the dividend or
+// Income & other tables. ?scope=discretionary|copy|all (default discretionary), ?year=2026|all,
+// ?minAmount=N (exclude positions with less than $N invested; 0 = off).
+func (s *Server) handleEtoroTradeStats(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFromContext(r.Context())
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{"demo": true})
+		return
+	}
+	q := r.URL.Query()
+	year := q.Get("year")
+	if year == "" {
+		year = "all"
+	}
+	if year != "all" {
+		if y, err := strconv.Atoi(year); err != nil || y < 2000 || y > 2100 {
+			writeError(w, http.StatusBadRequest, "year must be a 4-digit year or 'all'")
+			return
+		}
+	}
+	minAmount := 0.0
+	if v := q.Get("minAmount"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f < 0 {
+			writeError(w, http.StatusBadRequest, "minAmount must be a number >= 0")
+			return
+		}
+		minAmount = f
+	}
+	res, err := s.store.EtoroTradeStats(r.Context(), userID, q.Get("scope"), year, minAmount)
+	if mapStoreError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // etoroPeriodSummary is the whole-period Financial Summary view for the preview dialog.
@@ -183,7 +251,8 @@ func EtoroStatementToStore(st *etoro.Statement) store.EtoroStatementData {
 	}
 	for _, c := range st.Positions {
 		d.Positions = append(d.Positions, store.EtoroPosition{PositionID: c.PositionID, CloseDate: c.CloseDate, Year: c.Year,
-			AssetType: c.AssetType, IsCopy: c.IsCopy, ProfitUSD: c.ProfitUSD, ProfitEUR: c.ProfitEUR})
+			AssetType: c.AssetType, IsCopy: c.IsCopy, ProfitUSD: c.ProfitUSD, ProfitEUR: c.ProfitEUR,
+			OpenDate: c.OpenDate, AmountUSD: c.AmountUSD})
 	}
 	for _, v := range st.Dividends {
 		d.Dividends = append(d.Dividends, store.EtoroDividend{Key: v.Key, PositionID: v.PositionID, PayDate: v.PayDate,

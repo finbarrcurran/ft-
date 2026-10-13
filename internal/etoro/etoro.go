@@ -85,6 +85,8 @@ type ClosedPosition struct {
 	IsCopy     bool    `json:"isCopy"`
 	ProfitUSD  float64 `json:"profitUsd"`
 	ProfitEUR  float64 `json:"profitEur"`
+	OpenDate   string  `json:"openDate"`  // YYYY-MM-DD, "" when unreadable (SC-51)
+	AmountUSD  float64 `json:"amountUsd"` // invested amount, 0 when unreadable (SC-51)
 }
 
 // DividendRow is one Dividends-sheet row, deduped on Key.
@@ -228,6 +230,9 @@ func Parse(r io.Reader, fileName string, now time.Time) (*Statement, error) {
 		idx := headerIndex(cp[0])
 		iID, iType, iCopied, iClose := idx["Position ID"], idx["Type"], idx["Copied From"], idx["Close Date"]
 		iPU, iPE := idx["Profit(USD)"], idx["Profit(EUR)"]
+		iOpen, iAmt := idx["Open Date"], idx["Amount"]
+		_, hasOpen := idx["Open Date"]
+		_, hasAmt := idx["Amount"]
 		_, hasID := idx["Position ID"]
 		for n, row := range cp[1:] {
 			typ := normAssetType(cell(row, iType))
@@ -246,6 +251,13 @@ func Parse(r io.Reader, fileName string, now time.Time) (*Statement, error) {
 				year = endYear
 				undated++
 			}
+			openDate, amount := "", 0.0
+			if hasOpen {
+				openDate = isoFromDDMMYYYY(cell(row, iOpen))
+			}
+			if hasAmt {
+				amount = parseNum(cell(row, iAmt))
+			}
 			id := ""
 			if hasID {
 				id = cell(row, iID)
@@ -257,6 +269,7 @@ func Parse(r io.Reader, fileName string, now time.Time) (*Statement, error) {
 			st.Positions = append(st.Positions, ClosedPosition{
 				PositionID: id, CloseDate: cd, Year: year, AssetType: typ,
 				IsCopy: isCopy(cell(row, iCopied)), ProfitUSD: parseNum(cell(row, iPU)), ProfitEUR: parseNum(cell(row, iPE)),
+				OpenDate: openDate, AmountUSD: amount,
 			})
 		}
 	}

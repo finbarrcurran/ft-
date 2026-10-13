@@ -35,13 +35,13 @@ func buildStatement(t *testing.T, start, end string, pos []fixPos, divs []fixDiv
 	f.SetSheetRow("Account Summary", "A3", &[]any{"Start Date", start + " 00:00:00"})
 	f.SetSheetRow("Account Summary", "A4", &[]any{"End Date", end + " 23:59:59"})
 	f.NewSheet("Closed Positions")
-	f.SetSheetRow("Closed Positions", "A1", &[]any{"Position ID", "Open Date", "Close Date", "Profit(USD)", "Profit(EUR)", "Copied From", "Type"})
+	f.SetSheetRow("Closed Positions", "A1", &[]any{"Position ID", "Open Date", "Close Date", "Profit(USD)", "Profit(EUR)", "Copied From", "Type", "Amount"})
 	for i, p := range pos {
 		cf := "-"
 		if p.copied != "" {
 			cf = p.copied
 		}
-		f.SetSheetRow("Closed Positions", fmt.Sprintf("A%d", i+2), &[]any{p.id, "01/01/2025 10:00:00", p.closeDate + " 12:00:00", p.usd, p.eur, cf, p.typ})
+		f.SetSheetRow("Closed Positions", fmt.Sprintf("A%d", i+2), &[]any{p.id, "01/01/2025 10:00:00", p.closeDate + " 12:00:00", p.usd, p.eur, cf, p.typ, "250.50"})
 	}
 	f.NewSheet("Dividends")
 	f.SetSheetRow("Dividends", "A1", &[]any{"Date of Payment", "Instrument Name", "Net Dividend Received (USD)", "Net Dividend Received (EUR)", "Position ID", "Type"})
@@ -296,3 +296,16 @@ func TestBracketedNegativeProfitsReconcile(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// SC-51: the open date and invested amount are read from the Closed Positions sheet.
+func TestClosedPositionOpenDateAndAmount(t *testing.T) {
+	st := parse(t, multiYear(t))
+	if len(st.Positions) == 0 {
+		t.Fatal("no positions")
+	}
+	for _, p := range st.Positions {
+		if p.OpenDate != "2025-01-01" || p.AmountUSD != 250.50 {
+			t.Fatalf("position %s: open=%q amount=%v", p.PositionID, p.OpenDate, p.AmountUSD)
+		}
+	}
+}

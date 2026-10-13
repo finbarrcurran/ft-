@@ -104,6 +104,11 @@ func DefaultChecks(db *sql.DB) []Check {
 		// trading days (alert at >= 3), not by the file's modification time.
 		{Source: "farside", Label: "Farside ETF-flow data", MaxAge: 2 * 24 * h, Eval: etfFlowEval(FarsideFile)},
 
+		// eToro statement coverage (SC-51): Fin uploads statements by hand, so the data goes
+		// quiet when he forgets. Alert once the coverage end is more than 35 days old, remind weekly.
+		{Source: "statement_coverage", Label: "eToro statement coverage", MaxAge: 35 * 24 * h,
+			ReminderEvery: 7 * 24 * h, Eval: statementCoverageEval(db)},
+
 		// Google Drive bridge (SC-45 spec mirror, SC-47 library): the exporters touch a marker
 		// file on every successful run, including "nothing changed" runs (every 10 minutes).
 		{Source: "drive_spec", Label: "Drive spec mirror", MaxAge: 2 * h, Probe: fileProbe("/var/lib/ft/data/bridge/spec.ok")},

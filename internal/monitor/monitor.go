@@ -45,6 +45,9 @@ type Check struct {
 	Label    string        // human name for the alert
 	MaxAge   time.Duration // stale when older than this
 	Optional bool          // shown in Diagnostics, never alerts (known-dead feeds)
+	// ReminderEvery overrides the 24 h "still down" reminder interval for slow-moving sources
+	// (SC-51: statement coverage reminds weekly). Zero = the default.
+	ReminderEvery time.Duration
 	Probe    Probe
 	// Eval, when set, replaces the default "last success older than MaxAge" rule. It
 	// returns whether the source is down and a human detail (SC-49: the ETF-flow check
@@ -76,6 +79,7 @@ type Result struct {
 	MaxAge   time.Duration
 	Detail   string
 	Custom   bool // judged by Check.Eval: the detail already says everything
+	ReminderEvery time.Duration
 }
 
 func (m *Monitor) now() time.Time {
@@ -90,7 +94,7 @@ func (m *Monitor) Evaluate(ctx context.Context) []Result {
 	now := m.now()
 	out := make([]Result, 0, len(m.Checks))
 	for _, c := range m.Checks {
-		r := Result{Source: c.Source, Label: c.Label, Optional: c.Optional, MaxAge: c.MaxAge}
+		r := Result{Source: c.Source, Label: c.Label, Optional: c.Optional, MaxAge: c.MaxAge, ReminderEvery: c.ReminderEvery}
 		if c.Eval != nil {
 			down, last, found, detail, err := c.Eval(ctx, now)
 			r.LastOK, r.Found, r.Detail, r.Custom = last, found, detail, true
@@ -169,7 +173,11 @@ func (m *Monitor) Tick(ctx context.Context) {
 			m.upsert(ctx, r, statusDown, now.Unix(), lastOK, la)
 		case status == statusDown && r.Down:
 			la := lastAlert
-			if !r.Optional && (!lastAlert.Valid || now.Sub(time.Unix(lastAlert.Int64, 0)) >= reminderEvery) {
+			every := reminderEvery
+			if r.ReminderEvery > 0 {
+				every = r.ReminderEvery
+			}
+			if !r.Optional && (!lastAlert.Valid || now.Sub(time.Unix(lastAlert.Int64, 0)) >= every) {
 				text := fmt.Sprintf("🟠 FT connectivity: %s is STILL down (since %s)\n%s",
 					r.Label, time.Unix(since, 0).UTC().Format("2006-01-02 15:04 UTC"), describe(r, now))
 				m.alert(ctx, r.Source, "still_down", text, now)
