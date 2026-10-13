@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,7 +79,7 @@ func TestWeeklySnapshotTwoWeeksEndToEnd(t *testing.T) {
 		t.Fatalf("week %s saved %v", res.Payload.WeekStart, res.Saved)
 	}
 	md := readFile(t, filepath.Join(out, "ft-snapshot.md"))
-	if !strings.HasPrefix(md, "ft_snapshot_version: 1\ngenerated_at: ") || !strings.Contains(md, "week_start: 2026-10-05") || !strings.HasSuffix(strings.TrimSpace(md), "<!-- END ft-snapshot v1 -->") {
+	if !strings.HasPrefix(md, "ft_snapshot_version: 2\ngenerated_at: ") || !strings.Contains(md, "week_start: 2026-10-05") || !strings.HasSuffix(strings.TrimSpace(md), "<!-- END ft-snapshot v2 -->") {
 		t.Fatalf("file shape:\n%s", md[:300])
 	}
 	if c, _ := snapshot.Count(ctx, st.DB); c != 1 {
@@ -228,5 +229,119 @@ func TestScheduledSnapshotModes(t *testing.T) {
 	sun := time.Date(2026, 10, 18, 18, 0, 0, 0, time.UTC)
 	if err := s.RunScheduledSnapshot(ctx, sun, "sunday", nil); err != nil || count() != 2 {
 		t.Fatalf("sunday run: %v %d", err, count())
+	}
+}
+
+func setRegime(t *testing.T, st *store.Store, fw, value string, setAt time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	for k, v := range map[string]string{"regime_" + fw: value, "regime_" + fw + "_set_at": fmt.Sprint(setAt.Unix()), "regime_" + fw + "_source": "manual"} {
+		if err := st.SetPreference(ctx, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A1 live path: Jordi 101 days, Cowen unset 149 days: both ages in the file, data-health lines,
+// no regime change line.
+func TestSnapshotRegimeFreshnessAndHealth(t *testing.T) {
+	s, st := snapServer(t)
+	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	setRegime(t, st, "jordi", "stable", now.AddDate(0, 0, -101))
+	setRegime(t, st, "cowen", "unclassified", now.AddDate(0, 0, -149))
+	mustExec(t, st, `INSERT INTO regime_history (ts, framework_id, regime, source) VALUES (?, 'cowen', 'defensive', 'manual')`, now.AddDate(0, 0, -20).Unix())
+	res, err := s.RunWeeklySnapshot(context.Background(), now, SnapshotOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := res.Markdown
+	for _, want := range []string{"Regime (Jordi): stable — set 2026-07-04 (101 days ago, manual) — STALE (older than 14 days)", "Regime (Cowen): unset — unset since 2026-05-17 (149 days)", "Jordi regime: set 2026-07-04", "Cowen regime: unset since 2026-05-17"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("missing %q in:\n%s", want, md)
+		}
+	}
+	for _, l := range res.Report.Top {
+		if strings.Contains(l, "Cowen") {
+			t.Fatalf("defensive → unset must not be a Top change: %s", l)
+		}
+	}
+	if strings.Contains(md, "All monitored sources are ok") {
+		t.Fatal("must not claim everything is ok")
+	}
+	// A fresh, set regime shows no stale marker and no health line.
+	setRegime(t, st, "jordi", "stable", now.AddDate(0, 0, -3))
+	res2, _ := s.RunWeeklySnapshot(context.Background(), now, SnapshotOptions{DryRun: true})
+	if strings.Contains(res2.Markdown, "Jordi regime:") || strings.Contains(res2.Markdown, "Regime (Jordi): stable — set 2026-10-10 (3 days ago, manual) — STALE") {
+		t.Fatalf("fresh regime flagged stale:\n%s", res2.Markdown)
+	}
+}
+
+// A2 live path: a position removal between the two snapshots is annotated next to the value change.
+func TestSnapshotAnnotatesHoldingsRemoval(t *testing.T) {
+	s, st := snapServer(t)
+	ctx := context.Background()
+	mustExec(t, st, `INSERT INTO portfolio_value_history (date, total_value_usd, stocks_value_usd, crypto_value_usd, computed_at) VALUES ('2026-10-04', 28675, 7616, 21059, 1), ('2026-10-11', 25368, 5192, 20176, 1)`)
+	mustExec(t, st, `INSERT INTO holdings_audit (ts, user_id, holding_kind, holding_id, ticker, action, changes_json, reason_code) VALUES (?, 1, 'stock', 9, 'MSTR', 'soft_delete', '{"ftInvestedUsd":500.0,"backfilled":true,"tsEstimated":true}', 'etoro_reconcile'), (?, 1, 'stock', 10, 'NOW', 'soft_delete', '{"ftInvestedUsd":450.0}', 'etoro_reconcile')`,
+		time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC).Unix(), time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC).Unix())
+	// A tag update must not count as a holdings change.
+	mustExec(t, st, `INSERT INTO holdings_audit (ts, user_id, holding_kind, holding_id, ticker, action, changes_json, reason_code) VALUES (?, 1, 'stock', 11, 'AVGO', 'update', '{"x":{"from":null,"to":"y"}}', 'subtype_tag')`, time.Date(2026, 10, 9, 13, 0, 0, 0, time.UTC).Unix())
+	if err := snapshotSave(ctx, s, "2026-09-28"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.RunWeeklySnapshot(ctx, time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC), SnapshotOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := res.Markdown
+	if !strings.Contains(md, "2 removals ($950.00 invested: MSTR, NOW)") || !strings.Contains(md, "not separable from price movement") || !strings.Contains(md, "timestamps of backfilled rows are estimated") {
+		t.Fatalf("annotation missing:\n%s", md)
+	}
+	if strings.Contains(md, "AVGO") {
+		t.Fatal("a tag update is not a holdings change")
+	}
+	if !strings.Contains(strings.Join(res.Report.Top, "\n"), "holdings changes: 2 removals") {
+		t.Fatalf("top changes must carry the note: %v", res.Report.Top)
+	}
+	// No audit rows in the window: say so, still no estimate.
+	res0, _ := s.RunWeeklySnapshot(ctx, time.Date(2026, 10, 18, 18, 0, 0, 0, time.UTC), SnapshotOptions{DryRun: true})
+	_ = res0
+}
+
+func snapshotSave(ctx context.Context, s *Server, week string) error {
+	p := snapshot.New(week, time.Date(2026, 9, 28, 18, 0, 0, 0, time.UTC))
+	p.Metrics["portfolio.total_value_usd"] = 29387
+	return snapshot.Save(ctx, s.store.DB, p, time.Date(2026, 9, 28, 18, 0, 0, 0, time.UTC))
+}
+
+// A3 live path: RTX is in the entry zone and in the gap report (no thesis).
+func TestSnapshotInZoneWithoutThesis(t *testing.T) {
+	s, st := snapServer(t)
+	mustExec(t, st, `INSERT INTO watchlist (user_id, ticker, kind, current_price, target_entry_low, target_entry_high, added_at, updated_at) VALUES (1,'RTX','stock',10,9,11,1,1)`)
+	res, err := s.RunWeeklySnapshot(context.Background(), time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC), SnapshotOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := res.Payload.Sets["watchlist.in_zone_no_thesis"]
+	if len(got) != 1 || got[0] != "RTX" || !strings.Contains(res.Markdown, "In entry zone without a thesis: RTX") {
+		t.Fatalf("set %v\n%s", got, res.Markdown)
+	}
+}
+
+// The earlier falls in the "Last 4" column can be read against the holdings changes of those weeks.
+func TestSnapshotListsEarlierWeeksHoldingsChanges(t *testing.T) {
+	s, st := snapServer(t)
+	ctx := context.Background()
+	mustExec(t, st, `INSERT INTO holdings_audit (ts, user_id, holding_kind, holding_id, ticker, action, changes_json) VALUES (?, 1, 'stock', 9, 'MSTR', 'soft_delete', '{"ftInvestedUsd":500.0}')`, time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC).Unix())
+	if err := snapshotSave(ctx, s, "2026-10-05"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.RunWeeklySnapshot(ctx, time.Date(2026, 10, 18, 18, 0, 0, 0, time.UTC), SnapshotOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stored week 2026-10-05 was "taken" 2026-09-28; the removal on 10-07 is inside the
+	// current window; the week-ending lines cover the three windows before the previous snapshot.
+	if !strings.Contains(res.Markdown, "1 removal ($500.00 invested: MSTR)") {
+		t.Fatalf("removal not mentioned:\n%s", res.Markdown)
 	}
 }

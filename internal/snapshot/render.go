@@ -51,6 +51,7 @@ var labels = map[string]string{
 	"watchlist.in_zone_count":           "In entry zone",
 	"watchlist.in_zone":                 "Watchlist",
 	"gaps.open":                         "Gap report",
+	"watchlist.in_zone_no_thesis":       "Watchlist",
 	"theses.locked":                     "Thesis",
 	"theses.rescore_due":                "Thesis",
 	"portfolio.top5":                    "Portfolio",
@@ -180,7 +181,7 @@ func Render(p *Payload, r *Report) string {
 		lines := p.Lines[sec.Prefix]
 		var texts []string
 		for k, v := range p.Texts {
-			if strings.SplitN(k, ".", 2)[0] == sec.Prefix && !strings.HasSuffix(k, ".as_of") {
+			if strings.SplitN(k, ".", 2)[0] == sec.Prefix && !strings.HasSuffix(k, ".as_of") && !strings.HasSuffix(k, ".detail") {
 				texts = append(texts, k)
 				_ = v
 			}
@@ -220,8 +221,30 @@ func Render(p *Payload, r *Report) string {
 				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", Label(s.Key), now, change, trend)
 			}
 		}
+		if sec.Prefix == "portfolio" && len(r.ValueNotes) > 0 {
+			keys := make([]string, 0, len(r.ValueNotes))
+			for k := range r.ValueNotes {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			wrote := false
+			for _, k := range keys {
+				for _, s := range series {
+					if s.Key == k && s.Delta != nil && math.Abs(*s.Delta) > 1e-9 {
+						if !wrote {
+							b.WriteString("\n")
+							wrote = true
+						}
+						fmt.Fprintf(&b, "- Of the change in %s (%s): %s\n", strings.ToLower(Label(k)), FormatDelta(k, *s.Delta), r.ValueNotes[k].Long)
+					}
+				}
+			}
+		}
 		for _, k := range texts {
 			fmt.Fprintf(&b, "\n- %s: %s", Label(k), p.Texts[k])
+			if d := p.Texts[k+".detail"]; d != "" {
+				fmt.Fprintf(&b, " — %s", d)
+			}
 			for _, c := range r.TextChanges {
 				if c.Key == k {
 					fmt.Fprintf(&b, " (changed from %s to %s)", c.From, c.To)
@@ -287,6 +310,8 @@ func setHeading(key string) string {
 	switch key {
 	case "watchlist.in_zone":
 		return "In the entry zone"
+	case "watchlist.in_zone_no_thesis":
+		return "In entry zone without a thesis"
 	case "gaps.open":
 		return "Open gaps"
 	case "theses.locked":

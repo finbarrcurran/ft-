@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"ft/internal/snapshot"
@@ -75,6 +77,7 @@ func (s *Server) seedPayload(ctx context.Context, weekStart string) (*snapshot.P
 	asOf := sunday.Format("2006-01-02")
 	endTS := sunday.Add(24*time.Hour - time.Second).Unix()
 	p := snapshot.New(weekStart, time.Now())
+	p.Seeded = true
 	db := s.store.DB
 
 	var tot, st, cr sql.NullFloat64
@@ -146,3 +149,167 @@ func (s *Server) seedPayload(ctx context.Context, weekStart string) (*snapshot.P
 	}
 	return p, rows.Err()
 }
+
+// prevInstant is when the previous snapshot was taken: its stored time, or for a seeded week the
+// Sunday evening it stands for.
+func prevInstant(prev *snapshot.Payload) time.Time {
+	if !prev.Seeded {
+		if t, err := time.Parse(time.RFC3339, prev.GeneratedAt); err == nil {
+			return t
+		}
+	}
+	ws, _ := time.Parse("2006-01-02", prev.WeekStart)
+	return ws.AddDate(0, 0, 6).Add(18 * time.Hour)
+}
+
+type auditAgg struct {
+	removals, adds, adjusts int
+	removedUSD, addedUSD    float64
+	netAdjustUSD            float64
+	tickers                 map[string][]string
+	estimated               bool
+}
+
+// auditWindow aggregates the holdings changes recorded in (from, to], by holding kind.
+func (s *Server) auditWindow(ctx context.Context, from, to time.Time) map[string]*auditAgg {
+	agg := map[string]*auditAgg{"stock": {tickers: map[string][]string{}}, "crypto": {tickers: map[string][]string{}}}
+	rows, err := s.store.DB.QueryContext(ctx, `SELECT holding_kind, COALESCE(ticker, symbol, ''), action, changes_json FROM holdings_audit WHERE ts > ? AND ts <= ? AND action IN ('create','soft_delete','restore','update') ORDER BY ts`, from.Unix(), to.Unix())
+	if err != nil {
+		return agg
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, tk, action, raw string
+		if err := rows.Scan(&kind, &tk, &action, &raw); err != nil {
+			return agg
+		}
+		a := agg[kind]
+		if a == nil {
+			continue
+		}
+		var ch map[string]any
+		_ = json.Unmarshal([]byte(raw), &ch)
+		if b, _ := ch["tsEstimated"].(bool); b {
+			a.estimated = true
+		}
+		switch action {
+		case "soft_delete":
+			a.removals++
+			a.removedUSD += numOr(ch["ftInvestedUsd"])
+			a.tickers["removed"] = append(a.tickers["removed"], tk)
+		case "create", "restore":
+			a.adds++
+			if nw, ok := ch["new"].(map[string]any); ok {
+				a.addedUSD += numOr(nw["investedUsd"])
+			}
+			a.tickers["added"] = append(a.tickers["added"], tk)
+		case "update":
+			if inv, ok := ch["investedUsd"].(map[string]any); ok {
+				a.adjusts++
+				a.netAdjustUSD += numOr(inv["to"]) - numOr(inv["from"])
+				a.tickers["adjusted"] = append(a.tickers["adjusted"], tk)
+			}
+		}
+	}
+	return agg
+}
+
+const flowsText = "deposits and withdrawals are not recorded in FT, so they are not separable from price movement"
+
+// describeAgg renders the recorded holdings changes (empty string when there are none).
+func describeAgg(as ...*auditAgg) string {
+	var rem, add, adj int
+	var remU, addU, netU float64
+	est := false
+	var rt, at, jt []string
+	for _, a := range as {
+		rem += a.removals
+		add += a.adds
+		adj += a.adjusts
+		remU += a.removedUSD
+		addU += a.addedUSD
+		netU += a.netAdjustUSD
+		est = est || a.estimated
+		rt = append(rt, a.tickers["removed"]...)
+		at = append(at, a.tickers["added"]...)
+		jt = append(jt, a.tickers["adjusted"]...)
+	}
+	if rem+add+adj == 0 {
+		return ""
+	}
+	var parts []string
+	if rem > 0 {
+		parts = append(parts, fmt.Sprintf("%d removal%s (%s invested: %s)", rem, plural(rem), snapMoney(remU), tickerList(rt)))
+	}
+	if add > 0 {
+		parts = append(parts, fmt.Sprintf("%d addition%s (%s invested: %s)", add, plural(add), snapMoney(addU), tickerList(at)))
+	}
+	if adj > 0 {
+		parts = append(parts, fmt.Sprintf("%d invested-amount adjustment%s (net %s: %s)", adj, plural(adj), snapMoney(netU), tickerList(jt)))
+	}
+	out := strings.Join(parts, "; ")
+	if est {
+		out += " (timestamps of backfilled rows are estimated)"
+	}
+	return out
+}
+
+// valueNotes explains the portfolio value changes: holdings changes recorded in holdings_audit
+// since the previous snapshot, and a plain statement that capital flows are not recorded. It
+// never estimates an amount: a flow or change it cannot separate is said to be not separable.
+func (s *Server) valueNotes(ctx context.Context, prev *snapshot.Payload, now time.Time) map[string]snapshot.ValueNote {
+	agg := s.auditWindow(ctx, prevInstant(prev), now)
+	one := func(as ...*auditAgg) snapshot.ValueNote {
+		d := describeAgg(as...)
+		if d == "" {
+			return snapshot.ValueNote{Short: "no holdings changes recorded",
+				Long: "no holdings changes were recorded since the last snapshot; " + flowsText + "."}
+		}
+		var rem, add, adj int
+		for _, a := range as {
+			rem += a.removals
+			add += a.adds
+			adj += a.adjusts
+		}
+		return snapshot.ValueNote{
+			Short: fmt.Sprintf("holdings changes: %d removal%s, %d addition%s, %d adjustment%s; capital flows not recorded", rem, plural(rem), add, plural(add), adj, plural(adj)),
+			Long:  "holdings changes recorded since the last snapshot: " + d + "; " + flowsText + ".",
+		}
+	}
+	return map[string]snapshot.ValueNote{
+		"portfolio.stocks_value_usd": one(agg["stock"]),
+		"portfolio.crypto_value_usd": one(agg["crypto"]),
+		"portfolio.total_value_usd":  one(agg["stock"], agg["crypto"]),
+	}
+}
+
+// valueHistoryLines lists, for the three weeks before the previous snapshot, the holdings changes
+// recorded in each, so an earlier fall in the "Last 4" column can be read against them.
+func (s *Server) valueHistoryLines(ctx context.Context, prev *snapshot.Payload) []string {
+	var out []string
+	end := prevInstant(prev)
+	for k := 0; k < 3; k++ {
+		to := end.AddDate(0, 0, -7*k)
+		from := to.AddDate(0, 0, -7)
+		agg := s.auditWindow(ctx, from, to)
+		if d := describeAgg(agg["stock"], agg["crypto"]); d != "" {
+			out = append(out, fmt.Sprintf("Holdings changes in the week ending %s: %s.", to.Format("2006-01-02"), d))
+		}
+	}
+	return out
+}
+
+func numOr(v any) float64 {
+	f, _ := v.(float64)
+	return f
+}
+
+func tickerList(t []string) string {
+	sort.Strings(t)
+	if len(t) > 6 {
+		return strings.Join(t[:6], ", ") + fmt.Sprintf(" and %d more", len(t)-6)
+	}
+	return strings.Join(t, ", ")
+}
+
+func snapMoney(v float64) string { return snapshot.FormatNumber("x_usd", v) }

@@ -165,10 +165,10 @@ func TestRenderHasHeaderEndMarkerAndStaysShort(t *testing.T) {
 	b.Notes = []string{"Conviction bands are not stored in FT."}
 	out := Render(b, Compare(b, []*Payload{a}))
 	lines := strings.Split(out, "\n")
-	if !strings.HasPrefix(out, "ft_snapshot_version: 1\ngenerated_at: ") || !strings.Contains(out, "\nweek_start: 2026-10-12\n") {
+	if !strings.HasPrefix(out, "ft_snapshot_version: 2\ngenerated_at: ") || !strings.Contains(out, "\nweek_start: 2026-10-12\n") {
 		t.Fatalf("header:\n%s", out[:200])
 	}
-	if !strings.HasSuffix(strings.TrimSpace(out), "<!-- END ft-snapshot v1 -->") {
+	if !strings.HasSuffix(strings.TrimSpace(out), "<!-- END ft-snapshot v2 -->") {
 		t.Fatal("end marker missing")
 	}
 	if len(lines) > 250 {
@@ -217,5 +217,85 @@ func TestSaveReplacesTheSameWeekAndKeepsOthers(t *testing.T) {
 	prev, _ := Before(ctx, db, "2026-10-12", 3)
 	if len(prev) != 1 || prev[0].WeekStart != "2026-10-05" {
 		t.Fatalf("before: %+v", prev)
+	}
+}
+
+// A1: an unset or unclassified state is never a regime change; a real change still ranks first.
+func TestUnsetAndUnclassifiedAreNotRegimeChanges(t *testing.T) {
+	for _, c := range []struct{ prev, cur string }{
+		{"defensive", "unset"}, {"defensive", "unclassified"}, {"unset", "stable"}, {"unclassified", "defensive"}, {"unset", "unset"},
+	} {
+		a, b := payload("2026-10-05"), payload("2026-10-12")
+		a.Texts["regime.cowen"], b.Texts["regime.cowen"] = c.prev, c.cur
+		r := Compare(b, []*Payload{a})
+		if len(r.TextChanges) != 0 || len(r.Top) != 0 {
+			t.Fatalf("%s → %s must not be a change: %+v %v", c.prev, c.cur, r.TextChanges, r.Top)
+		}
+	}
+	a, b := payload("2026-10-05"), payload("2026-10-12")
+	a.Texts["regime.jordi"], b.Texts["regime.jordi"] = "stable", "defensive"
+	a.Metrics["portfolio.total_value_usd"], b.Metrics["portfolio.total_value_usd"] = 100, 150
+	r := Compare(b, []*Payload{a})
+	if len(r.Top) != 2 || r.Top[0] != "Regime (Jordi): stable → defensive" {
+		t.Fatalf("a real change must rank first: %v", r.Top)
+	}
+}
+
+// A1: the file shows the regime with its age/stale detail, and an unset regime reads "unset since".
+func TestRegimeDetailIsRendered(t *testing.T) {
+	b := payload("2026-10-12")
+	b.Texts["regime.jordi"] = "stable"
+	b.Texts["regime.jordi.detail"] = "set 2026-07-03 (101 days ago, manual) — STALE (older than 14 days)"
+	b.Texts["regime.cowen"] = "unset"
+	b.Texts["regime.cowen.detail"] = "unset since 2026-05-16 (149 days)"
+	b.Lines["data_health"] = []string{"Monitored external sources: all ok.", "Jordi regime: set 2026-07-03 (101 days ago, manual) — STALE (older than 14 days)"}
+	out := Render(b, Compare(b, nil))
+	for _, want := range []string{"Regime (Jordi): stable — set 2026-07-03 (101 days ago, manual) — STALE", "Regime (Cowen): unset — unset since 2026-05-16 (149 days)", "Jordi regime: set 2026-07-03"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "All monitored sources are ok") {
+		t.Fatal("the health section must not claim everything is ok")
+	}
+}
+
+// A2: value changes carry the holdings-change annotation; the first snapshot is unchanged.
+func TestValueNotesAppearNextToTheChange(t *testing.T) {
+	a, b := payload("2026-10-05"), payload("2026-10-12")
+	a.Metrics["portfolio.total_value_usd"], b.Metrics["portfolio.total_value_usd"] = 28675, 25368
+	notes := map[string]ValueNote{"portfolio.total_value_usd": {Short: "holdings changes: 6 removals, 0 additions, 0 adjustments; capital flows not recorded", Long: "holdings changes recorded since the last snapshot: 6 removals ($2,000.00 invested: MSTR, NOW); deposits and withdrawals are not recorded in FT, so they are not separable from price movement."}}
+	r := CompareWith(b, []*Payload{a}, notes)
+	if len(r.Top) != 1 || !strings.Contains(r.Top[0], "— holdings changes: 6 removals") {
+		t.Fatalf("top: %v", r.Top)
+	}
+	out := Render(b, r)
+	if !strings.Contains(out, "Of the change in total value (stocks + crypto) (-$3,307.00): holdings changes recorded since the last snapshot: 6 removals") {
+		t.Fatalf("long note missing:\n%s", out)
+	}
+	// Unchanged value: no note. First snapshot: no note, no change.
+	b.Metrics["portfolio.total_value_usd"] = 28675
+	if out := Render(b, CompareWith(b, []*Payload{a}, notes)); strings.Contains(out, "Of the change in") {
+		t.Fatal("no note when the value did not move")
+	}
+	if out := Render(b, Compare(b, nil)); strings.Contains(out, "Of the change in") || !strings.Contains(out, "First snapshot") {
+		t.Fatal("first snapshot must be unchanged")
+	}
+}
+
+// A3: entering "in the entry zone without a thesis" is a Top change; leaving it is not.
+func TestInZoneWithoutThesisTopChange(t *testing.T) {
+	a, b := payload("2026-10-05"), payload("2026-10-12")
+	a.Sets["watchlist.in_zone_no_thesis"], b.Sets["watchlist.in_zone_no_thesis"] = nil, []string{"RTX"}
+	r := Compare(b, []*Payload{a})
+	if len(r.Top) != 1 || r.Top[0] != "Watchlist: RTX is in the entry zone without a thesis" {
+		t.Fatalf("top: %v", r.Top)
+	}
+	r = Compare(a, []*Payload{b})
+	if len(r.Top) != 0 || r.ChangeCount != 1 {
+		t.Fatalf("leaving the state is visible but not a Top change: %v / %d", r.Top, r.ChangeCount)
+	}
+	if out := Render(b, Compare(b, nil)); !strings.Contains(out, "In entry zone without a thesis: RTX") {
+		t.Fatalf("the section must show RTX:\n%s", out)
 	}
 }

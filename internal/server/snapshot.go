@@ -280,6 +280,28 @@ func (s *Server) BuildSnapshot(ctx context.Context, weekStart string, now time.T
 		p.Sets["watchlist.in_zone"] = in
 	}
 
+	// A3: process flag, not a recommendation: a ticker in the entry zone that has no thesis.
+	{
+		gapTickers := map[string]bool{}
+		for _, g := range p.Sets["gaps.open"] {
+			if i := strings.Index(g, ":"); i >= 0 {
+				gapTickers[g[i+1:]] = true
+			}
+		}
+		if _, ok := p.Sets["gaps.open"]; ok {
+			if _, ok2 := p.Sets["watchlist.in_zone"]; ok2 {
+				both := []string{}
+				for _, tk := range p.Sets["watchlist.in_zone"] {
+					if gapTickers[tk] {
+						both = append(both, tk)
+					}
+				}
+				sort.Strings(both)
+				p.Sets["watchlist.in_zone_no_thesis"] = both
+			}
+		}
+	}
+
 	// --- Alerts: the last 7 days by kind (notification_log), plus the live count ---
 	if err := s.snapshotAlerts(ctx, p, now); err != nil {
 		omit("alerts", err)
@@ -309,11 +331,14 @@ func (s *Server) BuildSnapshot(ctx context.Context, weekStart string, now time.T
 		if v := fstr(rg["effective"]); v != "" {
 			p.Texts["regime.effective"] = v
 		}
-		if v := fstr(dig(rg, "jordi", "regime")); v != "" {
-			p.Texts["regime.jordi"] = v
-		}
-		if v := fstr(dig(rg, "cowen", "regime")); v != "" {
-			p.Texts["regime.cowen"] = v
+		for _, fw := range []struct{ key, name string }{{"jordi", "Jordi"}, {"cowen", "Cowen"}} {
+			m, _ := rg[fw.key].(map[string]any)
+			value, detail, stale := regimeState(m, now)
+			p.Texts["regime."+fw.key] = value
+			p.Texts["regime."+fw.key+".detail"] = detail
+			if stale {
+				p.Lines["data_health"] = append(p.Lines["data_health"], fmt.Sprintf("%s regime: %s", fw.name, detail))
+			}
 		}
 	}
 	if mr, err := call("/api/macro/regime", nil, s.handleMacroRegime); err != nil {
@@ -365,7 +390,7 @@ func (s *Server) BuildSnapshot(ctx context.Context, weekStart string, now time.T
 		p.Lines["data_health"] = append(p.Lines["data_health"], line)
 	}
 	if bad == 0 {
-		p.Lines["data_health"] = []string{"All monitored sources are ok."}
+		p.Lines["data_health"] = append([]string{"Monitored external sources: all ok."}, p.Lines["data_health"]...)
 	}
 
 	// --- Video digest: the latest week ---
@@ -420,6 +445,42 @@ func (s *Server) BuildSnapshot(ctx context.Context, weekStart string, now time.T
 		}
 	}
 	return p, nil
+}
+
+// regimeState returns the regime value, a one-line detail with its set-at date and age, and
+// whether it is stale (the handler's own flag: older than 14 days). An unclassified regime is
+// reported as "unset" with the date it has been unset since.
+func regimeState(m map[string]any, now time.Time) (value, detail string, stale bool) {
+	if m == nil {
+		return "unset", "no regime record", true
+	}
+	value = fstr(m["regime"])
+	stale, _ = m["stale"].(bool)
+	age := ""
+	date := ""
+	if t, err := time.Parse(time.RFC3339, fstr(m["set_at"])); err == nil {
+		date = t.UTC().Format("2006-01-02")
+		age = fmt.Sprintf("%d days", int(now.Sub(t).Hours()/24))
+	}
+	if !snapshot.IsState(value) {
+		value = "unset"
+		if date != "" {
+			return value, fmt.Sprintf("unset since %s (%s)", date, age), true
+		}
+		return value, "unset", true
+	}
+	detail = "set " + date
+	if age != "" {
+		detail += " (" + age + " ago"
+		if src := fstr(m["source"]); src != "" {
+			detail += ", " + src
+		}
+		detail += ")"
+	}
+	if stale {
+		detail += " — STALE (older than 14 days)"
+	}
+	return value, detail, stale
 }
 
 func freshnessRuleText(id string) string {
@@ -538,7 +599,15 @@ func (s *Server) RunWeeklySnapshot(ctx context.Context, now time.Time, opt Snaps
 	if err != nil {
 		return nil, err
 	}
-	rep := snapshot.Compare(p, hist)
+	var notes map[string]snapshot.ValueNote
+	if len(hist) > 0 {
+		notes = s.valueNotes(ctx, hist[0], now)
+		if ls := s.valueHistoryLines(ctx, hist[0]); len(ls) > 0 {
+			p.Lines["portfolio"] = append(p.Lines["portfolio"], ls...)
+			p.Lines["portfolio"] = append(p.Lines["portfolio"], "Earlier value changes above are read against these recorded holdings changes; "+flowsText+".")
+		}
+	}
+	rep := snapshot.CompareWith(p, hist, notes)
 	if len(seeded) > 0 {
 		p.Notes = append(p.Notes, "Weeks before the first stored snapshot are filled only from FT's existing history tables (portfolio value, alerts raised, regimes, thesis scores and lock dates); every other metric starts at its first snapshot.")
 	}
