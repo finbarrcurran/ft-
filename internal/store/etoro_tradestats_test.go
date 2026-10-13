@@ -180,6 +180,18 @@ func TestTradeStatsReconcileWithYearTable(t *testing.T) {
 			t.Fatalf("%s: trades %v vs year table %v", scope, r.Stats.TotalUSD, want)
 		}
 	}
+	// The year table's scoped trade counts come from the same positions.
+	var nd, nc int
+	for _, a := range row.Assets {
+		nd += a.TradeCountDisc
+		nc += a.TradeCountCopy
+		if a.TradeCountDisc+a.TradeCountCopy != a.TradeCount {
+			t.Fatalf("%s: scoped counts %d+%d != %d", a.AssetType, a.TradeCountDisc, a.TradeCountCopy, a.TradeCount)
+		}
+	}
+	if nd != 3 || nc != 2 {
+		t.Fatalf("scoped counts: disc %d copy %d", nd, nc)
+	}
 	r, _ := st.EtoroTradeStats(ctx, 1, "discretionary", "2026", 0)
 	if r.Stats.N != 3 || r.AmountUnknown != 0 {
 		t.Fatalf("discretionary: %+v", r.Stats)

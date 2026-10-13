@@ -25,6 +25,10 @@ type EtoroAssetRow struct {
 	FeesUSD         float64 `json:"feesUsd"`
 	FeesEUR         float64 `json:"feesEur"`
 	TradeCount      int     `json:"tradeCount"`
+	// SC-51 follow-up: trades per scope (from etoro_closed_positions) so the scoped year tables
+	// can show a scoped count. TradeCount stays the all-scope figure.
+	TradeCountDisc int `json:"tradeCountDisc"`
+	TradeCountCopy int `json:"tradeCountCopy"`
 }
 
 // EtoroYearRow is the per-year authoritative summary plus its asset breakdown.
@@ -200,6 +204,30 @@ func (s *Store) ListEtoroPerformance(ctx context.Context, userID int64) ([]Etoro
 		if err := arows.Err(); err != nil {
 			return nil, err
 		}
+		crows, err := s.DB.QueryContext(ctx, `
+			SELECT asset_type, is_copy, COUNT(*) FROM etoro_closed_positions
+			 WHERE user_id = ? AND year = ? GROUP BY asset_type, is_copy`, userID, out[i].Year)
+		if err != nil {
+			return nil, err
+		}
+		for crows.Next() {
+			var t string
+			var isCopy, n int
+			if err := crows.Scan(&t, &isCopy, &n); err != nil {
+				crows.Close()
+				return nil, err
+			}
+			for j := range out[i].Assets {
+				if out[i].Assets[j].AssetType == t {
+					if isCopy == 1 {
+						out[i].Assets[j].TradeCountCopy = n
+					} else {
+						out[i].Assets[j].TradeCountDisc = n
+					}
+				}
+			}
+		}
+		crows.Close()
 	}
 
 	return out, nil

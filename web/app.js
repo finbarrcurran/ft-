@@ -2526,15 +2526,17 @@ function openCashBalanceModal(summaryPayload) {
 // =============================================================================
 
 // View state for the disc/copy strategy toggle. Persisted to localStorage.
+// One scope control for the whole tab (year tables AND trade statistics). Saved under a new
+// key so a previously saved "all" is dropped once; first load defaults to Discretionary.
 let etoroStrategyView = (() => {
   try {
-    const v = localStorage.getItem('ft.etoroStrategyView');
-    return v === 'discretionary' || v === 'copy' ? v : 'all';
-  } catch (_) { return 'all'; }
+    const v = localStorage.getItem('ft.etoroScope.v2');
+    return v === 'copy' || v === 'all' || v === 'discretionary' ? v : 'discretionary';
+  } catch (_) { return 'discretionary'; }
 })();
 
 // SC-51 Part A — trade statistics view state (scope, year, small-position filter).
-const etoroTrade = { scope: 'discretionary', year: null, minAmount: 0 };
+const etoroTrade = { year: null, minAmount: 0 }; // scope comes from etoroStrategyView
 
 const TS_DEFS = {
   n: 'Number of closed positions in the selected scope and period (break-even trades included).',
@@ -2596,7 +2598,7 @@ function renderEtoroTradeStatsHTML(res) {
   const s = res.stats;
   const yearOpts = ['all', ...(res.years || []).slice().reverse().map(String)];
   const sel = (v, cur) => (String(v) === String(cur) ? 'selected' : '');
-  const scopeBtn = (k, label) => `<button class="etoro-strat-btn ts-scope ${res.scope === k ? 'active' : ''}" data-scope="${k}">${label}</button>`;
+  const scopeName = { discretionary: 'Discretionary', copy: 'Copy / CFD', all: 'All' }[res.scope] || res.scope;
   const minOpts = [0, 10, 50, 100];
   const filterNote = res.minAmountUsd > 0
     ? `<div class="ts-note dim">Excluding positions under ${etoroMoney(res.minAmountUsd, 'USD')} invested: ${res.excludedN} trade${res.excludedN === 1 ? '' : 's'} (${etoroMoney(res.excludedUsd, 'USD')}) left out, so the total no longer matches the year table.</div>` : '';
@@ -2618,7 +2620,7 @@ function renderEtoroTradeStatsHTML(res) {
       <h4 class="cvs-title">Trade statistics <span class="dim">· USD · closed positions only</span></h4>
       <p class="dim cvs-sub">From the stored closed positions. Dividends, interest, refunds and other income are not trades and are not included. Hover a figure for its definition.</p>
       <div class="ts-controls">
-        <div class="etoro-strat-toggle" role="tablist" aria-label="Scope">${scopeBtn('discretionary', 'Discretionary')}${scopeBtn('copy', 'Copy / CFD')}${scopeBtn('all', 'All')}</div>
+        <span class="ts-scope-label" title="Set by the scope control at the top of the Performance history">Scope: <strong>${scopeName}</strong></span>
         <label class="dim">Period <select class="ts-year">${yearOpts.map((y) => `<option value="${y}" ${sel(y, res.year)}>${y === 'all' ? 'All years' : y}</option>`).join('')}</select></label>
         <label class="dim" title="Leave out very small positions. Off by default.">Exclude under <select class="ts-min">${minOpts.map((v) => `<option value="${v}" ${sel(v, res.minAmountUsd)}>${v === 0 ? 'off' : '$' + v}</option>`).join('')}</select></label>
       </div>
@@ -2635,12 +2637,9 @@ async function loadEtoroTradeStats(years) {
     etoroTrade.year = ytd ? String(ytd.year) : 'all';
   }
   try {
-    const qs = `scope=${encodeURIComponent(etoroTrade.scope)}&year=${encodeURIComponent(etoroTrade.year)}&minAmount=${etoroTrade.minAmount}`;
+    const qs = `scope=${encodeURIComponent(etoroStrategyView)}&year=${encodeURIComponent(etoroTrade.year)}&minAmount=${etoroTrade.minAmount}`;
     const res = await api(`/api/etoro/trade-stats?${qs}`);
     host.innerHTML = renderEtoroTradeStatsHTML(res);
-    for (const b of host.querySelectorAll('.ts-scope')) {
-      b.addEventListener('click', () => { etoroTrade.scope = b.dataset.scope; loadEtoroTradeStats(years); });
-    }
     const ys = host.querySelector('.ts-year');
     if (ys) ys.addEventListener('change', () => { etoroTrade.year = ys.value; loadEtoroTradeStats(years); });
     const ms = host.querySelector('.ts-min');
@@ -2872,9 +2871,9 @@ async function renderEtoroPerformance(currency) {
     `<button class="etoro-strat-btn ${etoroStrategyView === key ? 'active' : ''}" data-strat="${key}">${label}</button>`;
   const stratToggle = `
     <div class="etoro-strat-toggle" role="tablist" aria-label="Strategy">
-      ${stratBtn('all', 'All')}
       ${stratBtn('discretionary', 'Discretionary')}
-      ${stratBtn('copy', 'Copy')}
+      ${stratBtn('copy', 'Copy / CFD')}
+      ${stratBtn('all', 'All')}
     </div>`;
 
   // realisedFor returns the asset realised P&L for the active strategy view.
@@ -2902,7 +2901,7 @@ async function renderEtoroPerformance(currency) {
       : `<span class="etoro-recon-ok" title="discretionary + copy/CFD reconciles to closed-P/L total">✓ reconciles</span>`;
     ytdCard = `
       <div class="etoro-ytd-card">
-        <div class="etoro-ytd-label">YTD ${ytd.year} · discretionary realised <span class="dim">(${escapeHTML(ytd.rangeStart)} → ${escapeHTML(ytd.rangeEnd)})</span></div>
+        <div class="etoro-ytd-label">YTD ${ytd.year} · realised <span class="dim">(${escapeHTML(ytd.rangeStart)} → ${escapeHTML(ytd.rangeEnd)})</span></div>
         <div class="etoro-ytd-net num ${discY > 0 ? 'gain' : discY < 0 ? 'loss' : ''}">${etoroMoney(discY, ccy)}</div>
         <div class="etoro-ytd-split">
           <span class="etoro-ytd-splitline">your own picks (discretionary) <strong class="num ${discY > 0 ? 'gain' : discY < 0 ? 'loss' : ''}">${etoroMoney(discY, ccy)}</strong></span>
@@ -2921,12 +2920,22 @@ async function renderEtoroPerformance(currency) {
 
   // Annual tables — one per year, asset rows + a year total.
   const yearBlocks = years.map((y) => {
+    const scoped = etoroStrategyView !== 'all';
+    const tradesFor = (a) => (etoroStrategyView === 'discretionary' ? (a.tradeCountDisc || 0)
+      : etoroStrategyView === 'copy' ? (a.tradeCountCopy || 0) : (a.tradeCount || 0));
+    // Scoped views: only realised P&L and trade counts split by strategy. Dividends, fees,
+    // interest and refunds are account-level and shown once, never with a Net.
     const rows = (y.assets || []).map((a) => {
       const realised = realisedFor(a);
       const div = ccyPick(a, 'dividends', ccy);
       const fees = ccyPick(a, 'fees', ccy);
       const net = realised + div + fees;
-      return `
+      return scoped ? `
+        <tr>
+          <td>${escapeHTML(a.assetType)}</td>
+          <td class="num ${realised > 0 ? 'gain' : realised < 0 ? 'loss' : ''}">${etoroMoney(realised, ccy)}</td>
+          <td class="num dim">${tradesFor(a)}</td>
+        </tr>` : `
         <tr>
           <td>${escapeHTML(a.assetType)}</td>
           <td class="num ${realised > 0 ? 'gain' : realised < 0 ? 'loss' : ''}">${etoroMoney(realised, ccy)}</td>
@@ -2937,21 +2946,47 @@ async function renderEtoroPerformance(currency) {
         </tr>`;
     }).join('');
 
-    // Year totals (across assets) for the active strategy view.
     const tRealised = (y.assets || []).reduce((s, a) => s + realisedFor(a), 0);
+    const tTrades = (y.assets || []).reduce((s, a) => s + tradesFor(a), 0);
     const tDiv = ccyPick(y, 'dividends', ccy);
     const tFees = ccyPick(y, 'fees', ccy);
-    const tInterest = ccyPick(y, 'interest', ccy);
-    // When the strategy view is "all", the year net mirrors the authoritative
-    // Financial Summary net; for disc/copy we sum the visible realised lines.
-    const tNet = etoroStrategyView === 'all'
-      ? ccyPick(y, 'net', ccy)
-      : tRealised + tDiv + tFees + tInterest;
+    // Net exists only in the All view, where it is eToro's own Financial Summary net.
+    const tNet = ccyPick(y, 'net', ccy);
 
     const recon = ccyPick(y, 'reconDelta', ccy);
     const reconNote = Math.abs(recon) > 1
       ? `<span class="etoro-recon-flag" title="Financial Summary vs closed-positions delta">recon Δ ${etoroMoney(recon, ccy)}</span>`
       : '';
+    const incomeParts = `interest ${etoroMoney(ccyPick(y, 'interest', ccy), ccy)} · refunds ${etoroMoney(ccyPick(y, 'refunds', ccy), ccy)} · other ${etoroMoney(ccyPick(y, 'otherIncome', ccy), ccy)}${Math.abs(ccyPick(y, 'unclassified', ccy)) > 0.004 ? ` · <span class="loss">⚠ unclassified ${etoroMoney(ccyPick(y, 'unclassified', ccy), ccy)}</span>` : ''}`;
+    const hasIncome = ccyPick(y, 'interest', ccy) || ccyPick(y, 'refunds', ccy) || ccyPick(y, 'otherIncome', ccy) || ccyPick(y, 'unclassified', ccy);
+
+    const head = scoped
+      ? '<th>Asset</th><th class="num">Realised</th><th class="num">Trades</th>'
+      : '<th>Asset</th><th class="num">Realised</th><th class="num">Dividends</th><th class="num">Fees</th><th class="num">Net</th><th class="num">Trades</th>';
+    const totalRow = scoped ? `
+            <tr class="etoro-total-row">
+              <td>Total realised</td>
+              <td class="num ${tRealised > 0 ? 'gain' : tRealised < 0 ? 'loss' : ''}">${etoroMoney(tRealised, ccy)}</td>
+              <td class="num dim">${tTrades}</td>
+            </tr>
+            <tr class="etoro-income-row etoro-account-row">
+              <td title="Dividends, fees, interest and refunds belong to the whole account and cannot be split between copy and discretionary. Switch to All for the net.">Account-level <span class="dim">(not split by strategy)</span></td>
+              <td colspan="2" class="num dim">dividends ${etoroMoney(tDiv, ccy)} · fees ${etoroMoney(tFees, ccy)} · ${incomeParts}</td>
+            </tr>` : `
+            <tr class="etoro-total-row">
+              <td>Total</td>
+              <td class="num ${tRealised > 0 ? 'gain' : tRealised < 0 ? 'loss' : ''}">${etoroMoney(tRealised, ccy)}</td>
+              <td class="num">${etoroMoney(tDiv, ccy)}</td>
+              <td class="num">${etoroMoney(tFees, ccy)}</td>
+              <td class="num ${tNet > 0 ? 'gain' : tNet < 0 ? 'loss' : ''}">${etoroMoney(tNet, ccy)}</td>
+              <td></td>
+            </tr>
+            ${hasIncome ? `
+            <tr class="etoro-income-row">
+              <td title="Whole-period lines from the Financial Summary: counted in total return, never in per-trade statistics">Income &amp; other</td>
+              <td colspan="4" class="num dim">${incomeParts}</td>
+              <td></td>
+            </tr>` : ''}`;
 
     return `
       <div class="etoro-year-block">
@@ -2962,28 +2997,10 @@ async function renderEtoroPerformance(currency) {
           ${reconNote}
         </div>
         <table class="etoro-table">
-          <thead>
-            <tr>
-              <th>Asset</th><th class="num">Realised</th><th class="num">Dividends</th>
-              <th class="num">Fees</th><th class="num">Net</th><th class="num">Trades</th>
-            </tr>
-          </thead>
+          <thead><tr>${head}</tr></thead>
           <tbody>
-            ${rows || '<tr><td colspan="6" class="dim">no closed positions</td></tr>'}
-            <tr class="etoro-total-row">
-              <td>Total</td>
-              <td class="num ${tRealised > 0 ? 'gain' : tRealised < 0 ? 'loss' : ''}">${etoroMoney(tRealised, ccy)}</td>
-              <td class="num">${etoroMoney(tDiv, ccy)}</td>
-              <td class="num">${etoroMoney(tFees, ccy)}</td>
-              <td class="num ${tNet > 0 ? 'gain' : tNet < 0 ? 'loss' : ''}">${etoroMoney(tNet, ccy)}</td>
-              <td></td>
-            </tr>
-            ${(ccyPick(y, 'interest', ccy) || ccyPick(y, 'refunds', ccy) || ccyPick(y, 'otherIncome', ccy) || ccyPick(y, 'unclassified', ccy)) ? `
-            <tr class="etoro-income-row">
-              <td title="Whole-period lines from the Financial Summary: counted in total return, never in per-trade statistics">Income &amp; other</td>
-              <td colspan="4" class="num dim">interest ${etoroMoney(ccyPick(y, 'interest', ccy), ccy)} · refunds ${etoroMoney(ccyPick(y, 'refunds', ccy), ccy)} · other ${etoroMoney(ccyPick(y, 'otherIncome', ccy), ccy)}${Math.abs(ccyPick(y, 'unclassified', ccy)) > 0.004 ? ` · <span class="loss">⚠ unclassified ${etoroMoney(ccyPick(y, 'unclassified', ccy), ccy)}</span>` : ''}</td>
-              <td></td>
-            </tr>` : ''}
+            ${rows || `<tr><td colspan="${scoped ? 3 : 6}" class="dim">no closed positions</td></tr>`}
+            ${totalRow}
           </tbody>
         </table>
       </div>`;
@@ -3009,10 +3026,10 @@ async function renderEtoroPerformance(currency) {
   loadEtoroTradeStats(years);
 
   // Wire strategy toggle.
-  for (const btn of el.querySelectorAll('.etoro-strat-btn:not(.ts-scope)')) {
+  for (const btn of el.querySelectorAll('.etoro-strat-btn')) {
     btn.addEventListener('click', () => {
       etoroStrategyView = btn.dataset.strat;
-      try { localStorage.setItem('ft.etoroStrategyView', etoroStrategyView); } catch (_) {}
+      try { localStorage.setItem('ft.etoroScope.v2', etoroStrategyView); } catch (_) {}
       renderEtoroPerformance(currency);
     });
   }

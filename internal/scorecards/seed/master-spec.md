@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.84.0 · 2026-10-13** — latest change: Trade statistics and statement coverage (§13).
+> **Current version: v1.84.1 · 2026-10-13** — latest change: Performance tab: one scope control (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.84.0 2026-10-13 -->
+<!-- reference_reviewed: v1.84.1 2026-10-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -38,7 +38,7 @@ Nineteen tabs, in nav order:
 | 4 | Crypto Indicators | 9e, SC-20 | BTC-primary regime layer — Cowen 4-phase, Pal macro, ETF flows, F&G, stablecoin supply; indicator explainers |
 | 5 | Crypto Theses | 9l | 12-adapter repository + per-coin scored theses with lock / fork / cascade acknowledgement, and the crypto allocation table |
 | 6 | Signals | 9k, SC-23, SC-24 | Insider (SEC Form 4), Congress (Bargo feed, with a visible attribution line), executive-order, OGE 278-T, named political-figure tracker, 13F institutional tracker. Tab badge on alarms |
-| 7 | Performance | 9d, SC-17, SC-26, SC-30 | Leads with real eToro realised history (annual + YTD from statement imports), copy-vs-systematic split; closed-trade retrospective below. Hosts "Upload statement" and "Reconcile holdings". **SC-51:** a "Statement data through <date>" label (amber chip after 35 days) and a trade-statistics panel (win rate, payoff, profit factor, expectancy, median hold by scope/year) |
+| 7 | Performance | 9d, SC-17, SC-26, SC-30 | Leads with real eToro realised history (annual + YTD from statement imports), copy-vs-systematic split; closed-trade retrospective below. Hosts "Upload statement" and "Reconcile holdings". **SC-51:** a "Statement data through <date>" label (amber chip after 35 days) and a trade-statistics panel (win rate, payoff, profit factor, expectancy, median hold by scope/year). **One scope control (Discretionary default / Copy-CFD / All, v1.84.1)** drives the year tables and the statistics panel together; in the filtered views only realised P&L and trade counts are scoped, dividends/fees/interest/refunds show once as an "Account-level (not split by strategy)" row and no Net is computed; Net exists only in All and on the YTD card ("YTD <year> · realised"). Browser test: `tools/e2e/performance_scope.js` (Playwright) |
 | 8 | Screener | 9b, SC-21 | Stock screener ("+ watchlist") and the crypto market screener (CoinGecko top 250) |
 | 9 | Macro Regime & Sector Rotation | 9f, 9p | Macro regime band (growth × inflation, FRED-driven, playbook) above the 34-row sector taxonomy with multi-window returns, RS vs SPY, tag pills, weekly digest |
 | 10 | AI Nexus | SC-36, SC-39 | Visser replication: Trend Score, Exhaustion, Forward PEG over the Nexus universe; Entry Candidates view |
@@ -176,6 +176,7 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 - Approval queue: `GET /api/etoro/reconcile/proposals?status=`, `POST /api/etoro/reconcile/proposals/{id}/{approve,dismiss}`.
 - Statement fallback (`.xlsx` only): `POST /api/etoro/reconcile/{preview,apply}` — the preview returns `coverage {complete, reason, startDate, endDate, oldestOpen, newestOpen}`; an incomplete statement has closure/drift rows withheld, and copy-trade lots are left out. **Rules since 2026-10-11:** only crypto in the `eToro` wallet is reconciled (other wallets are never matched or proposed for closure); FT has no units column, so "FT units" are the live SC-42 broker units when known (units are derived as invested ÷ avg only for USD listings — for GBp/JPY/EUR listings that mixes currencies); when FT already matches the live data a differing statement is shown in sync with a partial-close note and never applied; drift proposals carry the live figures, and the statement's USD average is never written to a non-USD listing; a statement ticker without an exchange suffix (`SU`) matches the single FT holding with that base (`SU.PA`); applied crypto adds are tagged wallet `eToro`; every applied change writes a `holdings_audit` row (reason_code `etoro_statement_reconcile`).
 - Performance history: `POST /api/etoro/import/{preview,apply}`, `GET /api/etoro/performance` (now also returns `coverage {has,start,end,nextStart,ageDays,stale}`), `GET /api/etoro/trade-stats?scope=discretionary|copy|all&year=YYYY|all&minAmount=N` (SC-51).
+  **Scope (v1.84.1):** `GET /api/etoro/performance` asset rows also carry `tradeCountDisc`/`tradeCountCopy`. The UI scope is one variable (`ft.etoroScope.v2` in localStorage) shared by the year tables and the statistics panel.
   **Trade statistics (SC-51 A):** read from `etoro_closed_positions` only, USD only (per-position EUR does not sum to eToro's EUR summary); never the dividend or Income & other tables. Scope uses the same rule as the year tables (`is_copy`: discretionary = 0, copy/CFD = 1, so a discretionary CFD counts as discretionary); default = discretionary and the YTD year. Metrics: n, win rate (break-even counts in n only), average winner/loser, payoff ratio, profit factor, expectancy, median hold (calendar days, positions with a known open date), largest winner/loser, top-5 winners' share of total P&L (hidden when total <= 0); breakdowns by asset class and, for "All years", by year. n < 10 is greyed "small sample"; an empty scope says "no trades". "Exclude under $X invested" (off by default) drops small positions and states how many and their P&L. Sums per scope and period equal the year-table closed-trade P&L. No R-multiples, no thesis linkage, no EUR.
   **Statement coverage (SC-51 B):** coverage end = latest End Date and start = earliest Start Date of the non-superseded `etoro_statement_periods`. The preview classifies the new statement's Start Date: `clean` (= end + 1), `gap` (after end + 1: apply is refused with 409 `needsConfirm` until `{"confirmGap":true}` is sent; the dialog needs a ticked box) or `overlap` (the existing double-count warning). The upload dialog says "Next statement should start <end + 1>". Monitor check `statement_coverage`: alert when the coverage end is more than 35 days old, reminder every 7 days, recovery on import. The year-end tiled-sum check was not built.
   **Statement importer (SC-50, v1.83.0):** a statement is *merged*, never replaced. Each closed position and dividend row is stored once, keyed by eToro's **Position ID** (`etoro_closed_positions`, `etoro_dividend_rows`), so re-importing the same statement or importing an overlapping one never double-counts; a multi-year statement lands each position in the year of **its own close date** and each dividend in the year of its payment date. The Financial Summary's lines (fees, interest, refunds, airdrops, staking, corporate actions, stocks lending, index adjustments) are whole-period figures eToro does not split by year: they are stored per statement period (`etoro_statement_periods`) and shown in the End Date year as **"Income & other"**, separate from closed-trade P&L, counted in total return and never in per-trade statistics. Every non-zero Financial Summary line is classified or flagged as "Unclassified: <label> $x" (it then shows as the net-reconciliation delta until a rule is added). The preview shows the reconciliation in **both USD and EUR** (closed-trade P&L vs the Financial Summary; net vs classified lines); a delta above $1 or €1 warns and names the currency. A year row is only REPLACED when the imported statements together cover it (a past year: one merged range spanning it; the current year: reaching back to 1 January); a narrower statement leaves a wider existing row alone and says so. A statement whose period lies inside an earlier one records its whole-period lines as superseded so they are not counted twice; a partial overlap warns. `internal/etoro` also fixes accounting-style negatives: `(11.50)` is now −11.50 (before, every bracketed loss in the Closed Positions sheet read as 0). The master-file import rejects eToro statements (v1.77.3).
@@ -370,13 +371,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.84.1 · 2026-10-13 · pass 88 · SC-51
+
+**Performance tab: one scope control.** The year tables and the Trade statistics panel now share a single Discretionary / Copy-CFD / All control (default Discretionary, saved choice reset once). In the filtered views only realised P&L and trade counts are scoped; dividends, fees, interest and refunds appear once as an account-level row and no Net is computed there. Net shows only in All and on the YTD card (retitled 'YTD 2026 · realised'). Behaviour: yes. Migrations: none. Reference updated: §2, §5. Supersedes v1.84.0.
+
 ### v1.84.0 · 2026-10-13 · pass 87 · SC-51
 
 **Trade statistics and statement coverage.** The Performance tab gains a USD trade-statistics panel (scope, year, win rate, payoff, profit factor, expectancy, median hold, by asset and year; small samples greyed) read from the stored closed positions, and tracks how far the imported statements reach: a 'data through' label, the next start date, a confirmed-gap warning on upload and a monitor alert after 35 days. Migration 0054 adds open date and invested amount. Behaviour: yes. Migrations: 0054. Reference updated: §2, §3, §4, §5. Supersedes v1.83.2.
 
+
 ### v1.83.2 · 2026-10-13 · pass 86 · SC-51
 
 **ETF-flow trailing zero row ignored; chart freshness fixed.** A newest Farside row with `totalM = 0` followed by a non-zero row is a not-yet-published placeholder and is ignored for the as-of date (card, chart badge and monitor share one rule). Also fixes a v1.82.0 slip: the chart's `asOf`/age/badge fields had been attached to the BTC-history handler, so the ETF chart never showed them; now on `/api/crypto-indicators/etf-flow/history`, with a handler test. Behaviour: yes. Migrations: none. Reference updated: §3, §8. Supersedes v1.83.1.
+
 
 
 ### v1.83.1 · 2026-10-13 · pass 85 · SC-50
@@ -385,9 +392,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.83.0 · 2026-10-13 · pass 84 · SC-50
 
 **Performance importer.** Multi-year statements are split into per-year buckets by each position's own close date; positions are stored by eToro Position ID so re-imports and overlapping statements never double-count; a narrower statement can no longer erase a wider year; reconciliation is shown in USD and EUR; every Financial Summary line is classified or flagged, and interest, refunds and other income appear as "Income & other". Also fixes a bug that read bracketed losses `(11.50)` as 0 in the Closed Positions sheet. Migration 0053. Behaviour: yes. Reference updated: §3, §5. Supersedes v1.82.0.
+
 
 
 
@@ -400,9 +409,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.81.1 · 2026-10-13 · pass 82 · SC-48
 
 **RSS User-Agent fix.** Nasdaq's feed reset connections whose User-Agent contained a URL; the RSS fetcher now sends a plain `FT-Dashboard` UA, which all nine feeds accept. Behaviour: yes. Migrations: none. Reference updated: §8. Supersedes v1.81.0.
+
 
 
 
@@ -419,9 +430,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.80.1 · 2026-10-13 · pass 80 · SC-47
 
 **Scheduler fix.** Four scheduled jobs had never run because `scheduleAt` blocked after the first job in each group: the Bargo/Congress ingest, the executive-order ingest, the quarterly legislator refresh and the weekly Nexus fundamentals. Each job now has its own goroutine, with a regression test. The Bargo alert was a true positive; the key, quota and monitor rule are fine. Behaviour: yes. Migrations: none. Reference updated: §4. Supersedes v1.80.0.
+
 
 
 
@@ -442,21 +455,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.79.1 · 2026-10-12 · pass 78 · SC-47
-
-**Decisions applied.** AVGO and RR.L re-tagged, connector token #12 revoked, OpenClaw's dead FT skill retired; the eToro sync transaction is now `BEGIN IMMEDIATE` (fixes the intermittent `database is locked (517)`); the ETH thesis prose in the DB replaced by the amended original (scores unchanged); the unused legacy PPG gate removed; per-ticker stock theses added to the Drive library. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.79.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.84.0 -->
+<!-- END FT-master-spec v1.84.1 -->
