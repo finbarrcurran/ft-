@@ -100,8 +100,9 @@ func DefaultChecks(db *sql.DB) []Check {
 		{Source: "etoro", Label: "eToro sync", MaxAge: 3 * h,
 			Probe: sqlTimeProbe(db, `SELECT MAX(finished_at) FROM etoro_sync_runs WHERE status = 'ok'`)},
 
-		// Cron-fed file: Farside ETF flows (nightly 00:25).
-		{Source: "farside", Label: "Farside ETF-flow file", MaxAge: 50 * h, Probe: fileProbe("/var/lib/ft/data/farside/etf-flow.json")},
+		// Farside ETF flows (nightly 00:25 scraper). SC-49: judged by the NEWEST ROW'S DATE in US
+		// trading days (alert at >= 3), not by the file's modification time.
+		{Source: "farside", Label: "Farside ETF-flow data", MaxAge: 2 * 24 * h, Eval: etfFlowEval(FarsideFile)},
 
 		// Google Drive bridge (SC-45 spec mirror, SC-47 library): the exporters touch a marker
 		// file on every successful run, including "nothing changed" runs (every 10 minutes).

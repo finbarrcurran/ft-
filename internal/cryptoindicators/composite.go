@@ -53,9 +53,9 @@ func DefaultWeights() Weights {
 // action band. All sub-scores are in [-1, +1]; composite is in [-100,
 // +100]. Buckets with no active indicators have SubScores[b] = nil.
 type CompositeResult struct {
-	Composite  float64           // -100..+100
+	Composite  float64             // -100..+100
 	SubScores  map[string]*float64 // bucket → mean score (nil if empty)
-	ActionBand string            // strong_accumulate | accumulate | neutral | caution | distribute_wait
+	ActionBand string              // strong_accumulate | accumulate | neutral | caution | distribute_wait
 	// EffectiveWeights records the weights actually applied (after
 	// redistributing empty buckets). For the gauge tooltip + the
 	// snapshot row.

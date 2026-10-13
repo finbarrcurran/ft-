@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.81.1 · 2026-10-13** — latest change: RSS User-Agent fix (§13).
+> **Current version: v1.82.0 · 2026-10-13** — latest change: ETF-flow freshness guard (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.81.1 2026-10-11 -->
+<!-- reference_reviewed: v1.82.0 2026-10-11 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -56,7 +56,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 
 ## 3. Schema — every migration
 
-50 migrations applied (latest `0050_oauth.sql`).
+52 migrations applied (latest `0052_indicator_data_as_of.sql`).
 
 | # | File | Adds |
 |---|------|------|
@@ -107,6 +107,8 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0045 | `nexus` | SC-36 — `nexus_universe`, `nexus_ticker_map`, `nexus_technical`, `nexus_exhaustion`, `nexus_fundamentals` |
 | 0046 | `video_digest` | SC-43 — `video_sources` (seeded: jordi, cowen), `video_digests`, `video_mentions`, `video_quotes`, `video_frames`, `cowen_weekly_snapshot` |
 | 0047 | `etoro_sync` | SC-42 — `etoro_instruments`, `etoro_sync_runs`, `etoro_holdings_lots` (per-lot change history), `etoro_holdings_effective` (per ticker + direction) |
+| 0052 | `indicator_data_as_of` | SC-49 — `crypto_indicators.data_as_of` (date of the newest data point behind a reading) |
+| 0051 | `provider_daily` | SC-48 — per-provider per-day call counters; retired providers' health rows removed |
 | 0050 | `oauth` | SC-41b — `oauth_clients`, `oauth_codes`, `oauth_tokens` (hashes only; refresh tokens rotate, families revoked on reuse) |
 | 0049 | `bargo_congress_monitor` | SC-47 — `congress_trades_raw` (every Congress trade ever received, unfiltered, unique on `source_key`), `bargo_sync_runs`, `monitor_state`, `monitor_events` |
 | 0048 | `etoro_reconcile` | SC-44 — `etoro_reconcile_proposals`; `amount_usd` on lots, `invested_usd` on effective, `values_updated` / `proposals_pending` on sync runs |
@@ -134,7 +136,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | AI Nexus daily | 22:30 | Universe + benchmark bars, Trend Score + Exhaustion |
 | AI Nexus weekly | Sun 22:45 | Forward PEG recompute |
 | Signals ingest | 23:00 / 23:10 / 23:20 (+ quarterly legislators 02:00) | SEC Form 4 insiders (firehose + per-ticker), Congress, executive orders. The 23:10 Congress step (SC-47) imports the legacy Capitol Trades file into `congress_trades_raw` once, syncs Bargo (a rolling window of recent transaction dates, 7-day slices; first run backfills 3 months; Sundays re-read 60 days because disclosures lag up to ~45 days). **Before v1.80.1 only the 23:00 insider job ever ran** (see the scheduler note below), then turns recent raw rows into tiered `signal_events` |
-| Connectivity monitor | every 10 min (first run 5 min after start) | SC-47: reads each watched source's last success (`provider_health`, `bargo_sync_runs`, `etoro_sync_runs`, Farside file mtime, newest DB backup) and compares it with the silence that source is allowed (`internal/monitor/checks.go`). One Telegram message when a source goes stale, a reminder every 24 h while it stays stale, one on recovery; on first sight, already-stale sources are folded into a single "monitor is on" message. Known-dead feeds are flagged optional (shown, never alert). Alerts go straight to Telegram via `FT_TELEGRAM_BOT_TOKEN` / `FT_TELEGRAM_CHAT_ID`; with them unset events are recorded as undelivered |
+| Connectivity monitor | every 10 min (first run 5 min after start) | SC-47: reads each watched source's last success (`provider_health`, `bargo_sync_runs`, `etoro_sync_runs`, Farside file mtime, newest DB backup) and compares it with the silence that source is allowed (`internal/monitor/checks.go`). One Telegram message when a source goes stale, a reminder every 24 h while it stays stale, one on recovery; on first sight, already-stale sources are folded into a single "monitor is on" message. Known-dead feeds are flagged optional (shown, never alert). Alerts go straight to Telegram via `FT_TELEGRAM_BOT_TOKEN` / `FT_TELEGRAM_CHAT_ID`; with them unset events are recorded as undelivered **The Farside ETF-flow check (SC-49) judges the newest ROW's date in US trading days, not the file's modification time:** alert at ≥ 3 US trading days old (one message, reminder every 24 h, recovery note), and the text names the cause — scraper failed (its `fetchedAt` older than 30 h) versus source not updated (scraper fine, no newer row). |
 | Feed warm-up | 06:30 daily | SC-48: runs the real handlers for CNN Fear & Greed, crypto Fear & Greed, market news and crypto news once (same path as a user request, cache and stale fallback included) so request-driven feeds stay fresh; one Telegram alert naming any that still fail. Startup (30 s after boot): one Telegram alert naming any missing required provider variable (names only) |
 | Scheduler note | — | `scheduleAt` (cmd/ft/main.go) runs each job in its own goroutine since v1.80.1. It used to block, so in a goroutine that armed several jobs only the first ever fired: the Congress/Bargo ingest (23:10), the executive-order ingest (23:20), the quarterly legislator refresh (02:00) and the weekly Nexus fundamentals job (Sunday 22:45) had never run on schedule since v1.11.0 (Congress and EO data were only ever refreshed by manual buttons or one-off runs). A regression test arms three jobs in a row and requires all to fire |
 
@@ -281,7 +283,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 | Sector ETFs | Yahoo daily closes | — | 36 ETFs × 1 call/day |
 | Insider / 13F filings | SEC EDGAR | — | Daily ingest; 13F on demand |
 | Video digests | Anthropic API via the governor | — | Haiku; packages come from the Jarvis yt-dlp pipeline |
-| ETF flows (crypto) | Farside via the Playwright cron | live HTTP for the card after 36 h | Chart reads the cache file with no age check (ai's freshness-guard spec pending) |
+| ETF flows (crypto) | Farside via the Playwright cron | live HTTP for the card after 36 h | **Freshness (SC-49):** the card and the chart show the data's own date ("as of …" / "latest data …"); a badge appears by US trading days since that date (none ≤ 2, amber 3–4, red ≥ 5; never hides data); computed server-side from `crypto_indicators.data_as_of` (card) and the chart's last bar, so both use `marketdata.USTradingDaysSince`/`StaleLevel`. The 36 h file-age rule stays a *fetch* decision only. Settings → Diagnostics shows newest row, age and scraper last success. The cache file holds ONE series (BTC spot-ETF aggregate, newest-first, 90 rows), so one as-of covers card and chart; there is no ETH-flow series |
 
 **Request-driven feeds** (CNN F&G, both news feeds, alternative.me) are only fetched when a tab/card is opened and cached 60 minutes; a **daily 06:30 UTC warm-up** (`internal/server/warmup.go`) runs the real handlers once so they stay fresh, and sends a Telegram alert for any that still fail. The monitor allows them 36 h. All provider calls go through `health.Record` (Spec 7), which also feeds the per-day counters. **At startup** FT sends one Telegram alert naming any missing required provider variable (names only).
 
@@ -362,13 +364,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.82.0 · 2026-10-13 · pass 83 · SC-49
+
+**ETF-flow freshness guard.** The ETF-flow card and chart now show the data's own date and an amber/red badge by US trading days (3–4 / 5+), the monitor judges the newest row's date (not the file's time) and names whether the scraper or the source is at fault, and Diagnostics shows the age. Migration 0052. Behaviour: yes. Reference updated: §3, §4, §8. Supersedes v1.81.1.
+
 ### v1.81.1 · 2026-10-13 · pass 82 · SC-48
 
 **RSS User-Agent fix.** Nasdaq's feed reset connections whose User-Agent contained a URL; the RSS fetcher now sends a plain `FT-Dashboard` UA, which all nine feeds accept. Behaviour: yes. Migrations: none. Reference updated: §8. Supersedes v1.81.0.
 
+
 ### v1.81.0 · 2026-10-13 · pass 81 · SC-48
 
 **RSS cut-over, heatmap, theses.** Market News now reads free publisher RSS (CNBC, BBC Business, Nasdaq as primary; MarketWatch and The Guardian as measured backups) with per-feed health; NewsAPI is no longer called. The heatmap tiles refresh every ~30 minutes while their market is open instead of every 15 around the clock. The six crypto theses with empty text were restored from their originals (scores unchanged). §12 rows 16 and 13 closed as unverified. Behaviour: yes. Migrations: none. Reference updated: §8, §12. Supersedes v1.80.1.
+
 
 
 ### v1.80.1 · 2026-10-13 · pass 80 · SC-47
@@ -377,9 +385,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.80.0 · 2026-10-12 · pass 79 · SC-48
 
 **Data-provider fixes.** Finnhub is rate-gated, cached and limited to US holdings; heatmap tiles use Yahoo; Twelve Data retired; CNN Fear & Greed works again (Referer fix); a daily warm-up keeps the request-driven feeds fresh and alerts if one fails; market-news RSS is built but not yet switched on; per-provider daily call counters and usage lines in Diagnostics; a startup alert for missing provider keys; budget-alert path tested. Behaviour: yes. Migrations: 1. Reference updated: §8, §12. Supersedes v1.79.1.
+
 
 
 
@@ -392,9 +402,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.79.0 · 2026-10-12 · pass 77 · SC-41b
 
 **OAuth for the claude.ai connector; login rate limiting.** FT now runs its own single-user OAuth 2.1 server (discovery, registration, authorize with Fin's password, token with PKCE and rotating refresh tokens) so claude.ai can connect to `/mcp` with the URL alone; the 401 carries the OAuth discovery header and `/.well-known/*` no longer returns the SPA page. Login and authorize are now rate limited (5 failures per IP per 15 min) with a Telegram alert; migration 0050; `ft oauth` and `ft token revoke` commands; `ft help` aligned. Behaviour: yes. Migrations: 1. Reference updated: §3, §5, §11. Supersedes v1.78.1.
+
 
 
 
@@ -411,9 +423,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.78.0 · 2026-10-11 · pass 75 · SC-47
 
 **Bargo Congress feed, raw history, connectivity monitor.** Congress trades now come from Bargo (free key; Capitol Trades cron retired) into a new unfiltered `congress_trades_raw` history table (migration 0049) that outlives Bargo's 3-month window; recent rows feed the Signals tab, which now carries Bargo's required attribution. A freshness monitor watches every external source (price APIs, Bargo, eToro sync, Farside, backups) and sends one Telegram alert per outage, a 24 h reminder and a recovery note; Diagnostics shows it. Needs `FT_TELEGRAM_*` in FT's env. Behaviour: yes. Migrations: 1. Reference updated: §2–5, §8, §9, §12. Supersedes v1.77.3.
+
 
 
 
@@ -434,21 +448,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.77.2 · 2026-10-10 · pass 73 · SC-44
-
-**Post-migration fixes.** SC-44's silent updates and approved adds/removals now write `holdings_audit` rows (actors `etoro-sync` / `fin`, no entry snapshot, so no fabricated closed trades); the six 2026-10-10 removals backfilled. Cron logs moved to `~curran/logs`; the Farside/Capitol jobs are still blocked (output-dir permissions, Playwright missing, Capitol Trades answers 429). Drive exporter moved into `ops/bridge/` with an installer. Behaviour: yes (audit only). Migrations/endpoints: none. Reference updated: §4, §7, §12. Supersedes v1.77.1.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.81.1 -->
+<!-- END FT-master-spec v1.82.0 -->

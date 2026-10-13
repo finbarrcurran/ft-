@@ -48,6 +48,11 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 		out["oauth"] = s.oauth.Status(r.Context())
 	}
 
+	// SC-49 — ETF-flow data freshness (newest row date in US trading days, scraper last success).
+	if st, err := monitor.ReadETFFlowState(monitor.FarsideFile, time.Now()); err == nil {
+		out["etfFlow"] = st
+	}
+
 	// SC-48 — provider usage: today's calls against each limit, plus a 7-day view.
 	out["providerDaily"], _ = s.store.ProviderDaily(r.Context(), 7)
 	out["usage"] = s.providerUsage(r.Context())

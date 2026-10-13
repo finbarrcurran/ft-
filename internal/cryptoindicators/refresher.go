@@ -170,6 +170,11 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 			}
 			slog.Error("crypto indicators: upsert", "id", res.id, "err", err)
 		}
+		if res.reading.AsOf != "" {
+			if err := r.Service.SetIndicatorAsOf(ctx, res.id, res.reading.AsOf); err != nil {
+				slog.Warn("crypto indicators: set data_as_of", "id", res.id, "err", err)
+			}
+		}
 		// Tiny gap between CoinGecko calls so we don't trip free-tier RL.
 		time.Sleep(800 * time.Millisecond)
 	}

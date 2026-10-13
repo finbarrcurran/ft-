@@ -12,7 +12,7 @@ import (
 // ISMFile is the on-disk JSON shape for the manually-curated ISM
 // Manufacturing PMI series. Stored at
 //
-//   <CryptoIndicatorsDataDir>/ism.json    (default /var/lib/ft/data/ism.json)
+//	<CryptoIndicatorsDataDir>/ism.json    (default /var/lib/ft/data/ism.json)
 //
 // Maintained by the user via the Settings → Crypto Indicators →
 // "Update ISM data" panel (Spec 9e Phase 2 sub-phase B2). One file
@@ -21,13 +21,13 @@ import (
 //
 // Sample:
 //
-//   {
-//     "prints": [
-//       {"month": "2026-04", "value": 48.7},
-//       {"month": "2026-03", "value": 49.0},
-//       ...
-//     ]
-//   }
+//	{
+//	  "prints": [
+//	    {"month": "2026-04", "value": 48.7},
+//	    {"month": "2026-03", "value": 49.0},
+//	    ...
+//	  ]
+//	}
 //
 // "direction" used to be a separate field in the spec example; we
 // compute it from consecutive values instead so users don't have to

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"ft/internal/marketdata"
 	"os"
 	"time"
 )
@@ -30,6 +31,12 @@ type IndicatorRow struct {
 	Trend4w      *float64       `json:"trend4w,omitempty"`
 	UpdatedAt    *int64         `json:"updatedAt,omitempty"`
 	FetchError   string         `json:"fetchError,omitempty"`
+	// SC-49 freshness of the DATA (not of the refresh): the date of the newest data point
+	// used, its age in US trading days, and the badge level ("", "amber", "red"), all
+	// computed at request time so the badge moves with the calendar without a refresh.
+	DataAsOf           string `json:"dataAsOf,omitempty"`
+	DataAgeTradingDays *int   `json:"dataAgeTradingDays,omitempty"`
+	StaleLevel         string `json:"staleLevel,omitempty"`
 	Tooltip      string         `json:"tooltip"`
 	History      []HistoryPoint `json:"history,omitempty"` // last 30 daily snapshots, oldest first
 }
@@ -113,7 +120,7 @@ func (s *Service) listIndicatorsCore(ctx context.Context) ([]IndicatorRow, error
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, bucket, display_name, unit, source,
 		       current_value, current_score, trend_4w, updated_at,
-		       COALESCE(fetch_error, '')
+		       COALESCE(fetch_error, ''), COALESCE(data_as_of, '')
 		  FROM crypto_indicators
 		 ORDER BY CASE bucket
 		            WHEN 'cowen' THEN 1
@@ -133,8 +140,14 @@ func (s *Service) listIndicatorsCore(ctx context.Context) ([]IndicatorRow, error
 		var cv, cs, tr sql.NullFloat64
 		var ua sql.NullInt64
 		if err := rows.Scan(&r.ID, &r.Bucket, &r.DisplayName, &unit, &r.Source,
-			&cv, &cs, &tr, &ua, &r.FetchError); err != nil {
+			&cv, &cs, &tr, &ua, &r.FetchError, &r.DataAsOf); err != nil {
 			return nil, err
+		}
+		if r.DataAsOf != "" {
+			if age, err := marketdata.USTradingDaysSince(r.DataAsOf, time.Now()); err == nil {
+				r.DataAgeTradingDays = &age
+				r.StaleLevel = marketdata.StaleLevel(age)
+			}
 		}
 		if unit.Valid {
 			r.Unit = unit.String
@@ -443,6 +456,12 @@ func (s *Service) UpsertIndicatorReading(ctx context.Context, id string, value, 
 		 WHERE id = ?`,
 		nullFloat(value), nullFloat(score), nullFloat(trend),
 		now, nullStr(fetchErr), id)
+	return err
+}
+
+// SetIndicatorAsOf records the date of the newest data point behind an indicator's reading.
+func (s *Service) SetIndicatorAsOf(ctx context.Context, id, asOf string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE crypto_indicators SET data_as_of = ? WHERE id = ?`, asOf, id)
 	return err
 }
 

@@ -8,12 +8,17 @@
 // post-launch without recompile.
 //
 // Phase 1 (v1.8.0): schema + scoring engine + composite + tab shell +
-//                   F&G migration. No external data fetchers yet —
-//                   indicators stay NULL until Phase 2 wires providers.
+//
+//	F&G migration. No external data fetchers yet —
+//	indicators stay NULL until Phase 2 wires providers.
+//
 // Phase 2 (v1.8.1): FRED + DefiLlama + Farside + ISM + Cowen log-band
-//                   local fit + daily snapshot cron.
+//
+//	local fit + daily snapshot cron.
+//
 // Phase 3 (v1.8.2): composite gauge SVG + bucket cards + Cowen manual
-//                   override + Top/Worst performers table.
+//
+//	override + Top/Worst performers table.
 package cryptoindicators
 
 import (
@@ -29,12 +34,12 @@ var definitionsFS embed.FS
 
 // IndicatorDef is one entry in definitions/crypto_indicators.json.
 type IndicatorDef struct {
-	ID          string         `json:"id"`
-	Bucket      string         `json:"bucket"`
-	DisplayName string         `json:"display_name"`
-	Unit        string         `json:"unit"`
-	ScoringFn   string         `json:"scoring_fn"` // linear | step | level_and_trend | trend_only
-	Thresholds  []Threshold    `json:"thresholds"`
+	ID          string      `json:"id"`
+	Bucket      string      `json:"bucket"`
+	DisplayName string      `json:"display_name"`
+	Unit        string      `json:"unit"`
+	ScoringFn   string      `json:"scoring_fn"` // linear | step | level_and_trend | trend_only
+	Thresholds  []Threshold `json:"thresholds"`
 }
 
 // Threshold is one row in an indicator's scoring table. Fields are
@@ -44,13 +49,13 @@ type IndicatorDef struct {
 //	step:                uses Band + Score
 //	level_and_trend:     uses LevelMin/LevelMax + Trend4w + Score
 type Threshold struct {
-	Value     *float64 `json:"value,omitempty"`
-	Band      string   `json:"band,omitempty"`
-	LevelMin  *float64 `json:"level_min,omitempty"`
-	LevelMax  *float64 `json:"level_max,omitempty"`
-	Trend4w   string   `json:"trend_4w,omitempty"` // positive | negative | flat | any
-	TrendMin  *float64 `json:"trend_4w_min,omitempty"`
-	Score     float64  `json:"score"`
+	Value    *float64 `json:"value,omitempty"`
+	Band     string   `json:"band,omitempty"`
+	LevelMin *float64 `json:"level_min,omitempty"`
+	LevelMax *float64 `json:"level_max,omitempty"`
+	Trend4w  string   `json:"trend_4w,omitempty"` // positive | negative | flat | any
+	TrendMin *float64 `json:"trend_4w_min,omitempty"`
+	Score    float64  `json:"score"`
 }
 
 // Defs is the parsed list of indicator definitions, loaded once at startup.

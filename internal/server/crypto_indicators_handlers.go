@@ -10,6 +10,7 @@ package server
 
 import (
 	"context"
+	"ft/internal/marketdata"
 	"encoding/json"
 	"ft/internal/cryptoindicators"
 	"ft/internal/cryptoindicators/providers"
@@ -190,10 +191,21 @@ func (s *Server) handleCryptoIndicatorsBTCHistory(w http.ResponseWriter, r *http
 		mapStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"history": rows,
 		"days":    days,
-	})
+	}
+	// SC-49: the chart's own freshness = its last bar's date. The chart never hides stale
+	// data; the page shows the date and the same badge the card uses.
+	if len(rows) > 0 {
+		asOf := rows[len(rows)-1].Date
+		out["asOf"] = asOf
+		if age, err := marketdata.USTradingDaysSince(asOf, time.Now()); err == nil {
+			out["ageTradingDays"] = age
+			out["staleLevel"] = marketdata.StaleLevel(age)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // POST /api/crypto-indicators/backfill?days=730  (v1.20)

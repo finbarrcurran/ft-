@@ -46,6 +46,10 @@ type Check struct {
 	MaxAge   time.Duration // stale when older than this
 	Optional bool          // shown in Diagnostics, never alerts (known-dead feeds)
 	Probe    Probe
+	// Eval, when set, replaces the default "last success older than MaxAge" rule. It
+	// returns whether the source is down and a human detail (SC-49: the ETF-flow check
+	// judges the DATA's age in US trading days, not a file's modification time).
+	Eval func(ctx context.Context, now time.Time) (down bool, lastOK time.Time, found bool, detail string, err error)
 }
 
 // Notifier delivers an alert text.
@@ -71,6 +75,7 @@ type Result struct {
 	Found    bool
 	MaxAge   time.Duration
 	Detail   string
+	Custom   bool // judged by Check.Eval: the detail already says everything
 }
 
 func (m *Monitor) now() time.Time {
@@ -86,6 +91,18 @@ func (m *Monitor) Evaluate(ctx context.Context) []Result {
 	out := make([]Result, 0, len(m.Checks))
 	for _, c := range m.Checks {
 		r := Result{Source: c.Source, Label: c.Label, Optional: c.Optional, MaxAge: c.MaxAge}
+		if c.Eval != nil {
+			down, last, found, detail, err := c.Eval(ctx, now)
+			r.LastOK, r.Found, r.Detail, r.Custom = last, found, detail, true
+			switch {
+			case err != nil:
+				r.Down, r.Detail = true, "check error: "+err.Error()
+			default:
+				r.Down = down
+			}
+			out = append(out, r)
+			continue
+		}
 		last, found, detail, err := c.Probe(ctx)
 		r.LastOK, r.Found, r.Detail = last, found, detail
 		switch {
@@ -216,7 +233,7 @@ func (m *Monitor) alert(ctx context.Context, source, kind, text string, now time
 }
 
 func describe(r Result, now time.Time) string {
-	if !r.Found {
+	if !r.Found || r.Custom {
 		return r.Detail
 	}
 	s := fmt.Sprintf("last success %s ago (allowed %s)", humanDur(now.Sub(r.LastOK)), humanDur(r.MaxAge))

@@ -12,7 +12,7 @@ import (
 // DefiLlama provides the stablecoin total supply Pal uses as a "dry powder
 // waiting inside crypto" indicator. Endpoint:
 //
-//   https://stablecoins.llama.fi/stablecoins?includePrices=false
+//	https://stablecoins.llama.fi/stablecoins?includePrices=false
 //
 // Response shape (per docs as of 2024): an array of stablecoin objects,
 // each with .chainCirculating.{chain}.peggedUSD numerics PLUS, on the
@@ -34,7 +34,8 @@ func NewDefiLlamaClient() *DefiLlamaClient {
 // snapshot accumulation.
 //
 // Endpoints used:
-//   /stablecoincharts/all → daily total over time (current + 4wk-ago)
+//
+//	/stablecoincharts/all → daily total over time (current + 4wk-ago)
 //
 // (The /stablecoins endpoint also exists for current-only; we use the
 // chart endpoint because it gives us both current and historical in one

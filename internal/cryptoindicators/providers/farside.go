@@ -121,7 +121,7 @@ func (c *FarsideClient) FetchBTCETFFlow7d(ctx context.Context) Reading {
 	if count < 7 {
 		return Reading{Err: fmt.Sprintf("farside: only %d days available, need 7", count)}
 	}
-	return Reading{Value: &sum}
+	return Reading{Value: &sum, AsOf: rows[0].Date.Format("2006-01-02")}
 }
 
 type farsideRow struct {
@@ -133,8 +133,10 @@ type farsideRow struct {
 // returns the trailing 7d rolling sum if fresh. Returns (zero, false)
 // if the file is missing, unparseable, stale, or doesn't contain the
 // rolling sum. Caller falls through to direct HTTP scrape on false.
-func readFarsideFromFile() (Reading, bool) {
-	stat, err := os.Stat(FarsideJSONPath)
+func readFarsideFromFile() (Reading, bool) { return readFarsideFromPath(FarsideJSONPath) }
+
+func readFarsideFromPath(path string) (Reading, bool) {
+	stat, err := os.Stat(path)
 	if err != nil {
 		return Reading{}, false
 	}
@@ -142,7 +144,7 @@ func readFarsideFromFile() (Reading, bool) {
 	if age > FarsideJSONMaxAge {
 		return Reading{}, false
 	}
-	raw, err := os.ReadFile(FarsideJSONPath)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Reading{}, false
 	}
@@ -150,9 +152,10 @@ func readFarsideFromFile() (Reading, bool) {
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return Reading{}, false
 	}
+	asOf := newestRowDate(f)
 	if f.Rolling7dM != nil {
 		v := *f.Rolling7dM
-		return Reading{Value: &v}, true
+		return Reading{Value: &v, AsOf: asOf}, true
 	}
 	// Fall back to recomputing from the rows array if rolling7dM was
 	// missing (defensive — scraper always writes it currently).
@@ -163,7 +166,20 @@ func readFarsideFromFile() (Reading, bool) {
 	for i := 0; i < 7; i++ {
 		sum += f.Rows[i].TotalM
 	}
-	return Reading{Value: &sum}, true
+	return Reading{Value: &sum, AsOf: asOf}, true
+}
+
+// newestRowDate returns the newest "date" among the cached rows (the scraper writes them
+// newest-first, but the maximum is taken so ordering never matters). mtime and
+// fetchedAt say when the file was written, NOT how fresh the data is (SC-49).
+func newestRowDate(f farsideCachedFile) string {
+	newest := ""
+	for _, r := range f.Rows {
+		if r.Date > newest { // ISO dates compare lexically
+			newest = r.Date
+		}
+	}
+	return newest
 }
 
 // parseFarsideAsCSV tries to read the body as CSV. The first cell of the

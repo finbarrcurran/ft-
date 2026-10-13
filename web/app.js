@@ -5571,6 +5571,7 @@ function renderDiagnosticsSection(d) {
             <li><span class="dim">Latest migration:</span> ${escapeHTML(sys.latestMigration || '—')} ${sys.latestMigrationAt ? `<span class="dim">(${new Date(sys.latestMigrationAt).toLocaleDateString()})</span>` : ''}</li>
             <li><span class="dim">DB size:</span> ${fmtBytes(sys.dbSizeBytes)} <span class="dim">(${escapeHTML(sys.dbPath || '')})</span></li>
             <li><span class="dim">Latest backup:</span> ${backupRow}</li>
+            ${d.etfFlow ? `<li><span class="dim">ETF-flow data:</span> newest row ${escapeHTML(d.etfFlow.asOf)} · ${d.etfFlow.ageTradingDays} US trading day${d.etfFlow.ageTradingDays === 1 ? '' : 's'} old${d.etfFlow.level ? ` <span class="${d.etfFlow.level === 'red' ? 'loss' : 'amber-text'}">(${escapeHTML(d.etfFlow.level)})</span>` : ''} <span class="dim">· scraper last OK ${d.etfFlow.scraperLastOk ? new Date(d.etfFlow.scraperLastOk).toLocaleString() : '—'}${d.etfFlow.scraperOk ? '' : ' ⚠ not running'}</span></li>` : ''}
           </ul>
         </div>
 
@@ -9082,7 +9083,7 @@ function renderCIModal(indicator, allIndicators, compareIds) {
           <div class="ci-modal-current">
             <div class="ci-modal-val-block">
               <div class="ci-modal-val">${valStr}<span class="ci-modal-val-unit dim"> ${i.unit ? escapeHTML(i.unit) : ''}</span></div>
-              <div class="ci-modal-meta">${score} ${trend} <span class="dim">· last updated ${escapeHTML(lastUpdated)}</span></div>
+              <div class="ci-modal-meta">${score} ${trend} <span class="dim">· last updated ${escapeHTML(lastUpdated)}</span>${i.dataAsOf ? ` <span class="dim">· data as of <strong>${escapeHTML(i.dataAsOf)}</strong></span> ${ciFreshnessBadge(i.staleLevel, i.dataAgeTradingDays, i.dataAsOf)}` : ''}</div>
               ${i.fetchError ? `<div class="loss" style="font-size:0.82rem; margin-top:0.3rem">⚠ ${escapeHTML(i.fetchError)}</div>` : ''}
             </div>
           </div>
@@ -9233,13 +9234,23 @@ function renderCIStablecoinChart(indicator) {
   </svg>`;
 }
 
+// SC-49 — data freshness badge shared by the ETF-flow card and chart. `level` comes from the
+// server (US trading days since the data's own date: none <= 2, amber 3-4, red >= 5), so the
+// card, the chart and the monitor can never disagree.
+function ciFreshnessBadge(level, ageTd, asOf) {
+  if (level !== 'amber' && level !== 'red') return '';
+  const cls = level === 'red' ? 'ci-pill err' : 'ci-pill stale';
+  const days = ageTd != null ? ` ${ageTd} trading days` : '';
+  return `<span class="${cls}" title="Latest data ${escapeHTML(asOf || '')} — ${days.trim()} old">⚠ stale${days ? ' ·' + days : ''}</span>`;
+}
+
 // renderCIETFFlowChart returns inline SVG of daily BTC spot-ETF net
 // aggregate flow (USD millions). One bar per day. Green for net inflows,
 // red for outflows, grey for zero. Mirrors the BTC log-band chart that
 // sits at the top of the cowen bucket — this one sits at the top of the
 // universal bucket. Data from /api/crypto-indicators/etf-flow/history
 // which reads the Playwright-scraped Farside JSON cache.
-function renderCIETFFlowChart(history) {
+function renderCIETFFlowChart(history, meta) {
   const w = 720;
   const h = 180;
   const padL = 60;
@@ -9300,6 +9311,7 @@ function renderCIETFFlowChart(history) {
       <strong>BTC Spot-ETF Daily Net Flow</strong>
       <span class="dim">${history.length}-day window · USD millions</span>
       <span class="ci-chart-latest ${sum >= 0 ? 'gain' : 'loss'}">${sum >= 0 ? '+' : ''}${sum.toFixed(0)}M total</span>
+      ${meta && meta.staleLevel ? ciFreshnessBadge(meta.staleLevel, meta.ageTradingDays, meta.asOf) : ''}
     </div>
     <svg class="ci-chart" width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="ETF flow bar chart">
       ${yLabels}
@@ -9309,6 +9321,7 @@ function renderCIETFFlowChart(history) {
     </svg>
     <div class="ci-chart-foot dim">
       ${inflowDays} inflow / ${outflowDays} outflow days · latest ${latest >= 0 ? '+' : ''}${latest.toFixed(1)}M
+      · <strong>latest data ${escapeHTML((meta && meta.asOf) || history[history.length - 1].date)}</strong>${meta && meta.ageTradingDays != null ? ` <span class="dim">(${meta.ageTradingDays} US trading day${meta.ageTradingDays === 1 ? '' : 's'} ago)</span>` : ''}
     </div>
   </div>`;
 }
@@ -9463,7 +9476,7 @@ async function renderCryptoIndicators() {
 
   // ----- ETF flow bar chart (universal bucket header) -----------------
   const etfChartHTML = etfHistory.length >= 2
-    ? `<div class="ci-etf-chart">${renderCIETFFlowChart(etfHistory)}</div>`
+    ? `<div class="ci-etf-chart">${renderCIETFFlowChart(etfHistory, etfHist)}</div>`
     : '';
 
   // ----- Bucket card rendering with sparklines + chips ----------------
@@ -9511,6 +9524,7 @@ async function renderCryptoIndicators() {
             <div class="ci-card-meta">
               <span class="dim">4w</span> ${trend}
               ${stale}
+              ${i.dataAsOf ? `<span class="dim ci-asof" title="Date of the newest data point behind this value">as of ${escapeHTML(i.dataAsOf)}</span>${i.fetchError ? '' : ciFreshnessBadge(i.staleLevel, i.dataAgeTradingDays, i.dataAsOf)}` : ''}
             </div>
           </div>
         </div>

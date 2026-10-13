@@ -25,9 +25,9 @@ type holidayFile struct {
 }
 
 var (
-	holidayMu   sync.RWMutex
-	holidaySet  = map[string]map[string]string{} // exchange → date → name
-	holidaysOK  bool
+	holidayMu  sync.RWMutex
+	holidaySet = map[string]map[string]string{} // exchange → date → name
+	holidaysOK bool
 )
 
 // LoadHolidays reads every embedded holidays/*.json. Bad files log a warning

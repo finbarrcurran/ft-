@@ -30,6 +30,7 @@ type Reading struct {
 	Value   *float64
 	Trend4w *float64 // signed % change over ~28 days, computed from history when available
 	Err     string   // fetch_error string for the crypto_indicators row
+	AsOf    string   // date (YYYY-MM-DD) of the newest data point actually used, when the provider knows it (SC-49)
 }
 
 // FREDClient pulls observations from https://api.stlouisfed.org/fred/series.
