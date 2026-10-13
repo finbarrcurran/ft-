@@ -11,6 +11,7 @@
 package server
 
 import (
+	"encoding/json"
 	"ft/internal/etoro"
 	"ft/internal/store"
 	"net/http"
@@ -90,6 +91,9 @@ func (s *Server) handleEtoroImportPreview(w http.ResponseWriter, r *http.Request
 		"fileName":   st.FileName,
 		"years":      st.Years,
 		"warnings":   st.Warnings,
+		"period":     etoroPeriodSummary(st.Period),
+		"positions":  len(st.Positions),
+		"dividends":  len(st.Dividends),
 		"ttlSeconds": int(pendingEtoroTTL.Seconds()),
 	})
 }
@@ -104,19 +108,28 @@ func (s *Server) handleEtoroImportApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	applied := 0
-	for _, y := range pending.Statement.Years {
-		row := etoroYearToStore(y)
-		if err := s.store.UpsertEtoroPerformanceYear(r.Context(), userID, row, pending.Statement.FileName); err != nil {
-			mapStoreError(w, err)
-			return
-		}
-		applied++
+	// SC-50: merge, never replace. Positions and dividends are keyed by Position ID, the
+	// whole-period lines are kept per statement period, and the per-year rows are re-derived
+	// (a year is only REPLACED when the imported statements cover it).
+	res, err := s.store.ApplyEtoroStatement(r.Context(), userID, etoroStatementToStore(pending.Statement))
+	if err != nil {
+		mapStoreError(w, err)
+		return
 	}
-
+	applied := 0
+	for _, y := range res.Years {
+		if y.Action != "kept_existing" {
+			applied++
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"yearsApplied": applied,
 		"fileName":     pending.Statement.FileName,
+		"outcomes":     res.Years,
+		"positionsNew": res.PositionsNew, "positionsKnown": res.PositionsKnown,
+		"dividendsNew": res.DividendsNew, "dividendsKnown": res.DividendsKnown,
+		"periodAction": res.PeriodAction,
+		"warnings":     res.Warnings,
 	})
 }
 
@@ -137,44 +150,44 @@ func (s *Server) handleEtoroPerformance(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"years": years})
 }
 
-// etoroYearToStore maps the etoro package's compute result onto the store row
-// type (keeps the store package free of an excelize dependency).
-func etoroYearToStore(y etoro.YearPerf) store.EtoroYearRow {
-	row := store.EtoroYearRow{
-		Year:           y.Year,
-		RangeStart:     y.RangeStart,
-		RangeEnd:       y.RangeEnd,
-		IsYTD:          y.IsYTD,
-		RealisedPnLUSD: y.RealisedPnLUSD,
-		RealisedPnLEUR: y.RealisedPnLEUR,
-		DividendsUSD:   y.DividendsUSD,
-		DividendsEUR:   y.DividendsEUR,
-		FeesUSD:        y.FeesUSD,
-		FeesEUR:        y.FeesEUR,
-		InterestUSD:    y.InterestUSD,
-		InterestEUR:    y.InterestEUR,
-		NetUSD:         y.NetUSD,
-		NetEUR:         y.NetEUR,
-		ComputedPnLUSD: y.ComputedPnLUSD,
-		ComputedPnLEUR: y.ComputedPnLEUR,
-		ReconDeltaUSD:  y.ReconDeltaUSD,
-		ReconDeltaEUR:  y.ReconDeltaEUR,
+// etoroPeriodSummary is the whole-period Financial Summary view for the preview dialog.
+func etoroPeriodSummary(p etoro.Period) map[string]any {
+	return map[string]any{
+		"rangeStart": p.RangeStart, "rangeEnd": p.RangeEnd,
+		"netUsd": p.NetUSD, "netEur": p.NetEUR,
+		"interestUsd": p.InterestUSD, "refundsUsd": p.RefundsUSD, "otherIncomeUsd": p.OtherIncomeUSD,
+		"unclassifiedUsd": p.UnclassifiedUSD, "unclassifiedEur": p.UnclassifiedEUR,
+		"reconPnlDeltaUsd": p.ReconPnLDeltaUSD, "reconPnlDeltaEur": p.ReconPnLDeltaEUR,
+		"reconNetDeltaUsd": p.ReconNetDeltaUSD, "reconNetDeltaEur": p.ReconNetDeltaEUR,
 	}
-	for _, a := range y.Assets {
-		row.Assets = append(row.Assets, store.EtoroAssetRow{
-			AssetType:       a.AssetType,
-			RealisedPnLUSD:  a.RealisedPnLUSD,
-			RealisedPnLEUR:  a.RealisedPnLEUR,
-			RealisedDiscUSD: a.RealisedDiscUSD,
-			RealisedDiscEUR: a.RealisedDiscEUR,
-			RealisedCopyUSD: a.RealisedCopyUSD,
-			RealisedCopyEUR: a.RealisedCopyEUR,
-			DividendsUSD:    a.DividendsUSD,
-			DividendsEUR:    a.DividendsEUR,
-			FeesUSD:         a.FeesUSD,
-			FeesEUR:         a.FeesEUR,
-			TradeCount:      a.TradeCount,
-		})
+}
+
+// etoroStatementToStore maps the parsed statement onto the store's position-level types.
+func etoroStatementToStore(st *etoro.Statement) store.EtoroStatementData {
+	lines, _ := json.Marshal(st.Period.Lines)
+	p := st.Period
+	d := store.EtoroStatementData{
+		FileName: st.FileName,
+		Period: store.EtoroPeriod{
+			RangeStart: p.RangeStart, RangeEnd: p.RangeEnd,
+			NetUSD: p.NetUSD, NetEUR: p.NetEUR, RealisedUSD: p.RealisedUSD, RealisedEUR: p.RealisedEUR,
+			DividendsUSD: p.DividendsUSD, DividendsEUR: p.DividendsEUR,
+			DividendResidualUSD: p.DividendResidualUSD, DividendResidualEUR: p.DividendResidualEUR,
+			FeesUSD: p.FeesUSD, FeesEUR: p.FeesEUR, InterestUSD: p.InterestUSD, InterestEUR: p.InterestEUR,
+			RefundsUSD: p.RefundsUSD, RefundsEUR: p.RefundsEUR, OtherIncomeUSD: p.OtherIncomeUSD, OtherIncomeEUR: p.OtherIncomeEUR,
+			UnclassifiedUSD: p.UnclassifiedUSD, UnclassifiedEUR: p.UnclassifiedEUR,
+			ReconPnLDeltaUSD: p.ReconPnLDeltaUSD, ReconPnLDeltaEUR: p.ReconPnLDeltaEUR,
+			ReconNetDeltaUSD: p.ReconNetDeltaUSD, ReconNetDeltaEUR: p.ReconNetDeltaEUR,
+			FeesByType: p.FeesByType, LinesJSON: string(lines),
+		},
 	}
-	return row
+	for _, c := range st.Positions {
+		d.Positions = append(d.Positions, store.EtoroPosition{PositionID: c.PositionID, CloseDate: c.CloseDate, Year: c.Year,
+			AssetType: c.AssetType, IsCopy: c.IsCopy, ProfitUSD: c.ProfitUSD, ProfitEUR: c.ProfitEUR})
+	}
+	for _, v := range st.Dividends {
+		d.Dividends = append(d.Dividends, store.EtoroDividend{Key: v.Key, PositionID: v.PositionID, PayDate: v.PayDate,
+			Year: v.Year, AssetType: v.AssetType, USD: v.USD, EUR: v.EUR})
+	}
+	return d
 }

@@ -2783,7 +2783,8 @@ async function renderEtoroPerformance(currency) {
         <div class="etoro-ytd-sub num dim">
           dividends ${etoroMoney(ccyPick(ytd, 'dividends', ccy), ccy)} ·
           fees ${etoroMoney(ccyPick(ytd, 'fees', ccy), ccy)} ·
-          interest ${etoroMoney(ccyPick(ytd, 'interest', ccy), ccy)} ·
+          income &amp; other ${etoroMoney(ccyPick(ytd, 'interest', ccy) + ccyPick(ytd, 'refunds', ccy) + ccyPick(ytd, 'otherIncome', ccy), ccy)}
+          <span class="dim" title="interest + refunds + airdrops/staking/corporate actions/stocks lending/index adjustments: whole-period lines, not per-trade results">(ⓘ)</span> ·
           net ${etoroMoney(ccyPick(ytd, 'net', ccy), ccy)}
         </div>
       </div>`;
@@ -2828,6 +2829,7 @@ async function renderEtoroPerformance(currency) {
         <div class="etoro-year-title">
           ${y.year}${y.isYtd ? ' <span class="etoro-ytd-pill">YTD</span>' : ''}
           <span class="dim" style="font-weight:400">${escapeHTML(y.sourceFile || '')}</span>
+          ${y.coverageNote ? `<span class="etoro-recon-flag" title="${escapeHTML(y.coverageNote)}">partial year</span>` : ''}
           ${reconNote}
         </div>
         <table class="etoro-table">
@@ -2847,6 +2849,12 @@ async function renderEtoroPerformance(currency) {
               <td class="num ${tNet > 0 ? 'gain' : tNet < 0 ? 'loss' : ''}">${etoroMoney(tNet, ccy)}</td>
               <td></td>
             </tr>
+            ${(ccyPick(y, 'interest', ccy) || ccyPick(y, 'refunds', ccy) || ccyPick(y, 'otherIncome', ccy) || ccyPick(y, 'unclassified', ccy)) ? `
+            <tr class="etoro-income-row">
+              <td title="Whole-period lines from the Financial Summary: counted in total return, never in per-trade statistics">Income &amp; other</td>
+              <td colspan="4" class="num dim">interest ${etoroMoney(ccyPick(y, 'interest', ccy), ccy)} · refunds ${etoroMoney(ccyPick(y, 'refunds', ccy), ccy)} · other ${etoroMoney(ccyPick(y, 'otherIncome', ccy), ccy)}${Math.abs(ccyPick(y, 'unclassified', ccy)) > 0.004 ? ` · <span class="loss">⚠ unclassified ${etoroMoney(ccyPick(y, 'unclassified', ccy), ccy)}</span>` : ''}</td>
+              <td></td>
+            </tr>` : ''}
           </tbody>
         </table>
       </div>`;
@@ -2949,7 +2957,14 @@ function renderEtoroModalBody() {
   }
 
   if (st.step === 'applied') {
-    body.innerHTML = `<div class="gain">Imported ${st.applyResult.yearsApplied} year${st.applyResult.yearsApplied === 1 ? '' : 's'} from ${escapeHTML(st.applyResult.fileName)}.</div>`;
+    const ar = st.applyResult || {};
+    const outc = (ar.outcomes || []).map((o) => `<li><strong>${o.year}</strong> — ${escapeHTML(o.action.replace('_', ' '))}: <span class="dim">${escapeHTML(o.note || '')}</span></li>`).join('');
+    const aw = (ar.warnings || []).map((w) => `<li>${escapeHTML(w)}</li>`).join('');
+    body.innerHTML = `
+      <div class="gain">Imported ${ar.yearsApplied} year${ar.yearsApplied === 1 ? '' : 's'} from ${escapeHTML(ar.fileName)}.</div>
+      <p class="dim" style="font-size:0.82rem">${ar.positionsNew || 0} new closed positions, ${ar.positionsKnown || 0} already known (not counted twice); ${ar.dividendsNew || 0} new dividends, ${ar.dividendsKnown || 0} already known.</p>
+      ${outc ? `<ul class="etoro-warns">${outc}</ul>` : ''}
+      ${aw ? `<ul class="etoro-warns">${aw}</ul>` : ''}`;
     foot.innerHTML = `<button class="btn-primary" id="etoro-done">Done</button>`;
     $('#etoro-done').addEventListener('click', () => {
       closeImportModal();
@@ -2975,9 +2990,21 @@ function renderEtoroModalBody() {
         <span class="dim">· ${(y.assets || []).length} asset types</span>
       </div>`;
   }).join('');
+  // SC-50: reconciliation in BOTH currencies, and every non-trade line classified or flagged.
+  const pr = p.period || {};
+  const fmtD = (v, c) => (c === 'EUR' ? '€' : '$') + Number(v || 0).toFixed(2);
+  const reconLine = pr.rangeStart ? `
+    <div class="etoro-recon-box ${(Math.abs(pr.reconPnlDeltaUsd || 0) > 1 || Math.abs(pr.reconPnlDeltaEur || 0) > 1 || Math.abs(pr.reconNetDeltaUsd || 0) > 0.005 || Math.abs(pr.reconNetDeltaEur || 0) > 0.005) ? 'bad' : 'ok'}" style="margin:0.5rem 0; font-size:0.85rem">
+      <strong>Reconciliation</strong> (${escapeHTML(pr.rangeStart)} → ${escapeHTML(pr.rangeEnd)}):
+      closed-trade P&amp;L Δ ${fmtD(pr.reconPnlDeltaUsd, 'USD')} / ${fmtD(pr.reconPnlDeltaEur, 'EUR')} ·
+      net vs classified lines Δ ${fmtD(pr.reconNetDeltaUsd, 'USD')} / ${fmtD(pr.reconNetDeltaEur, 'EUR')}
+      ${Math.abs(pr.unclassifiedUsd || 0) > 0.004 ? ` · <span class="loss">Unclassified ${fmtD(pr.unclassifiedUsd, 'USD')} / ${fmtD(pr.unclassifiedEur, 'EUR')}</span>` : ''}
+      <br><span class="dim">Income &amp; other (interest ${fmtD(pr.interestUsd, 'USD')}, refunds ${fmtD(pr.refundsUsd, 'USD')}, other ${fmtD(pr.otherIncomeUsd, 'USD')}) is whole-period and shown separately from closed-trade P&amp;L.</span>
+    </div>` : '';
   body.innerHTML = `
-    <p class="dim" style="font-size:0.82rem">${escapeHTML(p.fileName)} — applying supersedes any prior import for these years.</p>
+    <p class="dim" style="font-size:0.82rem">${escapeHTML(p.fileName)} — ${p.positions || 0} closed positions, ${p.dividends || 0} dividend rows. Positions are matched by their eToro Position ID, so re-importing or overlapping statements never double-counts.</p>
     ${yearSummaries}
+    ${reconLine}
     ${warns ? `<ul class="etoro-warns">${warns}</ul>` : ''}`;
   foot.innerHTML = `
     <button class="btn-secondary" id="etoro-back">Back</button>

@@ -47,6 +47,16 @@ type EtoroYearRow struct {
 	ComputedPnLEUR float64         `json:"computedPnlEur"`
 	ReconDeltaUSD  float64         `json:"reconDeltaUsd"`
 	ReconDeltaEUR  float64         `json:"reconDeltaEur"`
+	// SC-50 "Income & other" (whole-period lines, shown in the End Date year) and coverage.
+	RefundsUSD       float64         `json:"refundsUsd"`
+	RefundsEUR       float64         `json:"refundsEur"`
+	OtherIncomeUSD   float64         `json:"otherIncomeUsd"`
+	OtherIncomeEUR   float64         `json:"otherIncomeEur"`
+	UnclassifiedUSD  float64         `json:"unclassifiedUsd"`
+	UnclassifiedEUR  float64         `json:"unclassifiedEur"`
+	ReconNetDeltaUSD float64         `json:"reconNetDeltaUsd"`
+	ReconNetDeltaEUR float64         `json:"reconNetDeltaEur"`
+	CoverageNote     string          `json:"coverageNote,omitempty"`
 	SourceFile     string          `json:"sourceFile"`
 	ImportedAt     time.Time       `json:"importedAt"`
 	Assets         []EtoroAssetRow `json:"assets"`
@@ -123,6 +133,8 @@ func (s *Store) ListEtoroPerformance(ctx context.Context, userID int64) ([]Etoro
 		       realised_pnl_usd, realised_pnl_eur, dividends_usd, dividends_eur,
 		       fees_usd, fees_eur, interest_usd, interest_eur, net_usd, net_eur,
 		       computed_pnl_usd, computed_pnl_eur, recon_delta_usd, recon_delta_eur,
+		       refunds_usd, refunds_eur, other_income_usd, other_income_eur, unclassified_usd, unclassified_eur,
+		       recon_net_delta_usd, recon_net_delta_eur, coverage_note,
 		       source_file, imported_at
 		  FROM etoro_performance_year
 		 WHERE user_id = ? AND superseded = 0
@@ -141,6 +153,8 @@ func (s *Store) ListEtoroPerformance(ctx context.Context, userID int64) ([]Etoro
 			&y.RealisedPnLUSD, &y.RealisedPnLEUR, &y.DividendsUSD, &y.DividendsEUR,
 			&y.FeesUSD, &y.FeesEUR, &y.InterestUSD, &y.InterestEUR, &y.NetUSD, &y.NetEUR,
 			&y.ComputedPnLUSD, &y.ComputedPnLEUR, &y.ReconDeltaUSD, &y.ReconDeltaEUR,
+			&y.RefundsUSD, &y.RefundsEUR, &y.OtherIncomeUSD, &y.OtherIncomeEUR, &y.UnclassifiedUSD, &y.UnclassifiedEUR,
+			&y.ReconNetDeltaUSD, &y.ReconNetDeltaEUR, &y.CoverageNote,
 			&y.SourceFile, &importedAt,
 		); err != nil {
 			return nil, err
