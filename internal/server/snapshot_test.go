@@ -1,0 +1,232 @@
+package server
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"ft/internal/config"
+	"ft/internal/frameworks"
+	"ft/internal/marketdata"
+	"ft/internal/snapshot"
+	"ft/internal/store"
+)
+
+func snapServer(t *testing.T) (*Server, *store.Store) {
+	t.Helper()
+	if err := marketdata.LoadHolidays(); err != nil {
+		t.Fatal(err)
+	}
+	_ = frameworks.Load()
+	st, err := store.Open(filepath.Join(t.TempDir(), "ft.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.Exec(`INSERT INTO users (id, email, password_hash, created_at) VALUES (1, 'fin@example.test', 'x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	return New(&config.Config{}, st, nil), st
+}
+
+func mustExec(t *testing.T, st *store.Store, q string, args ...any) {
+	t.Helper()
+	if _, err := st.DB.Exec(q, args...); err != nil {
+		t.Fatalf("%s: %v", q, err)
+	}
+}
+
+func readFile(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+type captureNotifier struct{ msgs []string }
+
+func (c *captureNotifier) Send(_ context.Context, text string) error {
+	c.msgs = append(c.msgs, text)
+	return nil
+}
+
+// Two consecutive weeks through the real run: one row per week, same-week re-run replaces,
+// the second week compares with the first, and the Telegram note carries the top changes.
+func TestWeeklySnapshotTwoWeeksEndToEnd(t *testing.T) {
+	s, st := snapServer(t)
+	ctx := context.Background()
+	out := t.TempDir()
+	n := &captureNotifier{}
+	// History tables the seeds and the alert counts read.
+	mustExec(t, st, `INSERT INTO macro_regime_history (quadrant, shorthand, growth_dir, inflation_dir, computed_at) VALUES ('Q4','Deflation/Recession','decel','decel',?)`, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC).Unix())
+	mustExec(t, st, `INSERT INTO notification_log (holding_kind, holding_id, alert_kind, alert_day, created_at) VALUES ('stock',1,'red','2026-10-09',1),('stock',2,'red','2026-10-10',1)`)
+	sun1 := time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC)
+	res, err := s.RunWeeklySnapshot(ctx, sun1, SnapshotOptions{OutDir: out, Notify: n})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Payload.WeekStart != "2026-10-05" || !res.Saved {
+		t.Fatalf("week %s saved %v", res.Payload.WeekStart, res.Saved)
+	}
+	md := readFile(t, filepath.Join(out, "ft-snapshot.md"))
+	if !strings.HasPrefix(md, "ft_snapshot_version: 1\ngenerated_at: ") || !strings.Contains(md, "week_start: 2026-10-05") || !strings.HasSuffix(strings.TrimSpace(md), "<!-- END ft-snapshot v1 -->") {
+		t.Fatalf("file shape:\n%s", md[:300])
+	}
+	if c, _ := snapshot.Count(ctx, st.DB); c != 1 {
+		t.Fatalf("rows %d", c)
+	}
+	// Same ISO week again: replaced, not added.
+	if _, err := s.RunWeeklySnapshot(ctx, sun1.Add(time.Hour), SnapshotOptions{OutDir: out}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := snapshot.Count(ctx, st.DB); c != 1 {
+		t.Fatalf("same-week re-run must replace: rows %d", c)
+	}
+	// Week 2: the macro regime changes in between.
+	mustExec(t, st, `INSERT INTO macro_regime_history (quadrant, shorthand, growth_dir, inflation_dir, computed_at) VALUES ('Q1','Goldilocks','accel','decel',?)`, time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC).Unix())
+	mustExec(t, st, `UPDATE meta SET value = value WHERE 0`)
+	mustExec(t, st, `INSERT INTO notification_log (holding_kind, holding_id, alert_kind, alert_day, created_at) VALUES ('stock',3,'red','2026-10-16',1),('stock',4,'red','2026-10-17',1),('stock',5,'red','2026-10-17',1)`)
+	sun2 := time.Date(2026, 10, 18, 18, 0, 0, 0, time.UTC)
+	// The live macro regime handler reads macro_regime_history's latest row.
+	res2, err := s.RunWeeklySnapshot(ctx, sun2, SnapshotOptions{OutDir: out, Notify: n})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := snapshot.Count(ctx, st.DB); c != 2 || res2.Report.First || res2.Report.PrevWeek != "2026-10-05" {
+		t.Fatalf("rows %d first=%v prev=%s", c, res2.Report.First, res2.Report.PrevWeek)
+	}
+	// Alerts raised 2026-10-12..18 = 3 (week 2) vs 2026-10-06..12 = 2 (week 1).
+	if res.Payload.Metrics["alerts.7d.red"] != 2 || res2.Payload.Metrics["alerts.7d.red"] != 3 {
+		t.Fatalf("alert counts: %v / %v", res.Payload.Metrics["alerts.7d.red"], res2.Payload.Metrics["alerts.7d.red"])
+	}
+	if len(n.msgs) != 2 || !strings.HasPrefix(n.msgs[1], "FT weekly snapshot ready:") {
+		t.Fatalf("telegram: %v", n.msgs)
+	}
+	for _, l := range res2.Report.Top {
+		if strings.Contains(l, "NaN") {
+			t.Fatal(l)
+		}
+	}
+}
+
+// A section whose source breaks is omitted with a note; the run still completes and nothing is invented.
+func TestSnapshotOmitsABrokenSectionWithANote(t *testing.T) {
+	s, st := snapServer(t)
+	mustExec(t, st, `ALTER TABLE watchlist RENAME TO watchlist_broken`)
+	res, err := s.RunWeeklySnapshot(context.Background(), time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC), SnapshotOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("run must complete: %v", err)
+	}
+	found := false
+	for _, n := range res.Payload.Notes {
+		if strings.Contains(n, "Section omitted — watchlist") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no omission note: %v", res.Payload.Notes)
+	}
+	if _, ok := res.Payload.Metrics["watchlist.count"]; ok {
+		t.Fatal("an omitted section must not invent numbers")
+	}
+	if !strings.Contains(res.Markdown, "Section omitted — watchlist") {
+		t.Fatal("the note must reach the file")
+	}
+}
+
+// The numbers equal what the connector tools return at the same moment (same handlers).
+func TestSnapshotEqualsConnectorHandlers(t *testing.T) {
+	s, st := snapServer(t)
+	mustExec(t, st, `INSERT INTO watchlist (user_id, ticker, kind, current_price, target_entry_low, target_entry_high, added_at, updated_at) VALUES
+	  (1,'AAA','stock',10,9,11,1,1),(1,'BBB','stock',50,9,11,1,1),(1,'CCC','stock',10,9,11,1,1)`)
+	ctx := context.Background()
+	res, err := s.RunWeeklySnapshot(ctx, time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC), SnapshotOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wl, _ := s.callHandlerJSON(ctx, 1, "/api/watchlist", nil, s.handleListWatchlist)
+	gaps, _ := s.callHandlerJSON(ctx, 1, "/api/theses/gaps", nil, s.handleThesesGaps)
+	if got, want := res.Payload.Metrics["watchlist.count"], float64(len(arr(wl, "watchlist"))); got != want || want < 3 {
+		t.Fatalf("watchlist count %v vs connector %v", got, want)
+	}
+	if got, want := res.Payload.Metrics["gaps.total"], float64(len(arr(gaps, "gaps"))); got != want {
+		t.Fatalf("gaps %v vs connector %v", got, want)
+	}
+	inRange := 0
+	for _, x := range arr(wl, "watchlist") {
+		if m, _ := x.(map[string]any); m["inRange"] == true {
+			inRange++
+		}
+	}
+	if got := res.Payload.Metrics["watchlist.in_zone_count"]; got != float64(inRange) || inRange < 2 {
+		t.Fatalf("in zone %v vs connector %d", got, inRange)
+	}
+	set := strings.Join(res.Payload.Sets["watchlist.in_zone"], ",")
+	if !strings.Contains(set, "AAA") || !strings.Contains(set, "CCC") || strings.Contains(set, "BBB") {
+		t.Fatalf("in-zone set %v", set)
+	}
+}
+
+// Nothing from the privacy sweep's blocked list may reach the file.
+func TestSnapshotFileHasNoBlockedContent(t *testing.T) {
+	s, st := snapServer(t)
+	mustExec(t, st, `INSERT INTO etoro_statement_periods (user_id, range_start, range_end, source_file, imported_at) VALUES (1,'2026-01-01','2026-10-09','etoro-account-statement-1-1-2026-10-9-2026.xlsx',1)`)
+	mustExec(t, st, `INSERT INTO etoro_closed_positions (user_id, position_id, close_date, year, asset_type, is_copy, profit_usd, profit_eur, source_file, imported_at) VALUES (1,'123456789','2026-05-01',2026,'Stocks',0,5,4,'etoro-account-statement-x.xlsx',1)`)
+	res, err := s.RunWeeklySnapshot(context.Background(), time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC), SnapshotOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := regexp.MustCompile(`(?i)\.xlsx|etoro-account-statement|BLOSSOM|MIDLETON|\bIBAN\b|\bPPS\b|taxpayer|password|api[_-]?key|secret|bearer|123456789|@example`)
+	if m := re.FindString(res.Markdown); m != "" {
+		t.Fatalf("blocked content %q in the snapshot file", m)
+	}
+	if !strings.Contains(res.Markdown, "2026-10-09") {
+		t.Fatal("the coverage end date is expected (it is not personal data)")
+	}
+}
+
+func TestSnapshotRefusesInDemoMode(t *testing.T) {
+	s, st := snapServer(t)
+	if err := st.SetPreference(context.Background(), "demo_mode", "on"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunWeeklySnapshot(context.Background(), time.Now(), SnapshotOptions{DryRun: true}); err == nil || !strings.Contains(err.Error(), "demo mode") {
+		t.Fatalf("demo mode must refuse: %v", err)
+	}
+}
+
+// Sunday run vs Monday catch-up: the catch-up fills a missed week, never duplicates one, and
+// other days do nothing.
+func TestScheduledSnapshotModes(t *testing.T) {
+	s, st := snapServer(t)
+	ctx := context.Background()
+	count := func() int { c, _ := snapshot.Count(ctx, st.DB); return c }
+	wed := time.Date(2026, 10, 14, 7, 0, 0, 0, time.UTC)
+	if err := s.RunScheduledSnapshot(ctx, wed, "sunday", nil); err != nil || count() != 0 {
+		t.Fatalf("wednesday must do nothing: %v %d", err, count())
+	}
+	// Monday 2026-10-12 07:00 UTC with no row for the week of 10-05: catch-up takes it.
+	mon := time.Date(2026, 10, 12, 7, 0, 0, 0, time.UTC)
+	if err := s.RunScheduledSnapshot(ctx, mon, "catchup", nil); err != nil || count() != 1 {
+		t.Fatalf("catch-up: %v %d", err, count())
+	}
+	if p, _ := snapshot.Get(ctx, st.DB, "2026-10-05"); p == nil {
+		t.Fatal("the catch-up must be filed under the week that just ended")
+	}
+	if err := s.RunScheduledSnapshot(ctx, mon.Add(time.Hour), "catchup", nil); err != nil || count() != 1 {
+		t.Fatalf("catch-up must not duplicate: %v %d", err, count())
+	}
+	sun := time.Date(2026, 10, 18, 18, 0, 0, 0, time.UTC)
+	if err := s.RunScheduledSnapshot(ctx, sun, "sunday", nil); err != nil || count() != 2 {
+		t.Fatalf("sunday run: %v %d", err, count())
+	}
+}

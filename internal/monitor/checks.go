@@ -104,6 +104,11 @@ func DefaultChecks(db *sql.DB) []Check {
 		// trading days (alert at >= 3), not by the file's modification time.
 		{Source: "farside", Label: "Farside ETF-flow data", MaxAge: 2 * 24 * h, Eval: etfFlowEval(FarsideFile)},
 
+		// Weekly FT snapshot (SC-46): taken Sunday evening, with a Monday catch-up; one missed
+		// week must alert, so the allowance is 8 days. Weekly reminders.
+		{Source: "snapshot", Label: "Weekly FT snapshot", MaxAge: 8 * 24 * h, ReminderEvery: 7 * 24 * h,
+			Eval: snapshotEval(db)},
+
 		// eToro statement coverage (SC-51): Fin uploads statements by hand, so the data goes
 		// quiet when he forgets. Alert once the coverage end is more than 35 days old, remind weekly.
 		{Source: "statement_coverage", Label: "eToro statement coverage", MaxAge: 35 * 24 * h,
@@ -113,6 +118,7 @@ func DefaultChecks(db *sql.DB) []Check {
 		// file on every successful run, including "nothing changed" runs (every 10 minutes).
 		{Source: "drive_spec", Label: "Drive spec mirror", MaxAge: 2 * h, Probe: fileProbe("/var/lib/ft/data/bridge/spec.ok")},
 		{Source: "drive_library", Label: "Drive library mirror", MaxAge: 2 * h, Probe: fileProbe("/var/lib/ft/data/bridge/library.ok")},
+		{Source: "drive_snapshot", Label: "Drive snapshot push", MaxAge: 2 * h, Probe: fileProbe("/var/lib/ft/data/bridge/snapshot.ok")},
 
 		// Nightly DB backup (cron 03:15).
 		{Source: "db_backup", Label: "Nightly DB backup", MaxAge: 30 * h, Probe: fileProbe("/var/backups/ft/ft-*.db")},

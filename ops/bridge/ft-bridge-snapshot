@@ -1,0 +1,30 @@
+#!/bin/bash
+# SC-46 (P5) — push the weekly FT snapshot to Google Drive (FT-Bridge/reports/ft-snapshot.md).
+# FT writes /var/lib/ft/data/bridge/snapshot/ft-snapshot.md when it takes a snapshot; this job
+# (root, every 10 minutes) uploads it ONLY when it changed, replacing the Drive file in place
+# (same file ID) through the existing SC-45 user script, as curran who owns the rclone remote.
+# It touches /var/lib/ft/data/bridge/snapshot.ok on every healthy run (the connectivity monitor
+# watches it) and refuses to push a file that lacks the end marker (a cut-off render).
+set -euo pipefail
+exec 9>/run/ft-bridge-snapshot.lock
+flock -n 9 || exit 0
+SRC=/var/lib/ft/data/bridge/snapshot/ft-snapshot.md
+OKDIR=/var/lib/ft/data/bridge
+W=/var/lib/ft_bridge/snapshot
+RUSER=curran
+install -d -m 750 -o root -g "$RUSER" /var/lib/ft_bridge "$W"
+if [ -f "$SRC" ]; then
+  if ! tail -n 3 "$SRC" | grep -q '<!-- END ft-snapshot v'; then
+    echo "refusing to upload: $SRC has no END marker"; exit 1
+  fi
+  NEW=$(sha256sum "$SRC" | cut -d' ' -f1)
+  OLD=$(cat "$W/pushed.sha" 2>/dev/null || true)
+  if [ "$NEW" != "$OLD" ]; then
+    cp "$SRC" "$W/upload.md"; chmod 640 "$W/upload.md"; chown root:"$RUSER" "$W/upload.md"
+    runuser -u "$RUSER" -- "/home/$RUSER/scripts/ft_bridge/ft_bridge_push.sh" "$W/upload.md" reports/ft-snapshot.md
+    echo "$NEW" > "$W/pushed.sha"
+    echo "uploaded the weekly FT snapshot ($(wc -l < "$SRC") lines)"
+  fi
+fi
+install -d -m 755 -o ft -g ft "$OKDIR"
+touch "$OKDIR/snapshot.ok"; chown ft:ft "$OKDIR/snapshot.ok"

@@ -1,0 +1,8 @@
+[Unit]
+Description=SC-46: push the weekly FT snapshot to Google Drive (FT-Bridge/reports/ft-snapshot.md)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ft-bridge-snapshot

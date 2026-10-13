@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.85.0 · 2026-10-13** — latest change: Data-date freshness for FRED and stablecoin indicators (§13).
+> **Current version: v1.86.0 · 2026-10-13** — latest change: Weekly FT snapshot (P5) (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.85.0 2026-10-13 -->
+<!-- reference_reviewed: v1.86.0 2026-10-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -56,7 +56,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 
 ## 3. Schema — every migration
 
-54 migrations applied (latest `0054_etoro_position_open.sql`).
+55 migrations applied (latest `0055_ft_snapshots.sql`).
 
 | # | File | Adds |
 |---|------|------|
@@ -109,6 +109,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0047 | `etoro_sync` | SC-42 — `etoro_instruments`, `etoro_sync_runs`, `etoro_holdings_lots` (per-lot change history), `etoro_holdings_effective` (per ticker + direction) |
 | 0053 | `etoro_positions` | SC-50 — `etoro_closed_positions` and `etoro_dividend_rows` (keyed by eToro Position ID), `etoro_statement_periods` (whole-period Financial Summary lines per statement), and new columns on `etoro_performance_year` (refunds, other income, unclassified, net-reconciliation delta, coverage note) |
 | 0054 | `etoro_position_open` | SC-51 — `etoro_closed_positions.open_date` and `.amount_usd` (hold time and the small-position filter); NULL until a statement carrying them is imported, a re-import fills them and a dateless re-import never erases them |
+| 0055 | `ft_snapshots` | SC-46 (P5) — `ft_snapshots` (one row per ISO week, `week_start` = Monday UNIQUE, `payload_json`); the same week is replaced, earlier weeks are kept |
 | 0052 | `indicator_data_as_of` | SC-49 — `crypto_indicators.data_as_of` (date of the newest data point behind a reading) |
 | 0051 | `provider_daily` | SC-48 — per-provider per-day call counters; retired providers' health rows removed |
 | 0050 | `oauth` | SC-41b — `oauth_clients`, `oauth_codes`, `oauth_tokens` (hashes only; refresh tokens rotate, families revoked on reuse) |
@@ -132,6 +133,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Macro Regime | 01:00, plus ~75 s after boot | FRED refresh + regime snapshot |
 | Legislators / committees | 02:00, self-gated to the first day of each quarter | Signals reference data |
 | Daily job | 04:00 | 365-day price history, calendar dates, beta, 12m vol, analyst forecasts. CLI: `ft daily` |
+| Weekly FT snapshot (SC-46) | Sunday 18:00 UTC (Sunday evening Dublin) + Monday 07:00 UTC catch-up | `Server.RunScheduledSnapshot`: builds the deterministic weekly snapshot from the same in-process handlers the connector tools call (portfolio, YTD performance and trade statistics, thesis scores and locks, gap report, watchlist in-zone set, alerts raised in the last 7 days, regimes, crypto indicators with data dates, non-ok monitor entries, the latest week of video digests), compares it with the previous weeks (deltas, 4-week trend, text/set changes, a Top-changes block of at most 8 lines ranked by a fixed rule: regime changes and thesis-score changes, then set changes, then the largest relative movers), saves it to `ft_snapshots` and writes `/var/lib/ft/data/bridge/snapshot/ft-snapshot.md`; one Telegram note. The Monday run takes the week that just ended only if Sunday's did not run. A section whose source fails is omitted with a note, never invented; demo mode refuses to snapshot. Weeks before the first stored snapshot are filled ONLY from existing history tables (portfolio value, alerts raised, regimes, thesis scores and lock dates); everything else starts at its first snapshot. Monitor `snapshot`: alert when the newest snapshot is older than 8 days, weekly reminders, quiet before the first one |
 | Video digest sweep | 09:15, plus ~2 min after boot | SC-43: ingests any complete package in `/var/lib/video_digest` not yet digested (one governor LLM call per new video) |
 | Sector rotation ingest | 22:00 | 34 sector ETFs + SPY + VWRL daily close. CLI: `ft sector-ingest` |
 | Weekly sector digest | Fri 22:00 | Top/bottom by RS, WoW movers → `sector_rotation_digests` |
@@ -147,6 +149,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Job | Schedule | What |
 |-----|----------|------|
 | `ft-bridge-spec.timer` | every 10 min | SC-45: exports the working spec (live DB row) and the archive (`docs/spec-archive/`) to Google Drive (`FT-Bridge/spec`, `FT-Bridge/spec/archive`) when either changes. Source and installer in `ops/bridge/` (`sudo ops/bridge/install.sh`) |
+| `ft-bridge-snapshot.timer` | every 10 min | SC-46: pushes `/var/lib/ft/data/bridge/snapshot/ft-snapshot.md` to `FT-Bridge/reports/ft-snapshot.md` (same Drive file, replaced in place through `ft_bridge_push.sh`) only when it changed and only if it ends with its `<!-- END ft-snapshot vN -->` marker; touches `snapshot.ok` (monitor `drive_snapshot`, 2 h) |
 | `ft-bridge-library.timer` | every 10 min | SC-47: mirrors the research library to Google Drive `FT-Bridge/library/` (one-way, Claude reads only): `specs/` (repo `ft_specs/`), `handovers/`, `theses/<adapter>/` (per-ticker locked stock theses, added v1.79.1), `scoring/` (stock + crypto logs, methodology registry, and the GENERATED `scoring_log_live` / `crypto_scoring_log_live` tallies built from `theses_index` / `crypto_theses`), `crypto/` (log, `adapters/`, `theses/`) and `FT-library-INDEX` (per-file last-updated + source commit + repo HEAD). Uploads only documents whose content changed (so a thesis lock/upload or a DB change shows within 10 min); `flock` prevents overlap. Source `ops/bridge/ft-bridge-library`; both bridge exporters touch `/var/lib/ft/data/bridge/{spec,library}.ok` on success, which the connectivity monitor watches (stale > 2 h → Telegram) |
 | `video-digest.timer` | Sun 20:00 + Mon 08:00 Europe/Dublin | SC-43 P0: fetches new Jordi/Cowen videos into `/var/lib/video_digest` |
 | `ft-backup.timer`, `ft-restore-verify.timer` | systemd timers | SC-37 backup / DR and restore verification |
@@ -336,6 +339,7 @@ ft token create --user-id N --name X      mint a bearer token (plaintext shown o
 ft token create-mcp ...                   mint a read-scoped token for the MCP connector (SC-41)
 ft token list                             list tokens (no plaintext)
 ft token revoke --id N [--user-id N]      revoke a service token
+ft snapshot [--now] [--dry-run] [--week-start YYYY-MM-DD]   SC-46: take the weekly FT snapshot now (build, compare, save to ft_snapshots, write the Drive file, Telegram note); --dry-run prints the Markdown and saves nothing
 ft etoro-import [--user-id N] [--dry-run] FILE.xlsx...   import eToro statements (merged by Position ID, SC-50); --dry-run only parses and prints the reconciliation
 ft oauth status | revoke-all | revoke-client --id ID | create-client [--name N] [--redirect URI] [--secret]   SC-41b OAuth sign-ins
 ft help
@@ -349,7 +353,7 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 | Item | Purpose | Status |
 |------|---------|--------|
-| P5 — FT snapshot report | Generated report (theses, gap report, watchlist, regime, latest video-digest week) written to `FT-Bridge/reports/ft-snapshot.md` | Not built. Transport ready (SC-45); the file there is a placeholder |
+| P5 — FT snapshot report | Weekly snapshot persisted in the DB with deltas and 4-week trends, rendered to `FT-Bridge/reports/ft-snapshot.md` | **Built (SC-46, v1.86.0).** Phase 2 (P5b: read-only connector tools `get_snapshot` / `get_trends`) is a proposal only, awaiting Fin |
 | SC-43 P2 | OCR of Cowen chart frames to fill the snapshot columns left NULL in P1 (200WMA, log band, dominance, ETH/BTC) | Not built |
 | SC-43 P3 / P4 | Regime read surfaced in the UI; digest query tool | Not built — `suggested_regime` / `regime_read` are stored but not exposed |
 | SC-04 batch automation | Thesis updates at scale | Parked pending Fin's decisions on model / scope / sourcing |
@@ -371,13 +375,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.86.0 · 2026-10-13 · pass 90 · SC-46
+
+**Weekly FT snapshot (P5).** FT stores a deterministic snapshot per ISO week (new table `ft_snapshots`), compares it with earlier weeks (deltas, 4-week trends, changes, a Top-changes block) and writes a short file to Drive `reports/ft-snapshot.md` every Sunday evening, with a Monday catch-up. History is seeded only from existing history tables. Behaviour: yes. Migrations: 0055. Reference updated: §3, §4, §11, §12. Supersedes v1.85.0.
+
 ### v1.85.0 · 2026-10-13 · pass 89 · SC-49b
 
 **Data-date freshness for FRED and stablecoin indicators.** The US 2-year yield, dollar index, CFNAI and stablecoin-supply cards now show the date of their data with an amber/red badge by a per-series rule (2Y 5/8 trading days, DXY 14/21 days, CFNAI 95/120 days, stablecoin 3/5 days), and the monitor alerts at amber naming fetch failure versus source not updated. Behaviour: yes. Migrations: none. Reference updated: §4, §8. Supersedes v1.84.1.
 
+
 ### v1.84.1 · 2026-10-13 · pass 88 · SC-51
 
 **Performance tab: one scope control.** The year tables and the Trade statistics panel now share a single Discretionary / Copy-CFD / All control (default Discretionary, saved choice reset once). In the filtered views only realised P&L and trade counts are scoped; dividends, fees, interest and refunds appear once as an account-level row and no Net is computed there. Net shows only in All and on the YTD card (retitled 'YTD 2026 · realised'). Behaviour: yes. Migrations: none. Reference updated: §2, §5. Supersedes v1.84.0.
+
 
 
 ### v1.84.0 · 2026-10-13 · pass 87 · SC-51
@@ -386,9 +396,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.83.2 · 2026-10-13 · pass 86 · SC-51
 
 **ETF-flow trailing zero row ignored; chart freshness fixed.** A newest Farside row with `totalM = 0` followed by a non-zero row is a not-yet-published placeholder and is ignored for the as-of date (card, chart badge and monitor share one rule). Also fixes a v1.82.0 slip: the chart's `asOf`/age/badge fields had been attached to the BTC-history handler, so the ETF chart never showed them; now on `/api/crypto-indicators/etf-flow/history`, with a handler test. Behaviour: yes. Migrations: none. Reference updated: §3, §8. Supersedes v1.83.1.
+
 
 
 
@@ -401,9 +413,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.83.0 · 2026-10-13 · pass 84 · SC-50
 
 **Performance importer.** Multi-year statements are split into per-year buckets by each position's own close date; positions are stored by eToro Position ID so re-imports and overlapping statements never double-count; a narrower statement can no longer erase a wider year; reconciliation is shown in USD and EUR; every Financial Summary line is classified or flagged, and interest, refunds and other income appear as "Income & other". Also fixes a bug that read bracketed losses `(11.50)` as 0 in the Closed Positions sheet. Migration 0053. Behaviour: yes. Reference updated: §3, §5. Supersedes v1.82.0.
+
 
 
 
@@ -420,9 +434,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.81.1 · 2026-10-13 · pass 82 · SC-48
 
 **RSS User-Agent fix.** Nasdaq's feed reset connections whose User-Agent contained a URL; the RSS fetcher now sends a plain `FT-Dashboard` UA, which all nine feeds accept. Behaviour: yes. Migrations: none. Reference updated: §8. Supersedes v1.81.0.
+
 
 
 
@@ -443,21 +459,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.80.1 · 2026-10-13 · pass 80 · SC-47
-
-**Scheduler fix.** Four scheduled jobs had never run because `scheduleAt` blocked after the first job in each group: the Bargo/Congress ingest, the executive-order ingest, the quarterly legislator refresh and the weekly Nexus fundamentals. Each job now has its own goroutine, with a regression test. The Bargo alert was a true positive; the key, quota and monitor rule are fine. Behaviour: yes. Migrations: none. Reference updated: §4. Supersedes v1.80.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.85.0 -->
+<!-- END FT-master-spec v1.86.0 -->

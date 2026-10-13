@@ -1,0 +1,10 @@
+[Unit]
+Description=SC-46: check for a new weekly FT snapshot every 10 minutes (uploads only on change)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

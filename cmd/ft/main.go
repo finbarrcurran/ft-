@@ -90,6 +90,8 @@ func main() {
 		runOAuth(os.Args[2:])
 	case "llm-alert-test":
 		runLLMAlertTest()
+	case "snapshot":
+		runSnapshot(os.Args[2:])
 	case "etoro-import":
 		runEtoroImport(os.Args[2:])
 	case "video-digest-reground":
@@ -182,6 +184,7 @@ USAGE
   ft token revoke --id N [--user-id N]         revoke a service token
   ft oauth status | revoke-all | revoke-client --id ID | create-client --name N --redirect URI [--secret]
                                                manage the claude.ai connector's OAuth sign-ins (SC-41b)
+  ft snapshot [--now] [--dry-run] [--week-start YYYY-MM-DD]   SC-46 weekly FT snapshot: build, compare with earlier weeks, save, write the Drive file
   ft llm-alert-test                            send one TEST budget alert through Telegram (delivery check, no spend)
   ft etoro-import [--user-id N] [--dry-run] FILE.xlsx...   import eToro statements (merged by Position ID; SC-50)
   ft help                  print this usage
@@ -584,6 +587,23 @@ func runServe() {
 		}
 		scheduleAt(bgCtx, 9, 15, run)
 	}()
+
+	// SC-46 — weekly FT snapshot: Sunday evening (Dublin) takes the week's snapshot; Monday
+	// 07:00 UTC takes the week that just ended if Sunday's run did not happen.
+	scheduleAt(bgCtx, 18, 0, func() {
+		ctx, cancel := context.WithTimeout(bgCtx, 10*time.Minute)
+		defer cancel()
+		if err := srv.RunScheduledSnapshot(ctx, time.Now(), "sunday", &monitor.Telegram{}); err != nil {
+			slog.Error("snapshot: scheduled run failed", "err", err)
+		}
+	})
+	scheduleAt(bgCtx, 7, 0, func() {
+		ctx, cancel := context.WithTimeout(bgCtx, 10*time.Minute)
+		defer cancel()
+		if err := srv.RunScheduledSnapshot(ctx, time.Now(), "catchup", &monitor.Telegram{}); err != nil {
+			slog.Error("snapshot: catch-up run failed", "err", err)
+		}
+	})
 
 	// Spec 15 — Thesis Library sync. Periodically `git pull` the
 	// cross_sector_research clone and re-index. No-op if FT_GITHUB_TOKEN
@@ -1276,6 +1296,38 @@ func runLLMAlertTest() {
 
 // runEtoroImport imports eToro statement .xlsx files in the order given (SC-50): the same merge the
 // Performance tab's Upload statement uses. --dry-run only parses and prints.
+// runSnapshot builds the weekly snapshot now (SC-46). --dry-run prints the file and saves nothing.
+func runSnapshot(args []string) {
+	fs := flag.NewFlagSet("snapshot", flag.ExitOnError)
+	_ = fs.Bool("now", false, "take the snapshot now (the default; the scheduled run does the same on Sunday evening)")
+	dry := fs.Bool("dry-run", false, "print the Markdown and save nothing")
+	week := fs.String("week-start", "", "override the week (a Monday, YYYY-MM-DD)")
+	_ = fs.Parse(args)
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	must("frameworks", frameworks.Load())
+	must("holidays", marketdata.LoadHolidays())
+	must("macro", macro.Load())
+	health.Init(st)
+	srv := server.New(cfg, st, llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY")))
+	opt := server.SnapshotOptions{DryRun: *dry, WeekOverride: *week}
+	if !*dry {
+		opt.Notify = &monitor.Telegram{}
+	}
+	res, err := srv.RunWeeklySnapshot(context.Background(), time.Now(), opt)
+	must("snapshot", err)
+	if *dry {
+		fmt.Print(res.Markdown)
+		fmt.Fprintf(os.Stderr, "\n[dry run] week %s, %d lines, %d changes, seeded keys: %d\n", res.Payload.WeekStart, strings.Count(res.Markdown, "\n"), res.Report.ChangeCount, len(res.Seeded))
+		return
+	}
+	fmt.Printf("snapshot saved for week %s: %d lines, %d changes (first=%v), seeded keys: %d\n", res.Payload.WeekStart, strings.Count(res.Markdown, "\n"), res.Report.ChangeCount, res.Report.First, len(res.Seeded))
+}
+
 func runEtoroImport(args []string) {
 	fs := flag.NewFlagSet("etoro-import", flag.ExitOnError)
 	userID := fs.Int64("user-id", 1, "user id")
