@@ -195,7 +195,7 @@ func (c *FREDClient) fetchSeries(ctx context.Context, seriesID string, absoluteT
 	sort.Slice(parsed, func(i, j int) bool { return parsed[i].date.After(parsed[j].date) })
 
 	latest := parsed[0]
-	out := Reading{Value: &latest.value}
+	out := Reading{Value: &latest.value, AsOf: latest.date.Format("2006-01-02")}
 
 	// Find the observation nearest to 28 days before the latest.
 	target := latest.date.Add(-28 * 24 * time.Hour)

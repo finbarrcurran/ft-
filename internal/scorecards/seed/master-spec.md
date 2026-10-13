@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.84.1 · 2026-10-13** — latest change: Performance tab: one scope control (§13).
+> **Current version: v1.85.0 · 2026-10-13** — latest change: Data-date freshness for FRED and stablecoin indicators (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.84.1 2026-10-13 -->
+<!-- reference_reviewed: v1.85.0 2026-10-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -138,7 +138,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | AI Nexus daily | 22:30 | Universe + benchmark bars, Trend Score + Exhaustion |
 | AI Nexus weekly | Sun 22:45 | Forward PEG recompute |
 | Signals ingest | 23:00 / 23:10 / 23:20 (+ quarterly legislators 02:00) | SEC Form 4 insiders (firehose + per-ticker), Congress, executive orders. The 23:10 Congress step (SC-47) imports the legacy Capitol Trades file into `congress_trades_raw` once, syncs Bargo (a rolling window of recent transaction dates, 7-day slices; first run backfills 3 months; Sundays re-read 60 days because disclosures lag up to ~45 days). **Before v1.80.1 only the 23:00 insider job ever ran** (see the scheduler note below), then turns recent raw rows into tiered `signal_events` |
-| Connectivity monitor | every 10 min (first run 5 min after start) | SC-47: reads each watched source's last success (`provider_health`, `bargo_sync_runs`, `etoro_sync_runs`, Farside file mtime, newest DB backup) and compares it with the silence that source is allowed (`internal/monitor/checks.go`). One Telegram message when a source goes stale, a reminder every 24 h while it stays stale, one on recovery; on first sight, already-stale sources are folded into a single "monitor is on" message. Known-dead feeds are flagged optional (shown, never alert). **`statement_coverage` (SC-51)** watches the eToro statement coverage end (35 days, weekly reminders; `Check.ReminderEvery`). Alerts go straight to Telegram via `FT_TELEGRAM_BOT_TOKEN` / `FT_TELEGRAM_CHAT_ID`; with them unset events are recorded as undelivered **The Farside ETF-flow check (SC-49) judges the newest ROW's date in US trading days, not the file's modification time:** alert at ≥ 3 US trading days old (one message, reminder every 24 h, recovery note), and the text names the cause — scraper failed (its `fetchedAt` older than 30 h) versus source not updated (scraper fine, no newer row). |
+| Connectivity monitor | every 10 min (first run 5 min after start) | SC-47: reads each watched source's last success (`provider_health`, `bargo_sync_runs`, `etoro_sync_runs`, Farside file mtime, newest DB backup) and compares it with the silence that source is allowed (`internal/monitor/checks.go`). One Telegram message when a source goes stale, a reminder every 24 h while it stays stale, one on recovery; on first sight, already-stale sources are folded into a single "monitor is on" message. Known-dead feeds are flagged optional (shown, never alert). **Indicator data dates (SC-49b):** one check per series (`ci_pal_us2y`, `ci_pal_dxy`, `ci_pal_cfnai`, `ci_universal_stablecoin_supply`) alerts at the amber age of its rule, names the cause (FETCH FAILED versus SOURCE not updated), reminds every 24 h (CFNAI every 7 days) and says when it recovers; Diagnostics lists each series' data date, age in its own unit and last fetch result. **`statement_coverage` (SC-51)** watches the eToro statement coverage end (35 days, weekly reminders; `Check.ReminderEvery`). Alerts go straight to Telegram via `FT_TELEGRAM_BOT_TOKEN` / `FT_TELEGRAM_CHAT_ID`; with them unset events are recorded as undelivered **The Farside ETF-flow check (SC-49) judges the newest ROW's date in US trading days, not the file's modification time:** alert at ≥ 3 US trading days old (one message, reminder every 24 h, recovery note), and the text names the cause — scraper failed (its `fetchedAt` older than 30 h) versus source not updated (scraper fine, no newer row). |
 | Feed warm-up | 06:30 daily | SC-48: runs the real handlers for CNN Fear & Greed, crypto Fear & Greed, market news and crypto news once (same path as a user request, cache and stale fallback included) so request-driven feeds stay fresh; one Telegram alert naming any that still fail. Startup (30 s after boot): one Telegram alert naming any missing required provider variable (names only) |
 | Scheduler note | — | `scheduleAt` (cmd/ft/main.go) runs each job in its own goroutine since v1.80.1. It used to block, so in a goroutine that armed several jobs only the first ever fired: the Congress/Bargo ingest (23:10), the executive-order ingest (23:20), the quarterly legislator refresh (02:00) and the weekly Nexus fundamentals job (Sunday 22:45) had never run on schedule since v1.11.0 (Congress and EO data were only ever refreshed by manual buttons or one-off runs). A regression test arms three jobs in a row and requires all to fire |
 
@@ -280,7 +280,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 | Crypto quote | CoinGecko `/simple/price` | serve-stale | Demo key `FT_COINGECKO_API_KEY`; free Demo plan 100 calls/min and 10,000/month (FT uses ~100–200/day) |
 | Crypto history | CoinGecko `/market_chart` | — | Sequential w/ 2.5s gap |
 | Crypto market screener | CoinGecko top 250 | — | SC-21 |
-| Macro + Pal indicators | FRED | manual ISM entry | `FRED_API_KEY` |
+| Macro + Pal indicators | FRED | manual ISM entry | `FRED_API_KEY`. **Freshness (SC-49b, v1.85.0):** `data_as_of` = the newest observation date used (FRED) or the newest point of DefiLlama's array (stablecoin supply; a real dated element, so a provider that stops publishing stops advancing it). One rule per series in `internal/cryptoindicators/freshness` (cards, Diagnostics and the monitor all use it; age >= amber is amber, >= red is red): `pal_us2y` 5 / 8 US trading days; `pal_dxy` 14 / 21 calendar days (daily series published weekly, 6-11 day lag); `pal_cfnai` 95 / 120 calendar days from the observation date (dated the 1st, released ~3-4 weeks after month end: the real FRED release dates 2025-2026 give a longest normal wait of ~87 days; a fixed number was used rather than "next release + 7 days"); `universal_stablecoin_supply` 3 / 5 calendar days. A fresh refresh time with an old data date is stale. Error pill still takes precedence; stale data is never hidden |
 | FX EUR→USD | Frankfurter (`api.frankfurter.dev/v1`) | stored rate, then static 1.08 | No key; moved from `frankfurter.app` (v1.80.0) |
 | Stocks Fear & Greed | CNN `production.dataviz.cnn.io` | stale cache ≤ 6 h | Unofficial; answers HTTP 418 unless a cnn.com `Referer`/`Origin` is sent (sent since v1.80.0). Fragile: the daily warm-up alerts if it still fails |
 | Crypto Fear & Greed | alternative.me | stale cache | Stable |
@@ -371,13 +371,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.85.0 · 2026-10-13 · pass 89 · SC-49b
+
+**Data-date freshness for FRED and stablecoin indicators.** The US 2-year yield, dollar index, CFNAI and stablecoin-supply cards now show the date of their data with an amber/red badge by a per-series rule (2Y 5/8 trading days, DXY 14/21 days, CFNAI 95/120 days, stablecoin 3/5 days), and the monitor alerts at amber naming fetch failure versus source not updated. Behaviour: yes. Migrations: none. Reference updated: §4, §8. Supersedes v1.84.1.
+
 ### v1.84.1 · 2026-10-13 · pass 88 · SC-51
 
 **Performance tab: one scope control.** The year tables and the Trade statistics panel now share a single Discretionary / Copy-CFD / All control (default Discretionary, saved choice reset once). In the filtered views only realised P&L and trade counts are scoped; dividends, fees, interest and refunds appear once as an account-level row and no Net is computed there. Net shows only in All and on the YTD card (retitled 'YTD 2026 · realised'). Behaviour: yes. Migrations: none. Reference updated: §2, §5. Supersedes v1.84.0.
 
+
 ### v1.84.0 · 2026-10-13 · pass 87 · SC-51
 
 **Trade statistics and statement coverage.** The Performance tab gains a USD trade-statistics panel (scope, year, win rate, payoff, profit factor, expectancy, median hold, by asset and year; small samples greyed) read from the stored closed positions, and tracks how far the imported statements reach: a 'data through' label, the next start date, a confirmed-gap warning on upload and a monitor alert after 35 days. Migration 0054 adds open date and invested amount. Behaviour: yes. Migrations: 0054. Reference updated: §2, §3, §4, §5. Supersedes v1.83.2.
+
 
 
 ### v1.83.2 · 2026-10-13 · pass 86 · SC-51
@@ -386,9 +392,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.83.1 · 2026-10-13 · pass 85 · SC-50
 
 **eToro statements re-imported.** The performance rows were repaired by re-importing four statements through the new merge (backup first); 2026 now covers 2026-01-01 to 2026-10-09, and USD closed-position P&L and dividends match eToro's own 5-30→10-11 summary to the cent. New CLI `ft etoro-import [--dry-run]`. Behaviour: yes. Migrations: none. Reference updated: §11. Supersedes v1.83.0.
+
 
 
 
@@ -401,9 +409,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.82.0 · 2026-10-13 · pass 83 · SC-49
 
 **ETF-flow freshness guard.** The ETF-flow card and chart now show the data's own date and an amber/red badge by US trading days (3–4 / 5+), the monitor judges the newest row's date (not the file's time) and names whether the scraper or the source is at fault, and Diagnostics shows the age. Migration 0052. Behaviour: yes. Reference updated: §3, §4, §8. Supersedes v1.81.1.
+
 
 
 
@@ -420,9 +430,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.81.0 · 2026-10-13 · pass 81 · SC-48
 
 **RSS cut-over, heatmap, theses.** Market News now reads free publisher RSS (CNBC, BBC Business, Nasdaq as primary; MarketWatch and The Guardian as measured backups) with per-feed health; NewsAPI is no longer called. The heatmap tiles refresh every ~30 minutes while their market is open instead of every 15 around the clock. The six crypto theses with empty text were restored from their originals (scores unchanged). §12 rows 16 and 13 closed as unverified. Behaviour: yes. Migrations: none. Reference updated: §8, §12. Supersedes v1.80.1.
+
 
 
 
@@ -443,21 +455,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.80.0 · 2026-10-12 · pass 79 · SC-48
-
-**Data-provider fixes.** Finnhub is rate-gated, cached and limited to US holdings; heatmap tiles use Yahoo; Twelve Data retired; CNN Fear & Greed works again (Referer fix); a daily warm-up keeps the request-driven feeds fresh and alerts if one fails; market-news RSS is built but not yet switched on; per-provider daily call counters and usage lines in Diagnostics; a startup alert for missing provider keys; budget-alert path tested. Behaviour: yes. Migrations: 1. Reference updated: §8, §12. Supersedes v1.79.1.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.84.1 -->
+<!-- END FT-master-spec v1.85.0 -->

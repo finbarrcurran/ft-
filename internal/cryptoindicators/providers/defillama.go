@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -69,6 +70,11 @@ func (c *DefiLlamaClient) FetchStablecoinSupply(ctx context.Context) Reading {
 	latestB := latestUSD / 1e9
 
 	out := Reading{Value: &latestB}
+	// The newest point of the chart is a real, dated element of the source's array (unix
+	// seconds, UTC midnight); if the source stops publishing, this date stops advancing.
+	if secs, err := strconv.ParseInt(latest.Date, 10, 64); err == nil {
+		out.AsOf = time.Unix(secs, 0).UTC().Format("2006-01-02")
+	}
 
 	// 4-week ROC.
 	if len(data) > 29 {

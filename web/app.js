@@ -5765,6 +5765,7 @@ function renderDiagnosticsSection(d) {
             <li><span class="dim">DB size:</span> ${fmtBytes(sys.dbSizeBytes)} <span class="dim">(${escapeHTML(sys.dbPath || '')})</span></li>
             <li><span class="dim">Latest backup:</span> ${backupRow}</li>
             ${d.etfFlow ? `<li><span class="dim">ETF-flow data:</span> newest row ${escapeHTML(d.etfFlow.asOf)} · ${d.etfFlow.ageTradingDays} US trading day${d.etfFlow.ageTradingDays === 1 ? '' : 's'} old${d.etfFlow.level ? ` <span class="${d.etfFlow.level === 'red' ? 'loss' : 'amber-text'}">(${escapeHTML(d.etfFlow.level)})</span>` : ''} <span class="dim">· scraper last OK ${d.etfFlow.scraperLastOk ? new Date(d.etfFlow.scraperLastOk).toLocaleString() : '—'}${d.etfFlow.scraperOk ? '' : ' ⚠ not running'}</span></li>` : ''}
+            ${(d.indicatorFreshness || []).map((f) => `<li><span class="dim">${escapeHTML(f.name)}:</span> ${f.asOf ? `data ${escapeHTML(f.asOf)} · ${f.age != null ? f.age : '?'} ${f.unit === 'trading' ? 'US trading days' : 'days'} old` : 'no data date yet'}${f.level ? ` <span class="${f.level === 'red' ? 'loss' : 'amber-text'}">(${escapeHTML(f.level)})</span>` : ''} <span class="dim">· amber at ${f.amberAt}, red at ${f.redAt} · last fetch ${f.fetchError ? '⚠ ' + escapeHTML(f.fetchError) : (f.lastFetchAt ? 'OK ' + new Date(f.lastFetchAt * 1000).toLocaleString() : '—')}</span></li>`).join('')}
           </ul>
         </div>
 
@@ -9276,7 +9277,7 @@ function renderCIModal(indicator, allIndicators, compareIds) {
           <div class="ci-modal-current">
             <div class="ci-modal-val-block">
               <div class="ci-modal-val">${valStr}<span class="ci-modal-val-unit dim"> ${i.unit ? escapeHTML(i.unit) : ''}</span></div>
-              <div class="ci-modal-meta">${score} ${trend} <span class="dim">· last updated ${escapeHTML(lastUpdated)}</span>${i.dataAsOf ? ` <span class="dim">· data as of <strong>${escapeHTML(i.dataAsOf)}</strong></span> ${ciFreshnessBadge(i.staleLevel, i.dataAgeTradingDays, i.dataAsOf)}` : ''}</div>
+              <div class="ci-modal-meta">${score} ${trend} <span class="dim">· last updated ${escapeHTML(lastUpdated)}</span>${i.dataAsOf ? ` <span class="dim">· data as of <strong>${escapeHTML(i.dataAsOf)}</strong></span> ${ciFreshnessBadge(i.staleLevel, i.dataAge != null ? i.dataAge : i.dataAgeTradingDays, i.dataAsOf, i.dataAgeUnit)}` : ''}</div>
               ${i.fetchError ? `<div class="loss" style="font-size:0.82rem; margin-top:0.3rem">⚠ ${escapeHTML(i.fetchError)}</div>` : ''}
             </div>
           </div>
@@ -9430,10 +9431,11 @@ function renderCIStablecoinChart(indicator) {
 // SC-49 — data freshness badge shared by the ETF-flow card and chart. `level` comes from the
 // server (US trading days since the data's own date: none <= 2, amber 3-4, red >= 5), so the
 // card, the chart and the monitor can never disagree.
-function ciFreshnessBadge(level, ageTd, asOf) {
+function ciFreshnessBadge(level, ageTd, asOf, unit) {
   if (level !== 'amber' && level !== 'red') return '';
   const cls = level === 'red' ? 'ci-pill err' : 'ci-pill stale';
-  const days = ageTd != null ? ` ${ageTd} trading days` : '';
+  // SC-49b: calendar-day series say "days"; trading-day series say "trading days".
+  const days = ageTd != null ? ` ${ageTd} ${unit === 'calendar' ? 'days' : 'trading days'}` : '';
   return `<span class="${cls}" title="Latest data ${escapeHTML(asOf || '')} — ${days.trim()} old">⚠ stale${days ? ' ·' + days : ''}</span>`;
 }
 
@@ -9717,7 +9719,7 @@ async function renderCryptoIndicators() {
             <div class="ci-card-meta">
               <span class="dim">4w</span> ${trend}
               ${stale}
-              ${i.dataAsOf ? `<span class="dim ci-asof" title="Date of the newest data point behind this value">as of ${escapeHTML(i.dataAsOf)}</span>${i.fetchError ? '' : ciFreshnessBadge(i.staleLevel, i.dataAgeTradingDays, i.dataAsOf)}` : ''}
+              ${i.dataAsOf ? `<span class="dim ci-asof" title="Date of the newest data point behind this value">as of ${escapeHTML(i.dataAsOf)}</span>${i.fetchError ? '' : ciFreshnessBadge(i.staleLevel, i.dataAge != null ? i.dataAge : i.dataAgeTradingDays, i.dataAsOf, i.dataAgeUnit)}` : ''}
             </div>
           </div>
         </div>

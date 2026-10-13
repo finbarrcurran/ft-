@@ -117,6 +117,7 @@ func DefaultChecks(db *sql.DB) []Check {
 		// Nightly DB backup (cron 03:15).
 		{Source: "db_backup", Label: "Nightly DB backup", MaxAge: 30 * h, Probe: fileProbe("/var/backups/ft/ft-*.db")},
 	}
+	checks = append(checks, indicatorChecksFor(db)...)
 	return append(checks, marketFeedChecks(db)...)
 }
 

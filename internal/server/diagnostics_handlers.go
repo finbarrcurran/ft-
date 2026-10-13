@@ -53,6 +53,13 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 		out["etfFlow"] = st
 	}
 
+	// SC-49b — data date, age in its own unit, level and last fetch result per ruled indicator.
+	if s.cryptoIndicators != nil {
+		if fr, err := s.cryptoIndicators.FreshnessRows(r.Context()); err == nil {
+			out["indicatorFreshness"] = fr
+		}
+	}
+
 	// SC-48 — provider usage: today's calls against each limit, plus a 7-day view.
 	out["providerDaily"], _ = s.store.ProviderDaily(r.Context(), 7)
 	out["usage"] = s.providerUsage(r.Context())

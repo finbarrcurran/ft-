@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"ft/internal/marketdata"
+	"ft/internal/cryptoindicators/freshness"
 	"os"
 	"time"
 )
@@ -39,6 +39,12 @@ type IndicatorRow struct {
 	DataAsOf           string `json:"dataAsOf,omitempty"`
 	DataAgeTradingDays *int   `json:"dataAgeTradingDays,omitempty"`
 	StaleLevel         string `json:"staleLevel,omitempty"`
+	// SC-49b: the age in the unit of this indicator's own rule ("trading" US trading days or
+	// "calendar" days) and the thresholds, so the badge can say what it measured.
+	DataAge     *int   `json:"dataAge,omitempty"`
+	DataAgeUnit string `json:"dataAgeUnit,omitempty"`
+	AmberAt     int    `json:"amberAt,omitempty"`
+	RedAt       int    `json:"redAt,omitempty"`
 	Tooltip      string         `json:"tooltip"`
 	History      []HistoryPoint `json:"history,omitempty"` // last 30 daily snapshots, oldest first
 }
@@ -145,10 +151,14 @@ func (s *Service) listIndicatorsCore(ctx context.Context) ([]IndicatorRow, error
 			&cv, &cs, &tr, &ua, &r.FetchError, &r.DataAsOf); err != nil {
 			return nil, err
 		}
-		if r.DataAsOf != "" {
-			if age, err := marketdata.USTradingDaysSince(r.DataAsOf, time.Now()); err == nil {
-				r.DataAgeTradingDays = &age
-				r.StaleLevel = marketdata.StaleLevel(age)
+		if rule, ok := freshness.For(r.ID); ok && r.DataAsOf != "" {
+			if age, err := rule.Age(r.DataAsOf, time.Now()); err == nil {
+				a := age
+				r.DataAge, r.DataAgeUnit, r.AmberAt, r.RedAt = &a, rule.Unit, rule.Amber, rule.Red
+				if rule.Unit == freshness.Trading {
+					r.DataAgeTradingDays = &a
+				}
+				r.StaleLevel = rule.Level(age)
 			}
 		}
 		if unit.Valid {
@@ -568,4 +578,37 @@ func nullStr(s string) any {
 		return nil
 	}
 	return s
+}
+
+// FreshnessRow is one indicator's data freshness for Diagnostics (SC-49b).
+type FreshnessRow struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	AsOf        string `json:"asOf"`
+	Age         *int   `json:"age,omitempty"`
+	Unit        string `json:"unit"`
+	AmberAt     int    `json:"amberAt"`
+	RedAt       int    `json:"redAt"`
+	Level       string `json:"level"`
+	FetchError  string `json:"fetchError,omitempty"`
+	LastFetchAt *int64 `json:"lastFetchAt,omitempty"`
+}
+
+// FreshnessRows lists every indicator that has a freshness rule, with its data date, age in the
+// rule's own unit, level, and the result of the last fetch.
+func (s *Service) FreshnessRows(ctx context.Context) ([]FreshnessRow, error) {
+	rows, err := s.listIndicatorsCore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []FreshnessRow{}
+	for _, r := range rows {
+		rule, ok := freshness.For(r.ID)
+		if !ok {
+			continue
+		}
+		out = append(out, FreshnessRow{ID: r.ID, Name: r.DisplayName, AsOf: r.DataAsOf, Age: r.DataAge, Unit: rule.Unit,
+			AmberAt: rule.Amber, RedAt: rule.Red, Level: r.StaleLevel, FetchError: r.FetchError, LastFetchAt: r.UpdatedAt})
+	}
+	return out, nil
 }
