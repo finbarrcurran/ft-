@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.81.0 · 2026-10-13** — latest change: RSS cut-over, heatmap, theses (§13).
+> **Current version: v1.81.1 · 2026-10-13** — latest change: RSS User-Agent fix (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.81.0 2026-10-11 -->
+<!-- reference_reviewed: v1.81.1 2026-10-11 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -276,7 +276,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 | FX EUR→USD | Frankfurter (`api.frankfurter.dev/v1`) | stored rate, then static 1.08 | No key; moved from `frankfurter.app` (v1.80.0) |
 | Stocks Fear & Greed | CNN `production.dataviz.cnn.io` | stale cache ≤ 6 h | Unofficial; answers HTTP 418 unless a cnn.com `Referer`/`Origin` is sent (sent since v1.80.0). Fragile: the daily warm-up alerts if it still fails |
 | Crypto Fear & Greed | alternative.me | stale cache | Stable |
-| News (stocks) | **Free publisher RSS** (cut over 2026-10-13) | stale cache | **Tier A (displayed):** CNBC Top News, BBC Business, Nasdaq Markets. **Tier B (backup, fetched every run so its health is measured, displayed only when < 2 tier-A feeds are healthy or < 10 tier-A items are under 24 h old):** MarketWatch Top Stories, The Guardian Business. No key. Headline, source, time, link out, plus the feed's own summary snippet (≤ ~200 chars) when it supplies one; no article body is fetched or stored. Merge deduped by URL and normalised title, newest first, per-feed attribution, a dead feed never blanks the tab; per-feed health `rss_market_<key>` in the monitor (one alert per outage names the feed). A feed can be dropped without a deploy: `meta.market_news_disabled_feeds` (comma-separated keys: cnbc, bbc, nasdaq, marketwatch, guardian). **NewsAPI is no longer called** (`meta.market_news_source` = `rss`; setting it back to `newsapi` re-enables the old path, kept for about two weeks, planned removal ~2026-10-27). Terms: see §13 entry |
+| News (stocks) | **Free publisher RSS** (cut over 2026-10-13) | stale cache | **Tier A (displayed):** CNBC Top News, BBC Business, Nasdaq Markets. **Tier B (backup, fetched every run so its health is measured, displayed only when < 2 tier-A feeds are healthy or < 10 tier-A items are under 24 h old):** MarketWatch Top Stories, The Guardian Business. No key. Headline, source, time, link out, plus the feed's own summary snippet (≤ ~200 chars) when it supplies one; no article body is fetched or stored. Merge deduped by URL and normalised title, newest first, per-feed attribution, a dead feed never blanks the tab; per-feed health `rss_market_<key>` in the monitor (one alert per outage names the feed). A feed can be dropped without a deploy: `meta.market_news_disabled_feeds` (comma-separated keys: cnbc, bbc, nasdaq, marketwatch, guardian). **NewsAPI is no longer called** (`meta.market_news_source` = `rss`; setting it back to `newsapi` re-enables the old path, kept for about two weeks, planned removal ~2026-10-27). Terms: see §13 entry. RSS requests use the User-Agent `Mozilla/5.0 (compatible; FT-Dashboard/1.0)` (no URL: Nasdaq's CDN resets connections otherwise) |
 | News (crypto) | Publisher RSS (CoinDesk, Cointelegraph, The Block, Decrypt) | stale cache | No key. (CryptoPanic and CryptoCompare are no longer used; CryptoCompare's stale health row was removed) |
 | Sector ETFs | Yahoo daily closes | — | 36 ETFs × 1 call/day |
 | Insider / 13F filings | SEC EDGAR | — | Daily ingest; 13F on demand |
@@ -362,13 +362,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.81.1 · 2026-10-13 · pass 82 · SC-48
+
+**RSS User-Agent fix.** Nasdaq's feed reset connections whose User-Agent contained a URL; the RSS fetcher now sends a plain `FT-Dashboard` UA, which all nine feeds accept. Behaviour: yes. Migrations: none. Reference updated: §8. Supersedes v1.81.0.
+
 ### v1.81.0 · 2026-10-13 · pass 81 · SC-48
 
 **RSS cut-over, heatmap, theses.** Market News now reads free publisher RSS (CNBC, BBC Business, Nasdaq as primary; MarketWatch and The Guardian as measured backups) with per-feed health; NewsAPI is no longer called. The heatmap tiles refresh every ~30 minutes while their market is open instead of every 15 around the clock. The six crypto theses with empty text were restored from their originals (scores unchanged). §12 rows 16 and 13 closed as unverified. Behaviour: yes. Migrations: none. Reference updated: §8, §12. Supersedes v1.80.1.
 
+
 ### v1.80.1 · 2026-10-13 · pass 80 · SC-47
 
 **Scheduler fix.** Four scheduled jobs had never run because `scheduleAt` blocked after the first job in each group: the Bargo/Congress ingest, the executive-order ingest, the quarterly legislator refresh and the weekly Nexus fundamentals. Each job now has its own goroutine, with a regression test. The Bargo alert was a true positive; the key, quota and monitor rule are fine. Behaviour: yes. Migrations: none. Reference updated: §4. Supersedes v1.80.0.
+
 
 
 ### v1.80.0 · 2026-10-12 · pass 79 · SC-48
@@ -377,9 +383,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.79.1 · 2026-10-12 · pass 78 · SC-47
 
 **Decisions applied.** AVGO and RR.L re-tagged, connector token #12 revoked, OpenClaw's dead FT skill retired; the eToro sync transaction is now `BEGIN IMMEDIATE` (fixes the intermittent `database is locked (517)`); the ETH thesis prose in the DB replaced by the amended original (scores unchanged); the unused legacy PPG gate removed; per-ticker stock theses added to the Drive library. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.79.0.
+
 
 
 
@@ -392,9 +400,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.78.1 · 2026-10-11 · pass 76 · SC-47
 
 **Drive library mirror and bridge alerting.** The research library (specs incl. the 9l chain, handovers, scoring logs, crypto adapters and theses) is mirrored one-way to Drive `FT-Bridge/library/` every 10 minutes (changed docs only), with an INDEX of freshness and two DB-generated live tallies. Both Drive mirrors now report success to the connectivity monitor, so a failing mirror alerts over Telegram. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4. Supersedes v1.78.0.
+
 
 
 
@@ -411,9 +421,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.77.3 · 2026-10-11 · pass 74 · SC-17
 
 **Statement-fallback fixes; scrapers restored.** The fallback now reconciles eToro-wallet crypto only, uses live SC-42 units (derived units only for USD listings, so no false RR.L/4063.T drift), matches `SU` to `SU.PA`, never applies a partial-close-blind statement over matching live data, and audits every applied change. The master-file import rejects eToro statements. Playwright installed; the Farside job works again (`ops/scrapers/`); Capitol Trades is still blocked by the site. Behaviour: yes. Migrations/endpoints: none. Reference updated: §4, §5, §7, §12. Supersedes v1.77.2.
+
 
 
 
@@ -434,21 +446,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.77.1 · 2026-10-10 · pass 72 · SC-45
-
-**Archive INDEX polish and end-marker hardening.** Both readers clip the last 10–40 characters of a Drive Doc, so the Drive copies now end with a short tail line after the END marker (exporter only); a marker line that has started counts as complete. INDEX: look in both tables; EIGEN entry resolves to v1.22.7; titles cut on word boundaries. Behaviour: no. Migrations/endpoints: none. Reference updated: §7. Binding: archive text stays byte-for-byte; INDEX is generated. ai's reads confirmed the 40.7k spec and 50k parts need no re-split. Supersedes v1.77.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.81.0 -->
+<!-- END FT-master-spec v1.81.1 -->

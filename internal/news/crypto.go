@@ -48,7 +48,7 @@ var cryptoFeeds = []struct {
 // links, and pubDates. Other fields (description, guid, media:content,
 // etc.) are ignored.
 type rssFeed struct {
-	XMLName xml.Name  `xml:"rss"`
+	XMLName xml.Name   `xml:"rss"`
 	Channel rssChannel `xml:"channel"`
 }
 type rssChannel struct {
@@ -63,11 +63,11 @@ type rssItem struct {
 
 // pubDateFormats covers the variants RSS feeds actually emit.
 var pubDateFormats = []string{
-	time.RFC1123Z,                          // "Mon, 02 Jan 2006 15:04:05 -0700"
-	time.RFC1123,                           // "Mon, 02 Jan 2006 15:04:05 MST"
-	"Mon, 2 Jan 2006 15:04:05 -0700",       // non-zero-padded day
+	time.RFC1123Z,                    // "Mon, 02 Jan 2006 15:04:05 -0700"
+	time.RFC1123,                     // "Mon, 02 Jan 2006 15:04:05 MST"
+	"Mon, 2 Jan 2006 15:04:05 -0700", // non-zero-padded day
 	"Mon, 2 Jan 2006 15:04:05 MST",
-	"2006-01-02T15:04:05Z07:00",            // RFC 3339 variants some feeds use
+	"2006-01-02T15:04:05Z07:00", // RFC 3339 variants some feeds use
 	time.RFC3339,
 }
 
@@ -163,6 +163,9 @@ func fetchRSSAggregate(ctx context.Context, provider string, feeds []rssSource, 
 	return out, nil
 }
 
+// rssUserAgent identifies FT honestly without a URL (Nasdaq rejects UAs containing one).
+const rssUserAgent = "Mozilla/5.0 (compatible; FT-Dashboard/1.0)"
+
 func fetchRSSItems(ctx context.Context, client *http.Client, url string) ([]rssItem, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -170,7 +173,9 @@ func fetchRSSItems(ctx context.Context, client *http.Client, url string) ([]rssI
 	}
 	// Some publisher CDNs (CoinDesk's Arc) reject default Go UA / serve
 	// 308 redirects. A real-browser UA + redirect-follow handles both.
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; FT-Dashboard/1.0; +https://ft.curranhouse.dev)")
+	// (Nasdaq's CDN resets the connection when the UA carries a URL, found 2026-10-13, so the
+	// UA is a plain self-identifying one: "FT-Dashboard".)
+	req.Header.Set("User-Agent", rssUserAgent)
 	req.Header.Set("Accept", "application/rss+xml, application/xml, text/xml, */*")
 
 	resp, err := client.Do(req)
