@@ -322,6 +322,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/registry", s.requireUser(s.handleRegistry))                           // SC-28 Registry / Document-Control
 	s.mux.HandleFunc("GET /api/nexus/entry-candidates", s.requireUser(s.handleNexusEntryCandidates)) // SC-39
 	s.mux.HandleFunc("GET /api/calibration/theses", s.requireUser(s.handleCalibrationTheses))        // SC-38
+	s.mux.HandleFunc("GET /api/transcripts/search", s.requireUser(s.handleTranscriptSearch)) // SC-52 P2
 	s.mux.HandleFunc("GET /api/video-digest", s.requireUser(s.handleVideoDigestList))                // SC-43 P1
 	s.mux.HandleFunc("POST /api/video-digest/ingest", s.requireUser(s.handleVideoDigestIngest))      // SC-43 P1
 	s.mux.HandleFunc("GET /api/scorecards/{code}", s.requireUserOrToken(s.handleScorecardGet))

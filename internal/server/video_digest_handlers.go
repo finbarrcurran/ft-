@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -123,4 +125,50 @@ func (s *Server) RunVideoDigestSweep(ctx context.Context) {
 	}
 	defer vdSweepRunning.Store(false)
 	logVideoDigestSweep("scheduled", s.videoDigest, ctx)
+}
+
+// GET /api/transcripts/search?q=&source=&from=&to=&limit= — SC-52 P2. Full-text search over the
+// stored transcripts (FTS5): a word, several words (all must occur) or a "quoted phrase".
+// Read-only, no LLM. The corpus is public video content, so demo mode does not change it.
+func (s *Server) handleTranscriptSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	opt := videodigest.SearchOptions{Source: q.Get("source"), From: q.Get("from"), To: q.Get("to")}
+	switch opt.Source {
+	case "", "all":
+		opt.Source = ""
+	case "jordi", "cowen":
+	default:
+		writeError(w, http.StatusBadRequest, "source must be all, jordi or cowen")
+		return
+	}
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive number")
+			return
+		}
+		opt.Limit = n
+	}
+	for _, d := range []string{opt.From, opt.To} {
+		if d != "" {
+			if _, err := time.Parse("2006-01-02", d); err != nil {
+				writeError(w, http.StatusBadRequest, "from/to must be YYYY-MM-DD")
+				return
+			}
+		}
+	}
+	hits, err := s.videoDigest.SearchTranscripts(r.Context(), q.Get("q"), opt)
+	if err != nil {
+		if strings.Contains(err.Error(), "empty search") {
+			writeError(w, http.StatusBadRequest, "q is required")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if hits == nil {
+		hits = []videodigest.TranscriptHit{}
+	}
+	stats, _ := s.videoDigest.TranscriptStats(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{"query": q.Get("q"), "hits": hits, "corpus": stats})
 }

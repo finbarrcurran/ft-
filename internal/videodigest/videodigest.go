@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -998,6 +999,11 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 		return fail(fmt.Errorf("transcript.vtt produced no text"))
 	}
 
+	// SC-52 P2: keep the full transcript, searchable, whether or not extraction succeeds.
+	if _, err := s.StoreTranscript(ctx, rowFromPackage(p, compact)); err != nil {
+		slog.Warn("videodigest: transcript not stored", "video", m.VideoID, "err", err)
+	}
+
 	var pr *prior
 	if m.Source == "jordi" { // theme_changes_vs_prior_week is Jordi-only (§7)
 		if pr, err = s.priorFor(ctx, m); err != nil {
@@ -1270,6 +1276,12 @@ func (s *Service) IngestVideo(ctx context.Context, videoID string, force bool) R
 // early when the governor blocks on budget or pause — the rest wait for the next
 // sweep rather than failing one by one.
 func (s *Service) Sweep(ctx context.Context) ([]Result, error) {
+	// SC-52 P2: every complete package's transcript is stored (free), digested or not.
+	if sr, err := s.SyncTranscripts(ctx); err != nil {
+		slog.Warn("videodigest: transcript sync failed", "err", err)
+	} else if sr.Written > 0 {
+		slog.Info("videodigest: transcripts stored", "written", sr.Written, "unchanged", sr.Unchanged, "failed", sr.Failed)
+	}
 	all, err := s.packages()
 	if err != nil {
 		return nil, err
