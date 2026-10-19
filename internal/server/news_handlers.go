@@ -25,7 +25,8 @@ const newsTTL = 60 * time.Minute
 //   4. If everything fails, return an empty feed with source="unconfigured".
 func (s *Server) handleMarketNews(w http.ResponseWriter, r *http.Request) {
 	// SC-48: the market-news source is switchable. `meta.market_news_source` = "newsapi"
-	// (the old default) or "rss" (free publisher feeds; NewsAPI is then never called).
+	// (a disabled-by-default fallback) or "rss" (the default: free publisher feeds; NewsAPI is then
+	// never called).
 	// `?source=rss` previews the RSS feeds without switching or touching the cache.
 	// `meta.market_news_disabled_feeds` (comma-separated feed keys) drops a publisher.
 	rssFetch := func(ctx context.Context) ([]news.Article, error) {
@@ -39,11 +40,22 @@ func (s *Server) handleMarketNews(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, news.Feed{Articles: arts, FetchedAt: time.Now().UTC(), Source: "rss"})
 		return
 	}
-	if v, _ := s.store.GetMeta(r.Context(), "market_news_source"); v == "rss" {
+	// SC-52 P6: RSS is the default (an unset value, as on a rebuilt database, means RSS);
+	// NewsAPI is a fallback that runs only when meta.market_news_source is explicitly "newsapi".
+	if v, _ := s.store.GetMeta(r.Context(), "market_news_source"); marketNewsSource(v) == "rss" {
 		s.handleNews(w, r, "market", "rss", rssFetch)
 		return
 	}
 	s.handleNews(w, r, "market", "newsapi", news.FetchMarketNews)
+}
+
+// marketNewsSource maps the stored setting to the source used: only an explicit "newsapi" selects
+// the NewsAPI fallback; anything else, including an unset value on a rebuilt database, is RSS.
+func marketNewsSource(setting string) string {
+	if strings.TrimSpace(strings.ToLower(setting)) == "newsapi" {
+		return "newsapi"
+	}
+	return "rss"
 }
 
 // disabledMarketFeeds reads the comma-separated feed keys switched off in meta.

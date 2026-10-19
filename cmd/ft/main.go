@@ -95,6 +95,8 @@ func main() {
 		runSnapshot(os.Args[2:])
 	case "etoro-import":
 		runEtoroImport(os.Args[2:])
+	case "regime-history":
+		runRegimeHistory(os.Args[2:])
 	case "transcripts":
 		runTranscripts(os.Args[2:])
 	case "video-digest-preview":
@@ -288,7 +290,7 @@ func runServe() {
 	go func() {
 		time.Sleep(30 * time.Second) // let the network and the Telegram sender come up
 		src, _ := st.GetMeta(bgCtx, "market_news_source")
-		if missing := monitor.CheckKeys(bgCtx, &monitor.Telegram{}, monitor.RequiredProviderKeys(src != "rss")); len(missing) > 0 {
+		if missing := monitor.CheckKeys(bgCtx, &monitor.Telegram{}, monitor.RequiredProviderKeys(src == "newsapi")); len(missing) > 0 {
 			slog.Error("startup: provider settings missing from the environment", "names", missing)
 		}
 	}()
@@ -1265,6 +1267,76 @@ func runVideoDigestPreview(args []string) {
 
 // rawField pulls one top-level key out of the model's raw JSON, for showing what the model said
 // before FT's sanitising dropped or kept it.
+// runRegimeHistory: SC-52 P6. `ft regime-history list [--framework jordi|cowen] [--from D] [--to D]`
+// shows rows with their ids and the seed flag; `flag --ids 1,2,3 [--clear]` sets or clears the flag
+// that keeps a row out of the weekly snapshot's seeded history. Rows are never deleted.
+func runRegimeHistory(args []string) {
+	sub := "list"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("regime-history", flag.ExitOnError)
+	fw := fs.String("framework", "", "jordi | cowen")
+	from := fs.String("from", "", "on/after YYYY-MM-DD")
+	to := fs.String("to", "", "on/before YYYY-MM-DD")
+	ids := fs.String("ids", "", "comma-separated row ids (flag)")
+	clear := fs.Bool("clear", false, "clear the flag instead of setting it")
+	_ = fs.Parse(args)
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	switch sub {
+	case "flag":
+		var n int64
+		for _, part := range strings.Split(*ids, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			v := 1
+			if *clear {
+				v = 0
+			}
+			r, err := st.DB.Exec(`UPDATE regime_history SET seed_excluded = ? WHERE id = ?`, v, part)
+			must("flag "+part, err)
+			c, _ := r.RowsAffected()
+			n += c
+		}
+		fmt.Printf("%d row(s) updated\n", n)
+	default:
+		q := `SELECT id, datetime(ts,'unixepoch'), framework_id, regime, source, COALESCE(note,''), seed_excluded FROM regime_history WHERE 1=1`
+		var a []any
+		if *fw != "" {
+			q += " AND framework_id = ?"
+			a = append(a, *fw)
+		}
+		if *from != "" {
+			q += " AND date(ts,'unixepoch') >= ?"
+			a = append(a, *from)
+		}
+		if *to != "" {
+			q += " AND date(ts,'unixepoch') <= ?"
+			a = append(a, *to)
+		}
+		rows, err := st.DB.Query(q+" ORDER BY ts, id", a...)
+		must("list", err)
+		defer rows.Close()
+		for rows.Next() {
+			var id, ex int
+			var ts, f, r, src, note string
+			must("scan", rows.Scan(&id, &ts, &f, &r, &src, &note, &ex))
+			mark := " "
+			if ex == 1 {
+				mark = "x"
+			}
+			fmt.Printf("%4d [%s] %s  %-5s %-12s %-16s %s\n", id, mark, ts, f, r, src, note)
+		}
+	}
+}
+
 // runTranscripts: SC-52 P2. `ft transcripts sync` stores every on-disk package's transcript;
 // `ft transcripts search [--source jordi|cowen] [--from D] [--to D] [--limit N] QUERY`; `stats`.
 func runTranscripts(args []string) {

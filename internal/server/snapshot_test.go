@@ -384,3 +384,29 @@ func TestSnapshotNotesCapitalFlows(t *testing.T) {
 		t.Fatalf("quiet period: %s", res.Markdown)
 	}
 }
+
+// SC-52 P6: flagged regime-history rows never seed the snapshot's history; the rows themselves stay.
+func TestFlaggedRegimeRowsDoNotSeedSnapshots(t *testing.T) {
+	s, st := snapServer(t)
+	ctx := context.Background()
+	sunday := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	mustExec(t, st, `INSERT INTO regime_history (ts, framework_id, regime, source, note) VALUES (?, 'cowen', 'defensive', 'auto_cowen_form', 'smoke test')`, sunday.Add(-24*time.Hour).Unix())
+	seed := func() string {
+		p, err := s.seedPayload(ctx, "2026-05-11")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.Texts["regime.cowen"]
+	}
+	if got := seed(); got != "defensive" {
+		t.Fatalf("an unflagged row seeds the week: %q", got)
+	}
+	mustExec(t, st, `UPDATE regime_history SET seed_excluded = 1`)
+	if got := seed(); got != "" {
+		t.Fatalf("a flagged row must not seed: %q", got)
+	}
+	var n int
+	if err := st.DB.QueryRow(`SELECT COUNT(*) FROM regime_history`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("the row itself stays: %d %v", n, err)
+	}
+}
