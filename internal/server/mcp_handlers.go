@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -91,6 +92,14 @@ type mcpThesesArgs struct {
 
 type mcpAlertsArgs struct {
 	OnlyUnnotified bool `json:"only_unnotified,omitempty" jsonschema:"If true (default), only alerts not yet notified today. Set false for the full current alert set."`
+}
+
+type mcpTranscriptArgs struct {
+	Query  string `json:"query" jsonschema:"Word, several words (all must occur) or a \"quoted phrase\" to find in the stored Jordi Visser / Benjamin Cowen transcripts."`
+	Source string `json:"source,omitempty" jsonschema:"Optional: jordi or cowen. Omit for both."`
+	From   string `json:"from,omitempty" jsonschema:"Optional: only videos published on or after this date (YYYY-MM-DD)."`
+	To     string `json:"to,omitempty" jsonschema:"Optional: only videos published on or before this date (YYYY-MM-DD)."`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Optional: maximum videos to return (default 10, maximum 50)."`
 }
 
 type mcpPerformanceArgs struct {
@@ -213,6 +222,32 @@ func (s *Server) mountMCP() {
 		userID := mcpUserID(ctx)
 		slog.Info("mcp tool call", "tool", "get_watchlist", "user_id", userID)
 		data, err := s.callHandlerJSON(ctx, userID, "/api/watchlist", nil, s.handleListWatchlist)
+		if err != nil {
+			return nil, nil, err
+		}
+		return mcpResult(data)
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "search_transcripts",
+		Description: "Full-text search over the stored video transcripts (Jordi Visser, Benjamin Cowen): returns video, date, a highlighted snippet and a timestamped YouTube link. Read-only, no LLM, no cache.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args mcpTranscriptArgs) (*mcp.CallToolResult, any, error) {
+		userID := mcpUserID(ctx)
+		slog.Info("mcp tool call", "tool", "search_transcripts", "user_id", userID)
+		q := url.Values{"q": {args.Query}}
+		if args.Source != "" {
+			q.Set("source", args.Source)
+		}
+		if args.From != "" {
+			q.Set("from", args.From)
+		}
+		if args.To != "" {
+			q.Set("to", args.To)
+		}
+		if args.Limit > 0 {
+			q.Set("limit", strconv.Itoa(args.Limit))
+		}
+		data, err := s.callHandlerJSON(ctx, userID, "/api/transcripts/search", q, s.handleTranscriptSearch)
 		if err != nil {
 			return nil, nil, err
 		}

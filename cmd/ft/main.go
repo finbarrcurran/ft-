@@ -95,6 +95,8 @@ func main() {
 		runSnapshot(os.Args[2:])
 	case "etoro-import":
 		runEtoroImport(os.Args[2:])
+	case "transcripts":
+		runTranscripts(os.Args[2:])
 	case "video-digest-preview":
 		runVideoDigestPreview(os.Args[2:])
 	case "video-digest-reground":
@@ -1263,6 +1265,46 @@ func runVideoDigestPreview(args []string) {
 
 // rawField pulls one top-level key out of the model's raw JSON, for showing what the model said
 // before FT's sanitising dropped or kept it.
+// runTranscripts: SC-52 P2. `ft transcripts sync` stores every on-disk package's transcript;
+// `ft transcripts search [--source jordi|cowen] [--from D] [--to D] [--limit N] QUERY`; `stats`.
+func runTranscripts(args []string) {
+	sub := "stats"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("transcripts", flag.ExitOnError)
+	src := fs.String("source", "", "jordi | cowen")
+	from := fs.String("from", "", "published on/after YYYY-MM-DD")
+	to := fs.String("to", "", "published on/before YYYY-MM-DD")
+	limit := fs.Int("limit", 10, "max videos")
+	_ = fs.Parse(args)
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	svc := videodigest.New(st.DB, nil, os.Getenv("FT_VIDEO_DIGEST_ROOT"))
+	ctx := context.Background()
+	switch sub {
+	case "sync":
+		r, err := svc.SyncTranscripts(ctx)
+		must("sync", err)
+		fmt.Printf("packages %d | written %d | unchanged %d | failed %d\n", r.Packages, r.Written, r.Unchanged, r.Failed)
+	case "search":
+		hits, err := svc.SearchTranscripts(ctx, strings.Join(fs.Args(), " "), videodigest.SearchOptions{Source: *src, From: *from, To: *to, Limit: *limit})
+		must("search", err)
+		for _, h := range hits {
+			fmt.Printf("%s  %-5s  %s\n    %s\n    %s\n", h.PublishedAt, h.Source, h.Title, h.Snippet, h.Link)
+		}
+		fmt.Printf("%d video(s)\n", len(hits))
+	default:
+		c, err := svc.TranscriptStats(ctx)
+		must("stats", err)
+		fmt.Printf("transcripts %d (%v) | %d KB | %s .. %s\n", c.Total, c.BySource, c.Bytes/1024, c.Oldest, c.Newest)
+	}
+}
+
 func rawField(raw, key string) any {
 	i, j := strings.Index(raw, "{"), strings.LastIndex(raw, "}")
 	if i < 0 || j <= i {
