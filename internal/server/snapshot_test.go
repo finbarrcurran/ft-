@@ -345,3 +345,42 @@ func TestSnapshotListsEarlierWeeksHoldingsChanges(t *testing.T) {
 		t.Fatalf("removal not mentioned:\n%s", res.Markdown)
 	}
 }
+
+// SC-52 P4: capital flows recorded from statements appear beside the value change; with no
+// statement covering the period the note says so instead of guessing.
+func TestSnapshotNotesCapitalFlows(t *testing.T) {
+	s, st := snapServer(t)
+	ctx := context.Background()
+	mustExec(t, st, `INSERT INTO portfolio_value_history (date, total_value_usd, stocks_value_usd, crypto_value_usd, computed_at) VALUES ('2026-10-04', 28000, 8000, 20000, 1), ('2026-10-11', 25000, 5000, 20000, 1)`)
+	if err := snapshotSave(ctx, s, "2026-09-28"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 11, 18, 0, 0, 0, time.UTC)
+	// No statement at all.
+	res, err := s.RunWeeklySnapshot(ctx, now, SnapshotOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Markdown, "no statement covers this period") {
+		t.Fatalf("no statements: %s", res.Markdown)
+	}
+	// A statement ending before the period.
+	mustExec(t, st, `INSERT INTO etoro_statement_periods (user_id, range_start, range_end, imported_at) VALUES (1,'2026-01-01','2026-06-30',1)`)
+	res, _ = s.RunWeeklySnapshot(ctx, now, SnapshotOptions{DryRun: true})
+	if !strings.Contains(res.Markdown, "after 2026-06-30 are not known") || !strings.Contains(res.Markdown, "next should start 2026-07-01") {
+		t.Fatalf("stale coverage: %s", res.Markdown)
+	}
+	// A statement covering the period, with a withdrawal in it.
+	mustExec(t, st, `UPDATE etoro_statement_periods SET range_end = '2026-10-09'`)
+	mustExec(t, st, `INSERT INTO etoro_capital_flows (user_id, flow_key, occurred_at, day, kind, amount_usd, details, manual, imported_at) VALUES (1,'w1','2026-10-08T12:00:00','2026-10-08','withdrawal',-2500,'',0,1),(1,'d1','2026-10-06T12:00:00','2026-10-06','deposit',400,'',0,1)`)
+	res, _ = s.RunWeeklySnapshot(ctx, time.Date(2026, 10, 9, 18, 0, 0, 0, time.UTC), SnapshotOptions{DryRun: true})
+	if !strings.Contains(res.Markdown, "in $400.00, out -$2,500.00 (net -$2,100.00)") {
+		t.Fatalf("flows missing:\n%s", res.Markdown)
+	}
+	// Covered but quiet.
+	mustExec(t, st, `DELETE FROM etoro_capital_flows`)
+	res, _ = s.RunWeeklySnapshot(ctx, time.Date(2026, 10, 9, 18, 0, 0, 0, time.UTC), SnapshotOptions{DryRun: true})
+	if !strings.Contains(res.Markdown, "no capital flows are recorded in this period (statements cover through 2026-10-09)") {
+		t.Fatalf("quiet period: %s", res.Markdown)
+	}
+}

@@ -2651,6 +2651,7 @@ async function loadEtoroTradeStats(years) {
 
 // SC-51 Part B — coverage of the imported statements ({has,start,end,nextStart,ageDays,stale}).
 let etoroCoverage = null;
+let etoroFlows = null; // SC-52 P4 — dated capital flows from the statements ({has,first,last,inUsd,outUsd,netUsd,feesUsd,byYear})
 
 function etoroCoverageLabel() {
   const c = etoroCoverage;
@@ -2659,6 +2660,16 @@ function etoroCoverageLabel() {
     ? ` <span class="cov-chip" title="The last imported statement ended ${c.ageDays} days ago (nudge after ${35} days). Upload a statement starting ${escapeHTML(c.nextStart)}.">⚠ ${c.ageDays} days old — upload a statement starting ${escapeHTML(c.nextStart)}</span>`
     : '';
   return `<div class="cov-label dim" title="Latest End Date of any imported statement (not the newest close date). Coverage starts ${escapeHTML(c.start)}.">Statement data through <strong>${escapeHTML(c.end)}</strong>${chip}</div>`;
+}
+
+// SC-52 P4 — deposits and withdrawals recorded from the statements' Account Activity.
+function etoroFlowsLabel() {
+  const f = etoroFlows;
+  if (!f || !f.has) return '';
+  const years = (f.byYear || []).map((y) => `${y.year}: in ${etoroMoney(y.inUsd, 'USD')}, out ${etoroMoney(y.outUsd, 'USD')}`).join(' · ');
+  const after = etoroCoverage && etoroCoverage.has && f.last && f.last < etoroCoverage.end
+    ? ` <span class="dim">(no flow since ${escapeHTML(f.last)}; statements run to ${escapeHTML(etoroCoverage.end)})</span>` : '';
+  return `<div class="cov-label dim" title="Deposits, withdrawals and transfers to/from eToro Money, from the statements' Account Activity sheet (USD as eToro reports it). ${escapeHTML(years)}">Capital flows (statements): in <strong>${etoroMoney(f.inUsd, 'USD')}</strong> · out <strong>${etoroMoney(f.outUsd, 'USD')}</strong> · net <strong>${etoroMoney(f.netUsd, 'USD')}</strong>${after}</div>`;
 }
 
 const etoroImportState = { step: 'idle', preview: null, error: null };
@@ -2847,6 +2858,7 @@ async function renderEtoroPerformance(currency) {
 
   const years = (data && data.years) || [];
   etoroCoverage = (data && data.coverage) || null;
+  etoroFlows = (data && data.capitalFlows) || null;
   const uploadBtn = `<button class="btn-secondary etoro-upload-btn" id="etoro-upload-btn">Upload statement</button>`;
   const reconcileBtn = `<button class="btn-secondary etoro-recon-btn" id="etoro-reconcile-btn" title="Reconstruct current open positions from a statement and reconcile against your live holdings">Reconcile holdings</button>`;
 
@@ -3016,6 +3028,7 @@ async function renderEtoroPerformance(currency) {
       <div class="etoro-perf-controls">${stratToggle}${reconcileBtn}${uploadBtn}</div>
     </div>
     ${etoroCoverageLabel()}
+    ${etoroFlowsLabel()}
     ${ytdCard}
     ${copyVsSystematic}
     <div id="etoro-trade-stats"></div>

@@ -101,6 +101,8 @@ func (s *Server) handleEtoroImportPreview(w http.ResponseWriter, r *http.Request
 		"warnings":   st.Warnings,
 		"period":     etoroPeriodSummary(st.Period),
 		"positions":  len(st.Positions),
+		"flows":      len(st.Flows),
+		"flowSummary": st.FlowSum,
 		"dividends":  len(st.Dividends),
 		"ttlSeconds": int(pendingEtoroTTL.Seconds()),
 	})
@@ -156,6 +158,7 @@ func (s *Server) handleEtoroImportApply(w http.ResponseWriter, r *http.Request) 
 		"outcomes":     res.Years,
 		"positionsNew": res.PositionsNew, "positionsKnown": res.PositionsKnown,
 		"dividendsNew": res.DividendsNew, "dividendsKnown": res.DividendsKnown,
+		"flowsNew": res.FlowsNew, "flowsKnown": res.FlowsKnown,
 		"periodAction": res.PeriodAction,
 		"warnings":     res.Warnings,
 	})
@@ -179,7 +182,11 @@ func (s *Server) handleEtoroPerformance(w http.ResponseWriter, r *http.Request) 
 	if mapStoreError(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"years": years, "coverage": cov})
+	flows, err := s.store.CapitalFlowSummary(r.Context(), userID)
+	if mapStoreError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"years": years, "coverage": cov, "capitalFlows": flows})
 }
 
 // handleEtoroTradeStats — SC-51 Part A. Reads closed positions only (USD); never the dividend or
@@ -254,9 +261,84 @@ func EtoroStatementToStore(st *etoro.Statement) store.EtoroStatementData {
 			AssetType: c.AssetType, IsCopy: c.IsCopy, ProfitUSD: c.ProfitUSD, ProfitEUR: c.ProfitEUR,
 			OpenDate: c.OpenDate, AmountUSD: c.AmountUSD})
 	}
+	for _, fl := range st.Flows {
+		d.Flows = append(d.Flows, store.EtoroFlow{Key: fl.Key, OccurredAt: fl.OccurredAt, Day: fl.Day, Kind: fl.Kind, Details: fl.Details, AmountUSD: fl.AmountUSD})
+	}
+	if st.FlowSum.Present || len(st.Flows) > 0 {
+		b, _ := json.Marshal(st.FlowSum)
+		d.FlowsJSON = string(b)
+	}
 	for _, v := range st.Dividends {
 		d.Dividends = append(d.Dividends, store.EtoroDividend{Key: v.Key, PositionID: v.PositionID, PayDate: v.PayDate,
 			Year: v.Year, AssetType: v.AssetType, USD: v.USD, EUR: v.EUR})
 	}
 	return d
+}
+
+// GET /api/etoro/capital-flows?from=&to= — SC-52 P4. Dated deposits, withdrawals and transfers
+// from the statements' Account Activity (plus any manual rows), with year totals.
+func (s *Server) handleEtoroCapitalFlows(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFromContext(r.Context())
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{"demo": true, "flows": []any{}})
+		return
+	}
+	q := r.URL.Query()
+	for _, d := range []string{q.Get("from"), q.Get("to")} {
+		if d != "" {
+			if _, err := time.Parse("2006-01-02", d); err != nil {
+				writeError(w, http.StatusBadRequest, "from/to must be YYYY-MM-DD")
+				return
+			}
+		}
+	}
+	fl, err := s.store.ListCapitalFlows(r.Context(), userID, q.Get("from"), q.Get("to"))
+	if mapStoreError(w, err) {
+		return
+	}
+	sum, err := s.store.CapitalFlowSummary(r.Context(), userID)
+	if mapStoreError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"flows": fl, "summary": sum})
+}
+
+// POST /api/etoro/capital-flows {"day","direction":"in|out","amountUsd","note"} — the manual
+// fallback for a period without a statement. DELETE /api/etoro/capital-flows/{id} removes a
+// manual row only.
+func (s *Server) handleEtoroCapitalFlowAdd(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFromContext(r.Context())
+	var req struct {
+		Day       string  `json:"day"`
+		Direction string  `json:"direction"`
+		AmountUSD float64 `json:"amountUsd"`
+		Note      string  `json:"note"`
+	}
+	if !decodeJSON(r, w, &req) {
+		return
+	}
+	id, err := s.store.AddManualFlow(r.Context(), userID, req.Day, req.Direction, req.AmountUSD, req.Note)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id})
+}
+
+func (s *Server) handleEtoroCapitalFlowDelete(w http.ResponseWriter, r *http.Request) {
+	userID, _ := userIDFromContext(r.Context())
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	ok, err := s.store.DeleteManualFlow(r.Context(), userID, id)
+	if mapStoreError(w, err) {
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "no manual flow with that id (statement rows cannot be deleted)")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
 }

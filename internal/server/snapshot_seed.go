@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"ft/internal/snapshot"
+	"ft/internal/store"
 )
 
 // snapshotHistory returns the three weeks before weekStart, newest first: the stored snapshot
@@ -214,8 +215,6 @@ func (s *Server) auditWindow(ctx context.Context, from, to time.Time) map[string
 	return agg
 }
 
-const flowsText = "deposits and withdrawals are not recorded in FT, so they are not separable from price movement"
-
 // describeAgg renders the recorded holdings changes (empty string when there are none).
 func describeAgg(as ...*auditAgg) string {
 	var rem, add, adj int
@@ -258,12 +257,14 @@ func describeAgg(as ...*auditAgg) string {
 // since the previous snapshot, and a plain statement that capital flows are not recorded. It
 // never estimates an amount: a flow or change it cannot separate is said to be not separable.
 func (s *Server) valueNotes(ctx context.Context, prev *snapshot.Payload, now time.Time) map[string]snapshot.ValueNote {
-	agg := s.auditWindow(ctx, prevInstant(prev), now)
+	from := prevInstant(prev)
+	agg := s.auditWindow(ctx, from, now)
+	flows, flowsShort := s.flowsSentence(ctx, from, now)
 	one := func(as ...*auditAgg) snapshot.ValueNote {
 		d := describeAgg(as...)
 		if d == "" {
-			return snapshot.ValueNote{Short: "no holdings changes recorded",
-				Long: "no holdings changes were recorded since the last snapshot; " + flowsText + "."}
+			return snapshot.ValueNote{Short: "no holdings changes recorded; " + flowsShort,
+				Long: "no holdings changes were recorded since the last snapshot; " + flows + "."}
 		}
 		var rem, add, adj int
 		for _, a := range as {
@@ -272,8 +273,8 @@ func (s *Server) valueNotes(ctx context.Context, prev *snapshot.Payload, now tim
 			adj += a.adjusts
 		}
 		return snapshot.ValueNote{
-			Short: fmt.Sprintf("holdings changes: %d removal%s, %d addition%s, %d adjustment%s; capital flows not recorded", rem, plural(rem), add, plural(add), adj, plural(adj)),
-			Long:  "holdings changes recorded since the last snapshot: " + d + "; " + flowsText + ".",
+			Short: fmt.Sprintf("holdings changes: %d removal%s, %d addition%s, %d adjustment%s; %s", rem, plural(rem), add, plural(add), adj, plural(adj), flowsShort),
+			Long:  "holdings changes recorded since the last snapshot: " + d + "; " + flows + ".",
 		}
 	}
 	return map[string]snapshot.ValueNote{
@@ -292,8 +293,20 @@ func (s *Server) valueHistoryLines(ctx context.Context, prev *snapshot.Payload) 
 		to := end.AddDate(0, 0, -7*k)
 		from := to.AddDate(0, 0, -7)
 		agg := s.auditWindow(ctx, from, to)
-		if d := describeAgg(agg["stock"], agg["crypto"]); d != "" {
-			out = append(out, fmt.Sprintf("Holdings changes in the week ending %s: %s.", to.Format("2006-01-02"), d))
+		d := describeAgg(agg["stock"], agg["crypto"])
+		fsum, _ := s.store.CapitalFlowsBetween(ctx, 1, from, to)
+		line := ""
+		if d != "" {
+			line = "holdings changes: " + d
+		}
+		if fsum.Has {
+			if line != "" {
+				line += "; "
+			}
+			line += "capital flows from statements: " + flowAmounts(fsum)
+		}
+		if line != "" {
+			out = append(out, fmt.Sprintf("Week ending %s — %s.", to.Format("2006-01-02"), line))
 		}
 	}
 	return out
@@ -313,3 +326,28 @@ func tickerList(t []string) string {
 }
 
 func snapMoney(v float64) string { return snapshot.FormatNumber("x_usd", v) }
+
+func flowAmounts(f store.FlowSummary) string {
+	return fmt.Sprintf("in %s, out %s (net %s)", snapMoney(f.InUSD), snapMoney(f.OutUSD), snapMoney(f.NetUSD))
+}
+
+// flowsSentence says what is known about deposits and withdrawals in (from, to]: the amounts
+// recorded from statements, "none recorded" where statements cover the period, or that no
+// statement reaches it. Never an estimate.
+func (s *Server) flowsSentence(ctx context.Context, from, to time.Time) (long, short string) {
+	cov, _ := s.store.EtoroCoverageFor(ctx, 1, to)
+	sum, _ := s.store.CapitalFlowsBetween(ctx, 1, from, to)
+	switch {
+	case sum.Has:
+		return "capital flows recorded from statements in this period: " + flowAmounts(sum) +
+				"; the rest of the change is price movement and items no statement shows, which FT does not split further",
+			"capital flows from statements: net " + snapMoney(sum.NetUSD)
+	case cov.Has && cov.End >= to.UTC().Format("2006-01-02"):
+		return "no capital flows are recorded in this period (statements cover through " + cov.End + "), so the change is price movement plus the holdings changes above",
+			"no capital flows recorded"
+	case cov.Has:
+		return "deposits and withdrawals after " + cov.End + " are not known (the last statement ends then; the next should start " + cov.NextStart + "), so they are not separable from price movement",
+			"capital flows after " + cov.End + " not known"
+	}
+	return "deposits and withdrawals are not known (no statement covers this period), so they are not separable from price movement", "capital flows not known"
+}
