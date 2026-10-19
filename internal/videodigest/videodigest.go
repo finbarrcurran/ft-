@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -381,7 +382,8 @@ type Extraction struct {
 	ProposedConfidence *string
 	ProposedQuote      *string
 	ProposedQuoteTs    *int
-	ProposalRejected   string // why a stated state was dropped; "" if none
+	ProposedQuoteMatch *string // "exact" (verbatim as the model wrote it) | "nearest" (snapped to the closest transcript passage)
+	ProposalRejected   string  // why a stated state was dropped; "" if none
 	Tilt               *string
 	TiltQuote          *string
 	AccumStance        *string
@@ -430,13 +432,122 @@ func groundedQuote(q *string, segs []segment) (string, int, bool) {
 	return qt, firstAt, true
 }
 
+// ---- nearest-passage grounding ---------------------------------------------------------
+//
+// The model often writes an "evidence quote" that stitches two or three nearby sentences
+// together or paraphrases a few words (on the 2026-10-18 Jordi video 5 of 6 runs were dropped
+// by the strict test). When the exact test fails, the quote is snapped to the transcript window
+// it overlaps most: the stored text is then real transcript text by construction, flagged
+// "nearest" so the UI can say so. Too little overlap still drops the quote.
+
+type wordTok struct {
+	orig, norm string
+	ts         int
+}
+
+var markerTokRe = regexp.MustCompile(`^\[(\d+)s\]$`)
+
+// transcriptTokens splits the compact transcript into words with the timestamp marker in force.
+func transcriptTokens(compact string) []wordTok {
+	var out []wordTok
+	ts := 0
+	for _, f := range strings.Fields(compact) {
+		if m := markerTokRe.FindStringSubmatch(f); m != nil {
+			ts, _ = strconv.Atoi(m[1])
+			continue
+		}
+		n := strings.Join(strings.Fields(nonWordRe.ReplaceAllString(strings.ToLower(f), " ")), "")
+		if n == "" {
+			continue
+		}
+		out = append(out, wordTok{orig: f, norm: n, ts: ts})
+	}
+	return out
+}
+
+var snapStop = map[string]bool{"that": true, "this": true, "with": true, "have": true, "from": true, "they": true, "were": true,
+	"been": true, "your": true, "will": true, "what": true, "when": true, "there": true, "their": true, "about": true,
+	"would": true, "could": true, "which": true, "just": true, "like": true, "going": true, "really": true, "because": true,
+	"these": true, "those": true, "then": true, "than": true, "them": true, "into": true, "over": true, "also": true,
+	"very": true, "much": true, "more": true, "some": true, "know": true, "think": true, "right": true, "here": true}
+
+func isContent(w string) bool { return len(w) >= 4 && !snapStop[w] }
+
+const (
+	snapWindow    = 35  // words in the passage a snapped quote can cover
+	snapMinWords  = 4   // content words the model's quote must have to be snapped at all
+	snapMinRecall = 0.5 // share of the quote's content words found in the best window
+)
+
+// snapQuote returns the transcript window (verbatim, original punctuation) that best matches
+// the model's quote, its start timestamp, and whether the overlap is good enough.
+func snapQuote(quote string, toks []wordTok) (string, int, bool) {
+	want := map[string]int{}
+	total := 0
+	for _, f := range strings.Fields(quote) {
+		n := strings.Join(strings.Fields(nonWordRe.ReplaceAllString(strings.ToLower(f), " ")), "")
+		if isContent(n) {
+			want[n]++
+			total++
+		}
+	}
+	if total < snapMinWords || len(toks) < snapWindow {
+		return "", 0, false
+	}
+	win := map[string]int{}
+	match := 0
+	add := func(w string, d int) {
+		if !isContent(w) {
+			return
+		}
+		if need := want[w]; need > 0 {
+			before := min(win[w], need)
+			win[w] += d
+			match += min(win[w], need) - before
+		} else {
+			win[w] += d
+		}
+	}
+	best, bestAt := -1, 0
+	for i := range toks {
+		add(toks[i].norm, 1)
+		if i >= snapWindow {
+			add(toks[i-snapWindow].norm, -1)
+		}
+		if i >= snapWindow-1 && match > best {
+			best, bestAt = match, i-snapWindow+1
+		}
+	}
+	denom := min(total, 21)
+	if best <= 0 || float64(best)/float64(denom) < snapMinRecall {
+		return "", 0, false
+	}
+	words := make([]string, 0, snapWindow)
+	for _, t := range toks[bestAt : bestAt+snapWindow] {
+		words = append(words, t.orig)
+	}
+	return strings.TrimSpace(strings.Join(words, " ")), toks[bestAt].ts, true
+}
+
 var ellipsisRe = regexp.MustCompile(`\s*(?:\.{3,}|…)\s*`)
 
 // sanitiseRegimeFields enforces the v2 regime schema. Only the four FT states pass
 // the enum; Stable, Shifting and Defensive additionally need a confidence and an
 // evidence quote that occurs verbatim in the transcript, otherwise the state is
 // dropped (and ProposalRejected says why) rather than shown unsupported.
-func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment) {
+func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment, toks []wordTok) {
+	// ground tries the exact test, then the nearest-passage snap. match is "exact" or "nearest".
+	ground := func(q *string) (text string, ts int, match string, ok bool) {
+		if t, at, ok := groundedQuote(q, segs); ok {
+			return t, at, "exact", true
+		}
+		if q != nil {
+			if t, at, ok := snapQuote(*q, toks); ok {
+				return t, at, "nearest", true
+			}
+		}
+		return "", 0, "", false
+	}
 	for _, c := range r.Catalysts {
 		if e := strings.TrimSpace(c.Event); e != "" && len(ex.CatalystsClean) < maxCatalysts {
 			ex.CatalystsClean = append(ex.CatalystsClean, rawCatalyst{Event: e, Date: text(c.Date)})
@@ -444,13 +555,13 @@ func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment) {
 	}
 	if t := r.CrossAssetTilt; t != nil {
 		ex.Tilt = enum(t.Tilt, "equities", "crypto", "balanced", "unstated")
-		if qt, _, ok := groundedQuote(t.Quote, segs); ok {
+		if qt, _, _, ok := ground(t.Quote); ok {
 			ex.TiltQuote = &qt
 		}
 	}
 	if a := r.Accumulation; a != nil {
 		ex.AccumStance = enum(a.Stance, "accumulating", "waiting", "reducing", "unstated")
-		if qt, _, ok := groundedQuote(a.Quote, segs); ok {
+		if qt, _, _, ok := ground(a.Quote); ok {
 			ex.AccumQuote = &qt
 		}
 	}
@@ -469,7 +580,7 @@ func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment) {
 		ex.ProposedRegime, ex.ProposedConfidence = &lower, conf
 		return
 	}
-	qt, at, ok := groundedQuote(f.EvidenceQuote, segs)
+	qt, at, match, ok := ground(f.EvidenceQuote)
 	switch {
 	case conf == nil:
 		ex.ProposalRejected = "no valid confidence"
@@ -477,6 +588,7 @@ func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment) {
 		ex.ProposalRejected = "evidence quote missing or not verbatim in the transcript"
 	default:
 		ex.ProposedRegime, ex.ProposedConfidence, ex.ProposedQuote, ex.ProposedQuoteTs = &lower, conf, &qt, &at
+		ex.ProposedQuoteMatch = &match
 	}
 }
 
@@ -660,7 +772,7 @@ func ParseExtraction(raw, compactTranscript string, source string) (Extraction, 
 	ex.RegimeRead = text(r.RegimeRead)
 	ex.RegimeNarrative = text(r.RegimeNarrative)
 	segs := segments(compactTranscript)
-	sanitiseRegimeFields(&ex, r, segs)
+	sanitiseRegimeFields(&ex, r, segs, transcriptTokens(compactTranscript))
 	for _, t := range r.Themes {
 		if t = strings.TrimSpace(t); t != "" {
 			ex.Themes = append(ex.Themes, t)
@@ -986,14 +1098,14 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 		  llm_model, llm_cost_usd, ingested_at,
 		  extraction_version, regime_narrative, catalysts, proposed_regime, proposed_confidence,
 		  proposed_quote, proposed_quote_ts, cross_asset_tilt, cross_asset_quote,
-		  accumulation_stance, accumulation_quote)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		  accumulation_stance, accumulation_quote, proposed_quote_match)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		idArg, m.Source, m.VideoID, m.Title, m.URL, m.PublishedAt, boolInt(isFlagship), m.DurationSec,
 		m.TranscriptMethod, m.CaptionTrack, m.PipelineVersion, p.Dir, ex.ExecutiveSummary,
 		jsonOrNull(ex.Themes), jsonOrNull(themeChanges), priorID, ex.RegimeRead, legacyRegime,
 		model, resp.CostUSD, time.Now().Unix(),
 		ExtractionVersion, ex.RegimeNarrative, catalystsJSON, ex.ProposedRegime, ex.ProposedConfidence,
-		ex.ProposedQuote, ex.ProposedQuoteTs, ex.Tilt, ex.TiltQuote, ex.AccumStance, ex.AccumQuote)
+		ex.ProposedQuote, ex.ProposedQuoteTs, ex.Tilt, ex.TiltQuote, ex.AccumStance, ex.AccumQuote, ex.ProposedQuoteMatch)
 	if err != nil {
 		return fail(err)
 	}

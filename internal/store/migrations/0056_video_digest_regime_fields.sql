@@ -15,6 +15,7 @@ ALTER TABLE video_digests ADD COLUMN proposed_regime     TEXT;   -- stable|shift
 ALTER TABLE video_digests ADD COLUMN proposed_confidence TEXT;   -- high|medium|low
 ALTER TABLE video_digests ADD COLUMN proposed_quote      TEXT;   -- verbatim evidence, grounded in the transcript
 ALTER TABLE video_digests ADD COLUMN proposed_quote_ts   INTEGER;
+ALTER TABLE video_digests ADD COLUMN proposed_quote_match TEXT;   -- exact | nearest (snapped to the closest transcript passage when the model's quote is not verbatim)
 ALTER TABLE video_digests ADD COLUMN cross_asset_tilt    TEXT;   -- equities|crypto|balanced|unstated — context only, not a regime state
 ALTER TABLE video_digests ADD COLUMN cross_asset_quote   TEXT;
 ALTER TABLE video_digests ADD COLUMN accumulation_stance TEXT;   -- accumulating|waiting|reducing|unstated

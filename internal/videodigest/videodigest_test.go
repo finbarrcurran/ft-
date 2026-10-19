@@ -387,3 +387,53 @@ func TestParseRegimeFields(t *testing.T) {
 		t.Error("unclassified needs no quote")
 	}
 }
+
+const snapTranscript = `[0s] welcome back everyone today is a big one
+[30s] hedge funds were already delevered at this point and they are not delevered as much as they should have been based on all the metrics that I got so this is a hedge fund deleveraging event and you will hear me talk about it more and more
+[60s] the second thing is the midterms which could change regulation for ai and crypto
+[90s] thanks for watching and see you next week with another update on the markets and the economy overall`
+
+// The nearest-passage fallback: a stitched or lightly paraphrased quote snaps to real transcript
+// text (verbatim by construction); an unrelated quote is still dropped.
+func TestSnapQuoteToNearestTranscriptPassage(t *testing.T) {
+	toks := transcriptTokens(snapTranscript)
+	if len(toks) < 60 {
+		t.Fatalf("tokens: %d", len(toks))
+	}
+	q := "Hedge funds were already delevered at this scenario. Not delevered as much as they should have been based on the metrics. This is a hedge fund deleveraging event."
+	text, ts, ok := snapQuote(q, toks)
+	if !ok || ts != 30 {
+		t.Fatalf("expected a snap at 30s, got ok=%v ts=%d %q", ok, ts, text)
+	}
+	if !strings.Contains(snapTranscript, strings.Fields(text)[0]) || !strings.Contains(strings.Join(strings.Fields(snapTranscript), " "), strings.Join(strings.Fields(text), " ")) {
+		t.Fatalf("snapped text must be a verbatim stretch of the transcript: %q", text)
+	}
+	if _, _, ok := snapQuote("The yield curve inverted while oil prices collapsed and gold rallied sharply", toks); ok {
+		t.Fatal("an unrelated quote must not snap")
+	}
+	if _, _, ok := snapQuote("too short", toks); ok {
+		t.Fatal("a quote with almost no content words must not snap")
+	}
+	// Through the sanitiser: an inexact quote is kept as 'nearest', an exact one as 'exact'.
+	raw := func(quote string) Extraction {
+		ex, err := ParseExtraction(`{"ft_regime":{"state":"Shifting","confidence":"medium","evidence_quote":`+jsonString(quote)+`}}`, snapTranscript, "jordi")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ex
+	}
+	if ex := raw(q); ex.ProposedRegime == nil || ex.ProposedQuoteMatch == nil || *ex.ProposedQuoteMatch != "nearest" {
+		t.Fatalf("stitched quote should be kept as nearest: %+v", ex)
+	}
+	if ex := raw("so this is a hedge fund deleveraging event"); ex.ProposedRegime == nil || *ex.ProposedQuoteMatch != "exact" {
+		t.Fatalf("verbatim quote should stay exact: %+v", ex)
+	}
+	if ex := raw("The yield curve inverted while oil prices collapsed and gold rallied sharply"); ex.ProposedRegime != nil || ex.ProposalRejected == "" {
+		t.Fatalf("an unrelated quote must still drop the state: %+v", ex)
+	}
+}
+
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}

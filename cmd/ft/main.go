@@ -1250,7 +1250,7 @@ func runVideoDigestPreview(args []string) {
 			"video": res.Title, "source": res.Source, "publishedAt": res.PublishedAt,
 			"priorBlock": res.WithPrior, "priorVideo": res.PriorTitle, "costUsd": res.CostUSD, "inputTokens": res.InputTokens,
 			"proposedRegime": res.Extraction.ProposedRegime, "confidence": res.Extraction.ProposedConfidence,
-			"evidenceQuote": res.Extraction.ProposedQuote, "evidenceTs": res.Extraction.ProposedQuoteTs, "proposalRejected": res.Extraction.ProposalRejected,
+			"evidenceQuote": res.Extraction.ProposedQuote, "evidenceTs": res.Extraction.ProposedQuoteTs, "evidenceMatch": res.Extraction.ProposedQuoteMatch, "proposalRejected": res.Extraction.ProposalRejected,
 			"regimeNarrative": res.Extraction.RegimeNarrative, "catalysts": res.Extraction.CatalystsClean,
 			"crossAssetTilt": res.Extraction.Tilt, "crossAssetQuote": res.Extraction.TiltQuote,
 			"accumulationStance": res.Extraction.AccumStance, "accumulationQuote": res.Extraction.AccumQuote,
