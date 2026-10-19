@@ -107,7 +107,7 @@ func (s *Server) seedPayload(ctx context.Context, weekStart string) (*snapshot.P
 
 	for _, fw := range []string{"jordi", "cowen"} {
 		var regime string
-		err := db.QueryRowContext(ctx, `SELECT regime FROM regime_history WHERE framework_id = ? AND ts <= ? ORDER BY ts DESC LIMIT 1`, fw, endTS).Scan(&regime)
+		err := db.QueryRowContext(ctx, `SELECT regime FROM regime_history WHERE framework_id = ? AND ts <= ? AND seed_excluded = 0 ORDER BY ts DESC LIMIT 1`, fw, endTS).Scan(&regime)
 		if err == nil {
 			p.Texts["regime."+fw] = regime
 		} else if err != sql.ErrNoRows {

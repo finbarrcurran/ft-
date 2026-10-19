@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.90.0 · 2026-10-19** — latest change: Bargo replaces Capitol Trades (SC-52 P5) (§13).
+> **Current version: v1.91.0 · 2026-10-19** — latest change: Housekeeping (SC-52 P6) (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.90.0 2026-10-19 -->
+<!-- reference_reviewed: v1.91.0 2026-10-19 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -56,7 +56,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 
 ## 3. Schema — every migration
 
-58 migrations applied (latest `0058_etoro_capital_flows.sql`).
+59 migrations applied (latest `0059_regime_history_seed_flag.sql`).
 
 | # | File | Adds |
 |---|------|------|
@@ -113,6 +113,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0056 | `video_digest_regime_fields` | SC-52 P0 — `video_digests` gains `extraction_version`, `regime_narrative`, `catalysts`, `proposed_regime/_confidence/_quote/_quote_ts` (FT states, evidence quote grounded in the transcript), `cross_asset_tilt` (+quote), `accumulation_stance` (+quote); `suggested_regime` is LEGACY (kept, never written by v2, never shown) |
 | 0057 | `video_transcripts` | SC-52 P2 — `video_transcripts` (one row per video: id, source, title, date, captions text with `[NNNs]` markers, sha) + `video_transcripts_fts` (FTS5 external-content index kept by triggers); free of LLM spend, carried by any DB backup |
 | 0058 | `etoro_capital_flows` | SC-52 P4 — `etoro_capital_flows` (dated deposits, transfers to/from eToro Money, withdrawals, reversals and FX conversion fees from the statements' Account Activity; idempotent on a hash of the activity row; `manual = 1` rows are the deletable fallback) and `etoro_statement_periods.flows_summary_json` (the Account Summary vs rows reconciliation of each statement) |
+| 0059 | `regime_history_seed_flag` | SC-52 P6 — `regime_history.seed_excluded` (rows kept, but skipped when the weekly snapshot seeds its history); the four 2026-05-16 smoke-test / reset rows are flagged by the migration; the June 2026 Jordi flips wait for Fin's confirmation (`ft regime-history flag --ids …`) |
 | 0052 | `indicator_data_as_of` | SC-49 — `crypto_indicators.data_as_of` (date of the newest data point behind a reading) |
 | 0051 | `provider_daily` | SC-48 — per-provider per-day call counters; retired providers' health rows removed |
 | 0050 | `oauth` | SC-41b — `oauth_clients`, `oauth_codes`, `oauth_tokens` (hashes only; refresh tokens rotate, families revoked on reuse) |
@@ -229,7 +230,8 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 **AI Nexus (SC-36, SC-39):** `POST /api/nexus/upload`, `GET /api/nexus/{universe,technical,exhaustion,fundamentals,entry-candidates}`
 
 **Video Digest (SC-43):** `GET /api/video-digest?source=`, `POST /api/video-digest/ingest`; **transcript search (SC-52 P2):** `GET /api/transcripts/search?q=&source=&from=&to=&limit=` (a word, several words that must all occur, or a "quoted phrase"; returns video, date, a highlighted snippet and a `youtu.be/…?t=` link; query text is never passed to FTS5 as an expression) and the read-only connector tool `search_transcripts`
-  **Extraction v2 (SC-52 P0, v1.87.0):** the prompt carries FT's own regime definitions (Stable / Shifting / Defensive / Unclassified, with the boundaries ai set: Stable = constructive and names no near-term risk event; Shifting = flags elevated uncertainty or named event risk but does not expect a material equity drawdown; Defensive = explicitly expects a material drawdown or advises cutting risk; Unclassified = no regime content) and says a speaker's "regime shift" is NOT FT "Shifting"; mixed evidence picks the more cautious state with confidence low. The model gets the transcript and the definitions only (no current regime, no scores). It returns `regime_narrative`, `catalysts`, `ft_regime` {state, confidence, evidence_quote}, `cross_asset_tilt` and `accumulation_stance` (context only, not regime states). A state is kept only if it is one of the four and its evidence quote is grounded in the transcript: verbatim as the model wrote it (`exact`; fragments joined by an ellipsis must each be verbatim), or else snapped to the transcript passage it overlaps most (`nearest`: the stored text is real transcript text by construction; at least half of the quote's content words must fall inside one 35-word window); otherwise the state is dropped. Stored for both sources, **never shown or applied** (D6, D7); the API shape is unchanged and legacy `suggested_regime` stays hidden. `ft transcripts [sync|search|stats]   SC-52 P2: store every on-disk package transcript (free, idempotent) / full-text search / corpus size
+  **Extraction v2 (SC-52 P0, v1.87.0):** the prompt carries FT's own regime definitions (Stable / Shifting / Defensive / Unclassified, with the boundaries ai set: Stable = constructive and names no near-term risk event; Shifting = flags elevated uncertainty or named event risk but does not expect a material equity drawdown; Defensive = explicitly expects a material drawdown or advises cutting risk; Unclassified = no regime content) and says a speaker's "regime shift" is NOT FT "Shifting"; mixed evidence picks the more cautious state with confidence low. The model gets the transcript and the definitions only (no current regime, no scores). It returns `regime_narrative`, `catalysts`, `ft_regime` {state, confidence, evidence_quote}, `cross_asset_tilt` and `accumulation_stance` (context only, not regime states). A state is kept only if it is one of the four and its evidence quote is grounded in the transcript: verbatim as the model wrote it (`exact`; fragments joined by an ellipsis must each be verbatim), or else snapped to the transcript passage it overlaps most (`nearest`: the stored text is real transcript text by construction; at least half of the quote's content words must fall inside one 35-word window); otherwise the state is dropped. Stored for both sources, **never shown or applied** (D6, D7); the API shape is unchanged and legacy `suggested_regime` stays hidden. `ft regime-history [list|flag]   SC-52 P6: list regime history with ids and the seed flag / flag (or --clear) rows so they never seed the weekly snapshot; rows are never deleted
+ft transcripts [sync|search|stats]   SC-52 P2: store every on-disk package transcript (free, idempotent) / full-text search / corpus size
 ft video-digest-preview --video-id ID [--prior with|without|both]` runs an extraction without storing it.
 
 **Bot:** `GET /api/bot/{alerts,holdings/summary,holdings/movers,refresh-status}` **T**, `POST /api/bot/{alerts/ack,refresh}` **T**
@@ -293,7 +295,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 | FX EUR→USD | Frankfurter (`api.frankfurter.dev/v1`) | stored rate, then static 1.08 | No key; moved from `frankfurter.app` (v1.80.0) |
 | Stocks Fear & Greed | CNN `production.dataviz.cnn.io` | stale cache ≤ 6 h | Unofficial; answers HTTP 418 unless a cnn.com `Referer`/`Origin` is sent (sent since v1.80.0). Fragile: the daily warm-up alerts if it still fails |
 | Crypto Fear & Greed | alternative.me | stale cache | Stable |
-| News (stocks) | **Free publisher RSS** (cut over 2026-10-13) | stale cache | **Tier A (displayed):** CNBC Top News, BBC Business, Nasdaq Markets. **Tier B (backup, fetched every run so its health is measured, displayed only when < 2 tier-A feeds are healthy or < 10 tier-A items are under 24 h old):** MarketWatch Top Stories, The Guardian Business. No key. Headline, source, time, link out, plus the feed's own summary snippet (≤ ~200 chars) when it supplies one; no article body is fetched or stored. Merge deduped by URL and normalised title, newest first, per-feed attribution, a dead feed never blanks the tab; per-feed health `rss_market_<key>` in the monitor (one alert per outage names the feed). A feed can be dropped without a deploy: `meta.market_news_disabled_feeds` (comma-separated keys: cnbc, bbc, nasdaq, marketwatch, guardian). **NewsAPI is no longer called** (`meta.market_news_source` = `rss`; setting it back to `newsapi` re-enables the old path, kept for about two weeks, planned removal ~2026-10-27). Terms: see §13 entry. RSS requests use the User-Agent `Mozilla/5.0 (compatible; FT-Dashboard/1.0)` (no URL: Nasdaq's CDN resets connections otherwise) |
+| News (stocks) | **Free publisher RSS** (cut over 2026-10-13) | stale cache | **Tier A (displayed):** CNBC Top News, BBC Business, Nasdaq Markets. **Tier B (backup, fetched every run so its health is measured, displayed only when < 2 tier-A feeds are healthy or < 10 tier-A items are under 24 h old):** MarketWatch Top Stories, The Guardian Business. No key. Headline, source, time, link out, plus the feed's own summary snippet (≤ ~200 chars) when it supplies one; no article body is fetched or stored. Merge deduped by URL and normalised title, newest first, per-feed attribution, a dead feed never blanks the tab; per-feed health `rss_market_<key>` in the monitor (one alert per outage names the feed). A feed can be dropped without a deploy: `meta.market_news_disabled_feeds` (comma-separated keys: cnbc, bbc, nasdaq, marketwatch, guardian). **NewsAPI is a disabled fallback, not a source** (Fin, 2026-10-19: the planned ~2026-10-27 code removal is cancelled). RSS is the default, including on a rebuilt database where `meta.market_news_source` is unset; the NewsAPI path runs only if that setting is explicitly `newsapi`, and no call is made otherwise (provider counters: one call on 2026-10-12 and 2026-10-13, none since). `NEWSAPI_API_KEY` stays in `/etc/ft/env`, and the startup missing-key alert only asks for it when the fallback is selected. Terms: see §13 entry. RSS requests use the User-Agent `Mozilla/5.0 (compatible; FT-Dashboard/1.0)` (no URL: Nasdaq's CDN resets connections otherwise) |
 | News (crypto) | Publisher RSS (CoinDesk, Cointelegraph, The Block, Decrypt) | stale cache | No key. (CryptoPanic and CryptoCompare are no longer used; CryptoCompare's stale health row was removed) |
 | Sector ETFs | Yahoo daily closes | — | 36 ETFs × 1 call/day |
 | Insider / 13F filings | SEC EDGAR | — | Daily ingest; 13F on demand |
@@ -383,13 +385,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.91.0 · 2026-10-19 · pass 96 · SC-52
+
+**Housekeeping (SC-52 P6).** Regime-history rows can be flagged so they never seed the weekly snapshot (nothing deleted); the May-16 smoke-test rows are flagged, the June flips wait for Fin. NewsAPI becomes an explicit-only disabled fallback and its 2026-10-27 removal is cancelled. Behaviour: snapshot seeding, news default. Migrations: 0059. Reference updated: §3, §8, §11. Supersedes v1.90.0.
+
 ### v1.90.0 · 2026-10-19 · pass 95 · SC-52
 
 **Bargo replaces Capitol Trades (SC-52 P5).** The Capitol Trades cron, wrongly recorded as removed on 2026-10-11, was still running and failing nightly; it is now deleted. The Signals tab shows Bargo's freshness under the Congress section. Parity measured and reported: Bargo has no party field and history only from 2026-07-13. Behaviour: Signals tab line. Migrations: none. Reference updated: §4, §5. Supersedes v1.89.0.
 
+
 ### v1.89.0 · 2026-10-19 · pass 94 · SC-52
 
 **Capital flows from statements (SC-52 P4).** Deposits, withdrawals and transfers to/from eToro Money are read from the statements' Account Activity, stored once each and reconciled to the Account Summary (93 rows, 2025-08-31 → 2026-06-01; none since). Shown on the Performance tab and quoted in the weekly snapshot's value notes; a manual entry endpoint is the fallback. Behaviour: import, display. Migrations: 0058. Reference updated: §3, §5, §11. Supersedes v1.88.0.
+
 
 
 ### v1.88.0 · 2026-10-19 · pass 93 · SC-52
@@ -398,9 +406,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.87.0 · 2026-10-19 · pass 92 · SC-52
 
 **Video-digest extraction v2 (SC-52 P0).** Digests are now extracted against FT's own regime definitions (not the speaker's wording), with a narrative, named catalysts, a verbatim evidence quote, cross-asset tilt and accumulation stance stored for both sources; a state without a grounded quote is dropped. Nothing is shown or applied (D6, D7); legacy `suggested_regime` stays hidden. New `ft video-digest-preview`. Behaviour: ingest only. Migrations: 0056. Reference updated: §3, §5, §11, §12. Supersedes v1.86.1.
+
 
 
 
@@ -413,9 +423,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.86.0 · 2026-10-13 · pass 90 · SC-46
 
 **Weekly FT snapshot (P5).** FT stores a deterministic snapshot per ISO week (new table `ft_snapshots`), compares it with earlier weeks (deltas, 4-week trends, changes, a Top-changes block) and writes a short file to Drive `reports/ft-snapshot.md` every Sunday evening, with a Monday catch-up. History is seeded only from existing history tables. Behaviour: yes. Migrations: 0055. Reference updated: §3, §4, §11, §12. Supersedes v1.85.0.
+
 
 
 
@@ -432,9 +444,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.84.1 · 2026-10-13 · pass 88 · SC-51
 
 **Performance tab: one scope control.** The year tables and the Trade statistics panel now share a single Discretionary / Copy-CFD / All control (default Discretionary, saved choice reset once). In the filtered views only realised P&L and trade counts are scoped; dividends, fees, interest and refunds appear once as an account-level row and no Net is computed there. Net shows only in All and on the YTD card (retitled 'YTD 2026 · realised'). Behaviour: yes. Migrations: none. Reference updated: §2, §5. Supersedes v1.84.0.
+
 
 
 
@@ -455,21 +469,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.83.2 · 2026-10-13 · pass 86 · SC-51
-
-**ETF-flow trailing zero row ignored; chart freshness fixed.** A newest Farside row with `totalM = 0` followed by a non-zero row is a not-yet-published placeholder and is ignored for the as-of date (card, chart badge and monitor share one rule). Also fixes a v1.82.0 slip: the chart's `asOf`/age/badge fields had been attached to the BTC-history handler, so the ETF chart never showed them; now on `/api/crypto-indicators/etf-flow/history`, with a handler test. Behaviour: yes. Migrations: none. Reference updated: §3, §8. Supersedes v1.83.1.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.90.0 -->
+<!-- END FT-master-spec v1.91.0 -->
