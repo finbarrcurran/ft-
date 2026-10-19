@@ -4,7 +4,7 @@
 //
 // FT reads packages read-only from disk and never re-fetches from YouTube.
 // Video-derived data is context only — never a scoring input (D6) — and
-// suggested_regime is never auto-applied (D7).
+// a proposed regime is never auto-applied (D7).
 package videodigest
 
 import (
@@ -37,6 +37,10 @@ const (
 	markerEverySec  = 30   // timestamp marker spacing in the compact transcript
 	maxMentions     = 20
 	maxQuotes       = 2
+
+	// ExtractionVersion 2 = regime fields extracted against FT's definitions
+	// (migration 0056). Version 1 digests carry only the legacy suggested_regime.
+	ExtractionVersion = 2
 )
 
 var (
@@ -231,7 +235,25 @@ const commonSchema = `{
                   "ts_sec": integer|null } ] — at most 20, most substantive first,
   "notable_quotes": [ { "quote_text": string, "ts_sec": integer|null } ] — at most 2, each copied VERBATIM from the transcript and under 15 words,
   "regime_read": string|null — his read of the current market regime in one or two sentences, only if he gives one,
-  "suggested_regime": "Stable"|"Shifting"|"Defensive"|"Unclassified"|null`
+  "regime_narrative": string|null — 2 to 3 plain sentences: what he thinks about the market right now, what uncertainty he says remains, and which dated catalysts he names. Only what he says,
+  "catalysts": [ { "event": string, "date": string|null } ] — events or dates he names as mattering (data releases, meetings, elections, unwinds); at most 6,
+  "ft_regime": { "state": "Stable"|"Shifting"|"Defensive"|"Unclassified"|null,
+                 "confidence": "high"|"medium"|"low"|null,
+                 "evidence_quote": string|null — copied VERBATIM from the transcript, under 40 words, the passage that best supports the state; required for Stable, Shifting and Defensive },
+  "cross_asset_tilt": { "tilt": "equities"|"crypto"|"balanced"|"unstated", "quote": string|null — VERBATIM, under 40 words } — where he says he has more conviction, as stated,
+  "accumulation_stance": { "stance": "accumulating"|"waiting"|"reducing"|"unstated", "quote": string|null — VERBATIM, under 40 words }`
+
+// regimeDefinitions are FT's own regime states. The speaker's vocabulary is not FT's:
+// the model is given these and nothing else about regimes — no current regime, no prior
+// scores, no opinion (the no-steering rule).
+const regimeDefinitions = `
+
+FT regime definitions (classify his stated view into ONE of these, in FT's terms, not his):
+- Stable: he sees conditions as supportive; normal risk posture. FT keeps its normal alert margin and entry-zone alerts on.
+- Shifting: he sees material uncertainty or deterioration and advises caution, but not an outright risk-off stance. FT tightens its risk posture: alert margin x0.6, entry-zone alerts off.
+- Defensive: he is explicitly risk-off or expects a significant drawdown; capital preservation first.
+- Unclassified: he does not give a clear enough read on the market to place it in one of the above.
+A speaker's phrase "regime shift" (a structural change in how markets work, e.g. a new monetary or technological regime) is NOT FT "Shifting". Judge the risk posture he recommends, not his vocabulary. If the evidence is mixed, choose the more cautious of the two best-fitting states and set confidence "low". Give ft_regime.state null only if the transcript says nothing about the market.`
 
 const jordiExtras = `,
   "theme_changes_vs_prior_week": [string]|null — how this video's themes differ from the PRIOR VIDEO CONTEXT supplied with the transcript (new, dropped, or changed emphasis); null if no prior context is supplied`
@@ -266,7 +288,7 @@ func systemPrompt(source string) string {
 	}
 	return "You extract a structured digest from one YouTube video transcript by " + sources[source] +
 		", for personal research. The transcript is timestamped: each \"[NNNs]\" marker gives the video time, in seconds, at which the following text begins.\n\n" +
-		"Return one JSON object with exactly these keys:\n" + commonSchema + extras + "\n}" + rules
+		"Return one JSON object with exactly these keys:\n" + commonSchema + extras + "\n}" + regimeDefinitions + rules
 }
 
 type prior struct {
@@ -313,15 +335,36 @@ type rawSnapshot struct {
 	MacroRecessionFlag *bool   `json:"macro_recession_flag"`
 	Confidence         *string `json:"confidence"`
 }
+type rawCatalyst struct {
+	Event string  `json:"event"`
+	Date  *string `json:"date"`
+}
+type rawRegime struct {
+	State         *string `json:"state"`
+	Confidence    *string `json:"confidence"`
+	EvidenceQuote *string `json:"evidence_quote"`
+}
+type rawTilt struct {
+	Tilt  *string `json:"tilt"`
+	Quote *string `json:"quote"`
+}
+type rawStance struct {
+	Stance *string `json:"stance"`
+	Quote  *string `json:"quote"`
+}
 type rawExtraction struct {
-	ExecutiveSummary *string      `json:"executive_summary"`
-	Themes           []string     `json:"themes"`
-	Mentions         []rawMention `json:"mentions"`
-	NotableQuotes    []rawQuote   `json:"notable_quotes"`
-	RegimeRead       *string      `json:"regime_read"`
-	SuggestedRegime  *string      `json:"suggested_regime"`
-	ThemeChanges     []string     `json:"theme_changes_vs_prior_week"`
-	Snapshot         *rawSnapshot `json:"snapshot"`
+	ExecutiveSummary *string       `json:"executive_summary"`
+	Themes           []string      `json:"themes"`
+	Mentions         []rawMention  `json:"mentions"`
+	NotableQuotes    []rawQuote    `json:"notable_quotes"`
+	RegimeRead       *string       `json:"regime_read"`
+	RegimeNarrative  *string       `json:"regime_narrative"`
+	Catalysts        []rawCatalyst `json:"catalysts"`
+	FTRegime         *rawRegime    `json:"ft_regime"`
+	CrossAssetTilt   *rawTilt      `json:"cross_asset_tilt"`
+	Accumulation     *rawStance    `json:"accumulation_stance"`
+	ThemeChanges     []string      `json:"theme_changes_vs_prior_week"`
+	Snapshot         *rawSnapshot  `json:"snapshot"`
 }
 
 // Extraction is the sanitised result that gets stored.
@@ -330,6 +373,87 @@ type Extraction struct {
 	QuotesRejected     int
 	RejectedQuotes     []string // logged, not stored — for tuning the prompt
 	MentionsUngrounded int      // name never found in the transcript → no timestamp
+
+	// v2 regime fields, sanitised. ProposedRegime is lowercase (the regime package's
+	// values); nil when absent, not an FT state, or its evidence quote is not in the
+	// transcript.
+	ProposedRegime     *string
+	ProposedConfidence *string
+	ProposedQuote      *string
+	ProposedQuoteTs    *int
+	ProposalRejected   string // why a stated state was dropped; "" if none
+	Tilt               *string
+	TiltQuote          *string
+	AccumStance        *string
+	AccumQuote         *string
+	CatalystsClean     []rawCatalyst
+}
+
+const (
+	maxCatalysts   = 6
+	maxEvidenceLen = 400 // characters; the prompt asks for under 40 words
+)
+
+// groundedQuote returns the trimmed quote and its timestamp if it occurs verbatim in
+// the transcript; ok is false otherwise. A model-invented quote is never stored.
+func groundedQuote(q *string, segs []segment) (string, int, bool) {
+	if q == nil {
+		return "", 0, false
+	}
+	qt := strings.TrimSpace(strings.Trim(*q, `"“”`))
+	if qt == "" || len(qt) > maxEvidenceLen {
+		return "", 0, false
+	}
+	at, ok := quoteTs(qt, segs)
+	return qt, at, ok
+}
+
+// sanitiseRegimeFields enforces the v2 regime schema. Only the four FT states pass
+// the enum; Stable, Shifting and Defensive additionally need a confidence and an
+// evidence quote that occurs verbatim in the transcript, otherwise the state is
+// dropped (and ProposalRejected says why) rather than shown unsupported.
+func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment) {
+	for _, c := range r.Catalysts {
+		if e := strings.TrimSpace(c.Event); e != "" && len(ex.CatalystsClean) < maxCatalysts {
+			ex.CatalystsClean = append(ex.CatalystsClean, rawCatalyst{Event: e, Date: text(c.Date)})
+		}
+	}
+	if t := r.CrossAssetTilt; t != nil {
+		ex.Tilt = enum(t.Tilt, "equities", "crypto", "balanced", "unstated")
+		if qt, _, ok := groundedQuote(t.Quote, segs); ok {
+			ex.TiltQuote = &qt
+		}
+	}
+	if a := r.Accumulation; a != nil {
+		ex.AccumStance = enum(a.Stance, "accumulating", "waiting", "reducing", "unstated")
+		if qt, _, ok := groundedQuote(a.Quote, segs); ok {
+			ex.AccumQuote = &qt
+		}
+	}
+	f := r.FTRegime
+	if f == nil || f.State == nil {
+		return
+	}
+	state := enum(f.State, "Stable", "Shifting", "Defensive", "Unclassified")
+	if state == nil {
+		ex.ProposalRejected = fmt.Sprintf("state %q is not one of the four FT states", strings.TrimSpace(*f.State))
+		return
+	}
+	lower := strings.ToLower(*state)
+	conf := enum(f.Confidence, "high", "medium", "low")
+	if lower == "unclassified" {
+		ex.ProposedRegime, ex.ProposedConfidence = &lower, conf
+		return
+	}
+	qt, at, ok := groundedQuote(f.EvidenceQuote, segs)
+	switch {
+	case conf == nil:
+		ex.ProposalRejected = "no valid confidence"
+	case !ok:
+		ex.ProposalRejected = "evidence quote missing or not verbatim in the transcript"
+	default:
+		ex.ProposedRegime, ex.ProposedConfidence, ex.ProposedQuote, ex.ProposedQuoteTs = &lower, conf, &qt, &at
+	}
 }
 
 func enum(v *string, allowed ...string) *string {
@@ -510,7 +634,9 @@ func ParseExtraction(raw, compactTranscript string, source string) (Extraction, 
 	ex := Extraction{}
 	ex.ExecutiveSummary = text(r.ExecutiveSummary)
 	ex.RegimeRead = text(r.RegimeRead)
-	ex.SuggestedRegime = enum(r.SuggestedRegime, "Stable", "Shifting", "Defensive", "Unclassified")
+	ex.RegimeNarrative = text(r.RegimeNarrative)
+	segs := segments(compactTranscript)
+	sanitiseRegimeFields(&ex, r, segs)
 	for _, t := range r.Themes {
 		if t = strings.TrimSpace(t); t != "" {
 			ex.Themes = append(ex.Themes, t)
@@ -523,7 +649,6 @@ func ParseExtraction(raw, compactTranscript string, source string) (Extraction, 
 			}
 		}
 	}
-	segs := segments(compactTranscript)
 	for _, m := range r.Mentions {
 		if strings.TrimSpace(m.Name) == "" || len(ex.Mentions) >= maxMentions {
 			continue
@@ -741,6 +866,23 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 		return fail(err)
 	}
 	defer tx.Rollback()
+	// suggested_regime is legacy: v2 never writes it, but a --force re-extraction
+	// carries any value already stored across the delete/insert.
+	var legacyRegime any
+	if oldID != 0 {
+		var old sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT suggested_regime FROM video_digests WHERE id = ?`, oldID).Scan(&old); err != nil {
+			return fail(err)
+		}
+		if old.Valid {
+			legacyRegime = old.String
+		}
+	}
+	var catalystsJSON any
+	if len(ex.CatalystsClean) > 0 {
+		b, _ := json.Marshal(ex.CatalystsClean)
+		catalystsJSON = string(b)
+	}
 	if oldID != 0 { // --force: children cascade; the id is reused so links survive
 		if _, err := tx.ExecContext(ctx, `DELETE FROM video_digests WHERE id = ?`, oldID); err != nil {
 			return fail(err)
@@ -754,12 +896,17 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 		INSERT INTO video_digests (id, source, video_id, title, url, published_at, is_flagship, duration_sec,
 		  transcript_method, transcript_caption_track, pipeline_version, package_path, executive_summary,
 		  themes, theme_changes_vs_prior_week, prior_digest_id, regime_read, suggested_regime,
-		  llm_model, llm_cost_usd, ingested_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		  llm_model, llm_cost_usd, ingested_at,
+		  extraction_version, regime_narrative, catalysts, proposed_regime, proposed_confidence,
+		  proposed_quote, proposed_quote_ts, cross_asset_tilt, cross_asset_quote,
+		  accumulation_stance, accumulation_quote)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		idArg, m.Source, m.VideoID, m.Title, m.URL, m.PublishedAt, boolInt(isFlagship), m.DurationSec,
 		m.TranscriptMethod, m.CaptionTrack, m.PipelineVersion, p.Dir, ex.ExecutiveSummary,
-		jsonOrNull(ex.Themes), jsonOrNull(themeChanges), priorID, ex.RegimeRead, ex.SuggestedRegime,
-		model, resp.CostUSD, time.Now().Unix())
+		jsonOrNull(ex.Themes), jsonOrNull(themeChanges), priorID, ex.RegimeRead, legacyRegime,
+		model, resp.CostUSD, time.Now().Unix(),
+		ExtractionVersion, ex.RegimeNarrative, catalystsJSON, ex.ProposedRegime, ex.ProposedConfidence,
+		ex.ProposedQuote, ex.ProposedQuoteTs, ex.Tilt, ex.TiltQuote, ex.AccumStance, ex.AccumQuote)
 	if err != nil {
 		return fail(err)
 	}
@@ -980,8 +1127,8 @@ type Snapshot struct {
 	Confidence         *string `json:"confidence"`
 }
 
-// Digest is the API shape. suggested_regime and regime_read are deliberately
-// absent: not rendered in P1 (P3 / D7).
+// Digest is the API shape. suggested_regime (legacy) and regime_read are
+// deliberately absent: never shown in the UI.
 type Digest struct {
 	ID               int64     `json:"id"`
 	Source           string    `json:"source"`

@@ -83,8 +83,8 @@ func TestParseExtractionSanitises(t *testing.T) {
 	if ts := ex.NotableQuotes[0].TsSec; ts == nil || *ts != 31 {
 		t.Errorf("quote ts should come from where it occurs (31s), got %v", ts)
 	}
-	if *ex.SuggestedRegime != "Shifting" || ex.Snapshot.BTCvs200DMA != nil || *ex.Snapshot.Confidence != "unstated" {
-		t.Errorf("enums: regime=%v dma=%v conf=%v", *ex.SuggestedRegime, ex.Snapshot.BTCvs200DMA, *ex.Snapshot.Confidence)
+	if ex.ProposedRegime != nil || ex.Snapshot.BTCvs200DMA != nil || *ex.Snapshot.Confidence != "unstated" {
+		t.Errorf("enums: legacy key must not produce a proposal; dma=%v conf=%v", ex.Snapshot.BTCvs200DMA, *ex.Snapshot.Confidence)
 	}
 }
 
@@ -262,7 +262,14 @@ func TestIngestEndToEnd(t *testing.T) {
 		t.Errorf("re-ingest without force = %s, want skipped", r.Status)
 	}
 	// --force rebuilds in place: same id, no duplicate children.
+	st.DB.Exec(`UPDATE video_digests SET suggested_regime = 'Shifting' WHERE video_id = 'JordiWeek1'`)
 	r := svc.IngestVideo(ctx, "JordiWeek1", true)
+	var legacy *string
+	var ver int
+	st.DB.QueryRow(`SELECT suggested_regime, extraction_version FROM video_digests WHERE video_id='JordiWeek1'`).Scan(&legacy, &ver)
+	if legacy == nil || *legacy != "Shifting" || ver != ExtractionVersion {
+		t.Errorf("force must keep the legacy suggested_regime and set extraction_version: legacy=%v ver=%d", legacy, ver)
+	}
 	st.DB.QueryRow(`SELECT count(*) FROM video_mentions`).Scan(&nMentions)
 	if r.Status != "ingested" || r.DigestID != res[0].DigestID || nMentions != 5 {
 		t.Errorf("force: status=%s id=%d (want %d) mentions=%d (want 5)", r.Status, r.DigestID, res[0].DigestID, nMentions)
@@ -292,5 +299,71 @@ func TestIngestEndToEnd(t *testing.T) {
 	}
 	if only, _ := svc.List(ctx, "cowen"); len(only) != 1 {
 		t.Errorf("source filter: %d rows, want 1", len(only))
+	}
+}
+
+// P0 AC(a)/(c): the prompt carries FT's definitions, the "regime shift" disambiguation,
+// and none of the steering inputs; the legacy key is no longer requested.
+func TestPromptCarriesFTRegimeDefinitions(t *testing.T) {
+	for _, src := range []string{"jordi", "cowen"} {
+		p := systemPrompt(src)
+		for _, want := range []string{"Stable:", "Shifting:", "Defensive:", "Unclassified:", "x0.6", "entry-zone alerts off",
+			`NOT FT "Shifting"`, "evidence_quote", "regime_narrative", "catalysts", "cross_asset_tilt", "accumulation_stance"} {
+			if !strings.Contains(p, want) {
+				t.Errorf("%s prompt missing %q", src, want)
+			}
+		}
+		if strings.Contains(p, "suggested_regime") {
+			t.Errorf("%s prompt still requests the legacy suggested_regime", src)
+		}
+	}
+	// No-steering: the user prompt is title/date/duration, optional prior-video themes
+	// and the transcript. Nothing about the current regime.
+	u := strings.ToLower(userPrompt(packageMeta{Title: "t", PublishedAt: "2026-10-12", DurationSec: 600}, "[0s] hi", nil))
+	for _, banned := range []string{"current regime", "defensive", "shifting", "stable", "score"} {
+		if strings.Contains(u, banned) {
+			t.Errorf("user prompt leaks %q", banned)
+		}
+	}
+}
+
+func TestParseRegimeFields(t *testing.T) {
+	tr := CompactTranscript(sampleVTT)
+	parse := func(ftRegime string) Extraction {
+		raw := `{"regime_narrative":" He is cautious. ","catalysts":[{"event":"midterms","date":"2026-11-03"},{"event":" "}],
+		 "ft_regime":` + ftRegime + `,
+		 "cross_asset_tilt":{"tilt":"Crypto","quote":"liquidity is the whole story"},
+		 "accumulation_stance":{"stance":"hoarding","quote":"made up"}}`
+		ex, err := ParseExtraction(raw, tr, "jordi")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ex
+	}
+
+	ex := parse(`{"state":"Shifting","confidence":"medium","evidence_quote":"liquidity is the whole story this week"}`)
+	if ex.ProposedRegime == nil || *ex.ProposedRegime != "shifting" || *ex.ProposedConfidence != "medium" ||
+		ex.ProposedQuote == nil || ex.ProposedQuoteTs == nil || *ex.ProposedQuoteTs != 31 {
+		t.Errorf("valid proposal not kept: %+v", ex)
+	}
+	if *ex.RegimeNarrative != "He is cautious." || len(ex.CatalystsClean) != 1 || *ex.CatalystsClean[0].Date != "2026-11-03" {
+		t.Errorf("narrative/catalysts: %v %v", ex.RegimeNarrative, ex.CatalystsClean)
+	}
+	if *ex.Tilt != "crypto" || ex.TiltQuote == nil || ex.AccumStance != nil || ex.AccumQuote != nil {
+		t.Errorf("tilt/stance: tilt=%v quote=%v stance=%v", ex.Tilt, ex.TiltQuote, ex.AccumStance)
+	}
+
+	for name, in := range map[string]string{
+		"not an FT state":    `{"state":"Bearish","confidence":"high","evidence_quote":"liquidity is the whole story"}`,
+		"invented quote":     `{"state":"Defensive","confidence":"high","evidence_quote":"sell everything now"}`,
+		"missing quote":      `{"state":"Defensive","confidence":"high"}`,
+		"missing confidence": `{"state":"Stable","evidence_quote":"liquidity is the whole story"}`,
+	} {
+		if ex := parse(in); ex.ProposedRegime != nil || ex.ProposalRejected == "" {
+			t.Errorf("%s: proposal should be rejected, got %v / %q", name, ex.ProposedRegime, ex.ProposalRejected)
+		}
+	}
+	if ex := parse(`{"state":"Unclassified","confidence":"low"}`); ex.ProposedRegime == nil || *ex.ProposedRegime != "unclassified" {
+		t.Error("unclassified needs no quote")
 	}
 }
