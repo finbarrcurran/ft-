@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.88.0 · 2026-10-19** — latest change: Transcript store and search (SC-52 P2) (§13).
+> **Current version: v1.89.0 · 2026-10-19** — latest change: Capital flows from statements (SC-52 P4) (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.88.0 2026-10-19 -->
+<!-- reference_reviewed: v1.89.0 2026-10-19 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -56,7 +56,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 
 ## 3. Schema — every migration
 
-57 migrations applied (latest `0057_video_transcripts.sql`).
+58 migrations applied (latest `0058_etoro_capital_flows.sql`).
 
 | # | File | Adds |
 |---|------|------|
@@ -112,6 +112,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0055 | `ft_snapshots` | SC-46 (P5) — `ft_snapshots` (one row per ISO week, `week_start` = Monday UNIQUE, `payload_json`); the same week is replaced, earlier weeks are kept |
 | 0056 | `video_digest_regime_fields` | SC-52 P0 — `video_digests` gains `extraction_version`, `regime_narrative`, `catalysts`, `proposed_regime/_confidence/_quote/_quote_ts` (FT states, evidence quote grounded in the transcript), `cross_asset_tilt` (+quote), `accumulation_stance` (+quote); `suggested_regime` is LEGACY (kept, never written by v2, never shown) |
 | 0057 | `video_transcripts` | SC-52 P2 — `video_transcripts` (one row per video: id, source, title, date, captions text with `[NNNs]` markers, sha) + `video_transcripts_fts` (FTS5 external-content index kept by triggers); free of LLM spend, carried by any DB backup |
+| 0058 | `etoro_capital_flows` | SC-52 P4 — `etoro_capital_flows` (dated deposits, transfers to/from eToro Money, withdrawals, reversals and FX conversion fees from the statements' Account Activity; idempotent on a hash of the activity row; `manual = 1` rows are the deletable fallback) and `etoro_statement_periods.flows_summary_json` (the Account Summary vs rows reconciliation of each statement) |
 | 0052 | `indicator_data_as_of` | SC-49 — `crypto_indicators.data_as_of` (date of the newest data point behind a reading) |
 | 0051 | `provider_daily` | SC-48 — per-provider per-day call counters; retired providers' health rows removed |
 | 0050 | `oauth` | SC-41b — `oauth_clients`, `oauth_codes`, `oauth_tokens` (hashes only; refresh tokens rotate, families revoked on reuse) |
@@ -180,9 +181,10 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 - Direct sync: `GET /api/etoro/sync` (last run + effective per-ticker SL/TP), `POST /api/etoro/sync` (run now).
 - Approval queue: `GET /api/etoro/reconcile/proposals?status=`, `POST /api/etoro/reconcile/proposals/{id}/{approve,dismiss}`.
 - Statement fallback (`.xlsx` only): `POST /api/etoro/reconcile/{preview,apply}` — the preview returns `coverage {complete, reason, startDate, endDate, oldestOpen, newestOpen}`; an incomplete statement has closure/drift rows withheld, and copy-trade lots are left out. **Rules since 2026-10-11:** only crypto in the `eToro` wallet is reconciled (other wallets are never matched or proposed for closure); FT has no units column, so "FT units" are the live SC-42 broker units when known (units are derived as invested ÷ avg only for USD listings — for GBp/JPY/EUR listings that mixes currencies); when FT already matches the live data a differing statement is shown in sync with a partial-close note and never applied; drift proposals carry the live figures, and the statement's USD average is never written to a non-USD listing; a statement ticker without an exchange suffix (`SU`) matches the single FT holding with that base (`SU.PA`); applied crypto adds are tagged wallet `eToro`; every applied change writes a `holdings_audit` row (reason_code `etoro_statement_reconcile`).
-- Performance history: `POST /api/etoro/import/{preview,apply}`, `GET /api/etoro/performance` (now also returns `coverage {has,start,end,nextStart,ageDays,stale}`), `GET /api/etoro/trade-stats?scope=discretionary|copy|all&year=YYYY|all&minAmount=N` (SC-51).
+- Performance history: `POST /api/etoro/import/{preview,apply}`, `GET /api/etoro/performance` (now also returns `coverage {has,start,end,nextStart,ageDays,stale}` and `capitalFlows {has,first,last,inUsd,outUsd,netUsd,feesUsd,byYear}`), `GET|POST /api/etoro/capital-flows` and `DELETE /api/etoro/capital-flows/{id}` (SC-52 P4: the dated flows; POST `{day,direction:in|out,amountUsd,note}` is the manual fallback and only manual rows can be deleted), `GET /api/etoro/trade-stats?scope=discretionary|copy|all&year=YYYY|all&minAmount=N` (SC-51).
   **Scope (v1.84.1):** `GET /api/etoro/performance` asset rows also carry `tradeCountDisc`/`tradeCountCopy`. The UI scope is one variable (`ft.etoroScope.v2` in localStorage) shared by the year tables and the statistics panel.
   **Trade statistics (SC-51 A):** read from `etoro_closed_positions` only, USD only (per-position EUR does not sum to eToro's EUR summary); never the dividend or Income & other tables. Scope uses the same rule as the year tables (`is_copy`: discretionary = 0, copy/CFD = 1, so a discretionary CFD counts as discretionary); default = discretionary and the YTD year. Metrics: n, win rate (break-even counts in n only), average winner/loser, payoff ratio, profit factor, expectancy, median hold (calendar days, positions with a known open date), largest winner/loser, top-5 winners' share of total P&L (hidden when total <= 0); breakdowns by asset class and, for "All years", by year. n < 10 is greyed "small sample"; an empty scope says "no trades". "Exclude under $X invested" (off by default) drops small positions and states how many and their P&L. Sums per scope and period equal the year-table closed-trade P&L. No R-multiples, no thesis linkage, no EUR.
+  **Capital flows (SC-52 P4):** the importer also reads the statement's Account Activity sheet: Deposit, Transfer: EUR > USD (to trading), Withdraw Request, Transfer: USD > EUR (to eToro Money), Withdraw Request Cancelled (a reversal, which eToro nets inside the transfers-to-eToro-Money line) and the deposit/withdrawal conversion fees. Each row is stored once (overlapping statements and re-imports add nothing). Each statement is reconciled to its own Account Summary: inflows (Deposits + Transfer to Trading), withdrawals, transfers to eToro Money net of reversals, and FX fees (cents of rounding tolerated); a mismatch or a non-zero Credits / Internal Transfer / Transfer in / Transfer out line, or a flow-like activity type FT does not recognise, is a warning. On the five real statements the first three reconcile to the cent; the fee rows differ from eToro's fee total by $0.02. Stored today: 93 rows from 2025-08-31 to 2026-06-01 (deposits $24,617.34; transfers to trading $2,306.32; withdrawal -$1,001.00; transfers to eToro Money -$3,138.54 with a +$102.94 reversal). No deposit, withdrawal or transfer row exists after 2026-06-01 in any statement through 2026-10-09 (only positions, dividends, interest and one adjustment). Flows after the coverage end are unknown, not zero. The Performance tab shows a "Capital flows (statements)" line; the weekly snapshot's value notes quote the flows recorded in the period, say "none recorded" where a statement covers it, and say "not known" after the last statement.
   **Statement coverage (SC-51 B):** coverage end = latest End Date and start = earliest Start Date of the non-superseded `etoro_statement_periods`. The preview classifies the new statement's Start Date: `clean` (= end + 1), `gap` (after end + 1: apply is refused with 409 `needsConfirm` until `{"confirmGap":true}` is sent; the dialog needs a ticked box) or `overlap` (the existing double-count warning). The upload dialog says "Next statement should start <end + 1>". Monitor check `statement_coverage`: alert when the coverage end is more than 35 days old, reminder every 7 days, recovery on import. The year-end tiled-sum check was not built.
   **Statement importer (SC-50, v1.83.0):** a statement is *merged*, never replaced. Each closed position and dividend row is stored once, keyed by eToro's **Position ID** (`etoro_closed_positions`, `etoro_dividend_rows`), so re-importing the same statement or importing an overlapping one never double-counts; a multi-year statement lands each position in the year of **its own close date** and each dividend in the year of its payment date. The Financial Summary's lines (fees, interest, refunds, airdrops, staking, corporate actions, stocks lending, index adjustments) are whole-period figures eToro does not split by year: they are stored per statement period (`etoro_statement_periods`) and shown in the End Date year as **"Income & other"**, separate from closed-trade P&L, counted in total return and never in per-trade statistics. Every non-zero Financial Summary line is classified or flagged as "Unclassified: <label> $x" (it then shows as the net-reconciliation delta until a rule is added). The preview shows the reconciliation in **both USD and EUR** (closed-trade P&L vs the Financial Summary; net vs classified lines); a delta above $1 or €1 warns and names the currency. A year row is only REPLACED when the imported statements together cover it (a past year: one merged range spanning it; the current year: reaching back to 1 January); a narrower statement leaves a wider existing row alone and says so. A statement whose period lies inside an earlier one records its whole-period lines as superseded so they are not counted twice; a partial overlap warns. `internal/etoro` also fixes accounting-style negatives: `(11.50)` is now −11.50 (before, every bracketed loss in the Closed Positions sheet read as 0). The master-file import rejects eToro statements (v1.77.3).
 
@@ -345,7 +347,7 @@ ft token create-mcp ...                   mint a read-scoped token for the MCP c
 ft token list                             list tokens (no plaintext)
 ft token revoke --id N [--user-id N]      revoke a service token
 ft snapshot [--now] [--dry-run] [--week-start YYYY-MM-DD]   SC-46: take the weekly FT snapshot now (build, compare, save to ft_snapshots, write the Drive file, Telegram note); --dry-run prints the Markdown and saves nothing
-ft etoro-import [--user-id N] [--dry-run] FILE.xlsx...   import eToro statements (merged by Position ID, SC-50); --dry-run only parses and prints the reconciliation
+ft etoro-import [--user-id N] [--dry-run] FILE.xlsx...   import eToro statements (merged by Position ID, SC-50; capital flows reconciled to the Account Summary, SC-52 P4); --dry-run only parses and prints the reconciliations
 ft oauth status | revoke-all | revoke-client --id ID | create-client [--name N] [--redirect URI] [--secret]   SC-41b OAuth sign-ins
 ft help
 ```
@@ -381,13 +383,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.89.0 · 2026-10-19 · pass 94 · SC-52
+
+**Capital flows from statements (SC-52 P4).** Deposits, withdrawals and transfers to/from eToro Money are read from the statements' Account Activity, stored once each and reconciled to the Account Summary (93 rows, 2025-08-31 → 2026-06-01; none since). Shown on the Performance tab and quoted in the weekly snapshot's value notes; a manual entry endpoint is the fallback. Behaviour: import, display. Migrations: 0058. Reference updated: §3, §5, §11. Supersedes v1.88.0.
+
 ### v1.88.0 · 2026-10-19 · pass 93 · SC-52
 
 **Transcript store and search (SC-52 P2).** Every stored video's full captions are kept in the database with a full-text index and can be searched by word or phrase (endpoint, CLI and a read-only connector tool), returning video, date, snippet and a timestamped link. Free of LLM spend; covered by the DB backup. Behaviour: yes. Migrations: 0057. Reference updated: §3, §5, §11, §12. Supersedes v1.87.0.
 
+
 ### v1.87.0 · 2026-10-19 · pass 92 · SC-52
 
 **Video-digest extraction v2 (SC-52 P0).** Digests are now extracted against FT's own regime definitions (not the speaker's wording), with a narrative, named catalysts, a verbatim evidence quote, cross-asset tilt and accumulation stance stored for both sources; a state without a grounded quote is dropped. Nothing is shown or applied (D6, D7); legacy `suggested_regime` stays hidden. New `ft video-digest-preview`. Behaviour: ingest only. Migrations: 0056. Reference updated: §3, §5, §11, §12. Supersedes v1.86.1.
+
 
 
 ### v1.86.1 · 2026-10-13 · pass 91 · SC-46
@@ -396,9 +404,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.86.0 · 2026-10-13 · pass 90 · SC-46
 
 **Weekly FT snapshot (P5).** FT stores a deterministic snapshot per ISO week (new table `ft_snapshots`), compares it with earlier weeks (deltas, 4-week trends, changes, a Top-changes block) and writes a short file to Drive `reports/ft-snapshot.md` every Sunday evening, with a Monday catch-up. History is seeded only from existing history tables. Behaviour: yes. Migrations: 0055. Reference updated: §3, §4, §11, §12. Supersedes v1.85.0.
+
 
 
 
@@ -411,9 +421,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.84.1 · 2026-10-13 · pass 88 · SC-51
 
 **Performance tab: one scope control.** The year tables and the Trade statistics panel now share a single Discretionary / Copy-CFD / All control (default Discretionary, saved choice reset once). In the filtered views only realised P&L and trade counts are scoped; dividends, fees, interest and refunds appear once as an account-level row and no Net is computed there. Net shows only in All and on the YTD card (retitled 'YTD 2026 · realised'). Behaviour: yes. Migrations: none. Reference updated: §2, §5. Supersedes v1.84.0.
+
 
 
 
@@ -430,9 +442,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.83.2 · 2026-10-13 · pass 86 · SC-51
 
 **ETF-flow trailing zero row ignored; chart freshness fixed.** A newest Farside row with `totalM = 0` followed by a non-zero row is a not-yet-published placeholder and is ignored for the as-of date (card, chart badge and monitor share one rule). Also fixes a v1.82.0 slip: the chart's `asOf`/age/badge fields had been attached to the BTC-history handler, so the ETF chart never showed them; now on `/api/crypto-indicators/etf-flow/history`, with a handler test. Behaviour: yes. Migrations: none. Reference updated: §3, §8. Supersedes v1.83.1.
+
 
 
 
@@ -453,21 +467,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.83.0 · 2026-10-13 · pass 84 · SC-50
-
-**Performance importer.** Multi-year statements are split into per-year buckets by each position's own close date; positions are stored by eToro Position ID so re-imports and overlapping statements never double-count; a narrower statement can no longer erase a wider year; reconciliation is shown in USD and EUR; every Financial Summary line is classified or flagged, and interest, refunds and other income appear as "Income & other". Also fixes a bug that read bracketed losses `(11.50)` as 0 in the Closed Positions sheet. Migration 0053. Behaviour: yes. Reference updated: §3, §5. Supersedes v1.82.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.88.0 -->
+<!-- END FT-master-spec v1.89.0 -->

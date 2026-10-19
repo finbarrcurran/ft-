@@ -1466,6 +1466,11 @@ func runEtoroImport(args []string) {
 		fmt.Printf("\n== %s  (%s to %s)\n", stmt.FileName, p.RangeStart, p.RangeEnd)
 		fmt.Printf("   %d closed positions, %d dividend rows; reconciliation: P&L delta $%.2f / EUR %.2f, net-vs-classified delta $%.2f / EUR %.2f, unclassified $%.2f\n",
 			len(stmt.Positions), len(stmt.Dividends), p.ReconPnLDeltaUSD, p.ReconPnLDeltaEUR, p.ReconNetDeltaUSD, p.ReconNetDeltaEUR, p.UnclassifiedUSD)
+		if fsum := stmt.FlowSum; len(stmt.Flows) > 0 || fsum.Present {
+			fmt.Printf("   %d capital-flow rows; Account Summary vs Activity rows: inflows %.2f vs %.2f | withdrawals %.2f vs %.2f | transfers out %.2f vs %.2f | FX fees %.2f vs %.2f | reconciled=%v\n",
+				len(stmt.Flows), fsum.SumDeposits+fsum.SumTransferToTrading, fsum.RowDeposits+fsum.RowTransfersIn, fsum.SumWithdrawals, fsum.RowWithdrawals,
+				fsum.SumTransferOut, fsum.RowTransfersOut+fsum.RowReversals, fsum.SumFXFees, fsum.RowFXFees, fsum.Reconciled)
+		}
 		for _, w := range stmt.Warnings {
 			fmt.Println("   WARNING:", w)
 		}
@@ -1474,8 +1479,8 @@ func runEtoroImport(args []string) {
 		}
 		res, err := st.ApplyEtoroStatement(ctx, *userID, server.EtoroStatementToStore(stmt))
 		must("apply "+path, err)
-		fmt.Printf("   applied: positions new %d / known %d, dividends new %d / known %d, period %s\n",
-			res.PositionsNew, res.PositionsKnown, res.DividendsNew, res.DividendsKnown, res.PeriodAction)
+		fmt.Printf("   applied: positions new %d / known %d, dividends new %d / known %d, flows new %d / known %d, period %s\n",
+			res.PositionsNew, res.PositionsKnown, res.DividendsNew, res.DividendsKnown, res.FlowsNew, res.FlowsKnown, res.PeriodAction)
 		for _, y := range res.Years {
 			fmt.Printf("   %d: %s - %s\n", y.Year, y.Action, y.Note)
 		}

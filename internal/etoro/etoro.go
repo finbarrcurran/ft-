@@ -139,6 +139,8 @@ type Statement struct {
 	Period    Period           `json:"period"`
 	Positions []ClosedPosition `json:"-"`
 	Dividends []DividendRow    `json:"-"`
+	Flows     []CapitalFlow    `json:"-"` // SC-52 P4
+	FlowSum   FlowSummary      `json:"flowSummary"`
 }
 
 const (
@@ -283,6 +285,11 @@ func Parse(r io.Reader, fileName string, now time.Time) (*Statement, error) {
 	if noID > 0 {
 		st.Warnings = append(st.Warnings, fmt.Sprintf("%d closed positions had no Position ID; they cannot be de-duplicated against another statement", noID))
 	}
+
+	// --- Account Activity → dated capital flows, reconciled to the Account Summary (SC-52 P4). ---
+	var flowWarns []string
+	st.Flows, st.FlowSum, flowWarns = parseFlows(f, have)
+	st.Warnings = append(st.Warnings, flowWarns...)
 
 	// --- Dividends sheet → per-row, dated. ---
 	if have[sheetDividends] {

@@ -45,6 +45,12 @@ type EtoroDividend struct {
 	USD, EUR   float64
 }
 
+// EtoroFlow is one capital-flow row from the Account Activity sheet (SC-52 P4).
+type EtoroFlow struct {
+	Key, OccurredAt, Day, Kind, Details string
+	AmountUSD                           float64
+}
+
 // EtoroPeriod is one statement's whole-period Financial Summary figures.
 type EtoroPeriod struct {
 	RangeStart, RangeEnd                       string
@@ -68,7 +74,9 @@ type EtoroStatementData struct {
 	FileName  string
 	Positions []EtoroPosition
 	Dividends []EtoroDividend
+	Flows     []EtoroFlow // SC-52 P4
 	Period    EtoroPeriod
+	FlowsJSON string // the statement's flow reconciliation (Account Summary vs Activity rows), kept for the audit trail
 }
 
 // EtoroYearOutcome says what happened to one year.
@@ -84,6 +92,8 @@ type EtoroApplyResult struct {
 	PositionsKnown int                `json:"positionsKnown"`
 	DividendsNew   int                `json:"dividendsNew"`
 	DividendsKnown int                `json:"dividendsKnown"`
+	FlowsNew       int                `json:"flowsNew"`
+	FlowsKnown     int                `json:"flowsKnown"`
 	PeriodAction   string             `json:"periodAction"` // inserted | replaced_identical | contained_in_existing
 	Years          []EtoroYearOutcome `json:"years"`
 	Warnings       []string           `json:"warnings"`
@@ -133,6 +143,21 @@ func (s *Store) ApplyEtoroStatement(ctx context.Context, userID int64, d EtoroSt
 			res.PositionsNew++
 		}
 		touched[p.Year] = true
+	}
+	// 1b. Capital flows (SC-52 P4): idempotent on the activity-row key.
+	for _, fl := range d.Flows {
+		r, err := tx.ExecContext(ctx, `
+			INSERT INTO etoro_capital_flows (user_id, flow_key, occurred_at, day, kind, amount_usd, details, manual, source_file, imported_at)
+			VALUES (?,?,?,?,?,?,?,0,?,?) ON CONFLICT(user_id, flow_key) DO NOTHING`,
+			userID, fl.Key, fl.OccurredAt, fl.Day, fl.Kind, fl.AmountUSD, fl.Details, d.FileName, now)
+		if err != nil {
+			return nil, err
+		}
+		if n, _ := r.RowsAffected(); n > 0 {
+			res.FlowsNew++
+		} else {
+			res.FlowsKnown++
+		}
 	}
 	// 2. Dividends.
 	for _, v := range d.Dividends {
@@ -203,7 +228,7 @@ func (s *Store) ApplyEtoroStatement(ctx context.Context, userID int64, d EtoroSt
 		}
 	}
 	feesJSON, _ := json.Marshal(p.FeesByType)
-	if _, err := tx.ExecContext(ctx, `
+	pres, err := tx.ExecContext(ctx, `
 		INSERT INTO etoro_statement_periods (user_id, range_start, range_end, source_file,
 		  net_usd, net_eur, realised_usd, realised_eur, dividends_usd, dividends_eur,
 		  dividend_residual_usd, dividend_residual_eur, fees_usd, fees_eur, interest_usd, interest_eur,
@@ -216,8 +241,16 @@ func (s *Store) ApplyEtoroStatement(ctx context.Context, userID int64, d EtoroSt
 		p.DividendResidualUSD, p.DividendResidualEUR, p.FeesUSD, p.FeesEUR, p.InterestUSD, p.InterestEUR,
 		p.RefundsUSD, p.RefundsEUR, p.OtherIncomeUSD, p.OtherIncomeEUR, p.UnclassifiedUSD, p.UnclassifiedEUR,
 		p.ReconPnLDeltaUSD, p.ReconPnLDeltaEUR, p.ReconNetDeltaUSD, p.ReconNetDeltaEUR,
-		string(feesJSON), nz(p.LinesJSON, "[]"), boolToInt(newSuperseded), now); err != nil {
+		string(feesJSON), nz(p.LinesJSON, "[]"), boolToInt(newSuperseded), now)
+	if err != nil {
 		return nil, err
+	}
+	if d.FlowsJSON != "" {
+		if pid, err := pres.LastInsertId(); err == nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE etoro_statement_periods SET flows_summary_json = ? WHERE id = ?`, d.FlowsJSON, pid); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// 4. Re-derive the touched years.

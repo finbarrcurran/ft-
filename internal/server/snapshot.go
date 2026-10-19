@@ -604,7 +604,7 @@ func (s *Server) RunWeeklySnapshot(ctx context.Context, now time.Time, opt Snaps
 		notes = s.valueNotes(ctx, hist[0], now)
 		if ls := s.valueHistoryLines(ctx, hist[0]); len(ls) > 0 {
 			p.Lines["portfolio"] = append(p.Lines["portfolio"], ls...)
-			p.Lines["portfolio"] = append(p.Lines["portfolio"], "Earlier value changes above are read against these recorded holdings changes; "+flowsText+".")
+			p.Lines["portfolio"] = append(p.Lines["portfolio"], "Earlier value changes above are read against these recorded holdings changes and the capital flows recorded from statements; whatever those do not explain is price movement and items no statement shows, which FT does not split further.")
 		}
 	}
 	rep := snapshot.CompareWith(p, hist, notes)

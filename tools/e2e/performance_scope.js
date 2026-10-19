@@ -42,7 +42,8 @@ const server = http.createServer((req, res) => {
     requests.push(u.pathname + u.search);
     res.setHeader('Content-Type', 'application/json');
     if (u.pathname === '/api/auth/state') return res.end(JSON.stringify({ state: 'authenticated', user: { id: 1, email: 'test@example.com', username: 'test' } }));
-    if (u.pathname === '/api/etoro/performance') return res.end(JSON.stringify({ years: YEARS, coverage: { has: true, start: '2025-01-01', end: '2026-10-09', nextStart: '2026-10-10', ageDays: 4, stale: false } }));
+    if (u.pathname === '/api/etoro/performance') return res.end(JSON.stringify({ years: YEARS, coverage: { has: true, start: '2025-01-01', end: '2026-10-09', nextStart: '2026-10-10', ageDays: 4, stale: false },
+      capitalFlows: { has: true, first: '2025-08-31', last: '2026-06-01', inUsd: 26923.66, outUsd: -4036.6, netUsd: 22887.06, feesUsd: -73.48, byYear: [{ year: 2025, inUsd: 26749.2, outUsd: 0 }, { year: 2026, inUsd: 174.46, outUsd: -4036.6 }] } }));
     if (u.pathname === '/api/etoro/trade-stats') return res.end(JSON.stringify(tradeStats(u.searchParams)));
     return res.end('{}');
   }
@@ -141,6 +142,8 @@ const check = (name, ok, extra) => { if (!ok) failures++; console.log(`${ok ? 'P
   await page.waitForSelector('.etoro-year-block');
   check('chosen scope (copy) is remembered after reload', (await active()) === 'copy', await active());
 
+  const flowsText = await text('.cov-label:nth-of-type(2)').catch(() => '');
+  check('capital flows label shows in/out/net and the last flow', (await page.$$eval('.cov-label', (els) => els.map((e) => e.textContent).join(' | '))).includes('Capital flows (statements): in $26923.66 · out -$4036.60 · net $22887.06'), flowsText);
   check('no page errors', errors.length === 0, errors.join(' | '));
   await browser.close();
   server.close();
