@@ -239,9 +239,9 @@ const commonSchema = `{
   "catalysts": [ { "event": string, "date": string|null } ] — events or dates he names as mattering (data releases, meetings, elections, unwinds); at most 6,
   "ft_regime": { "state": "Stable"|"Shifting"|"Defensive"|"Unclassified"|null,
                  "confidence": "high"|"medium"|"low"|null,
-                 "evidence_quote": string|null — copied VERBATIM from the transcript, under 40 words, the passage that best supports the state; required for Stable, Shifting and Defensive },
-  "cross_asset_tilt": { "tilt": "equities"|"crypto"|"balanced"|"unstated", "quote": string|null — VERBATIM, under 40 words } — where he says he has more conviction, as stated,
-  "accumulation_stance": { "stance": "accumulating"|"waiting"|"reducing"|"unstated", "quote": string|null — VERBATIM, under 40 words }`
+                 "evidence_quote": string|null — ONE contiguous passage copied exactly (word for word) from one place in the transcript, under 40 words, the passage that best supports the state; never join separate passages, never use "..." or paraphrase; required for Stable, Shifting and Defensive },
+  "cross_asset_tilt": { "tilt": "equities"|"crypto"|"balanced"|"unstated", "quote": string|null — one contiguous passage copied exactly, under 40 words } — where he says he has more conviction, as stated,
+  "accumulation_stance": { "stance": "accumulating"|"waiting"|"reducing"|"unstated", "quote": string|null — one contiguous passage copied exactly, under 40 words }`
 
 // regimeDefinitions are FT's own regime states. The speaker's vocabulary is not FT's:
 // the model is given these and nothing else about regimes — no current regime, no prior
@@ -249,11 +249,11 @@ const commonSchema = `{
 const regimeDefinitions = `
 
 FT regime definitions (classify his stated view into ONE of these, in FT's terms, not his):
-- Stable: he sees conditions as supportive; normal risk posture. FT keeps its normal alert margin and entry-zone alerts on.
-- Shifting: he sees material uncertainty or deterioration and advises caution, but not an outright risk-off stance. FT tightens its risk posture: alert margin x0.6, entry-zone alerts off.
-- Defensive: he is explicitly risk-off or expects a significant drawdown; capital preservation first.
-- Unclassified: he does not give a clear enough read on the market to place it in one of the above.
-A speaker's phrase "regime shift" (a structural change in how markets work, e.g. a new monetary or technological regime) is NOT FT "Shifting". Judge the risk posture he recommends, not his vocabulary. If the evidence is mixed, choose the more cautious of the two best-fitting states and set confidence "low". Give ft_regime.state null only if the transcript says nothing about the market.`
+- Stable: he is constructive and names no near-term risk event. FT keeps its normal risk posture: normal alert margin, entry-zone alerts on.
+- Shifting: he flags elevated uncertainty or named event risk (dated catalysts) but does NOT expect a material equity drawdown. FT tightens its risk posture: alert margin x0.6, entry-zone alerts off.
+- Defensive: he explicitly expects or warns of a material drawdown, or advises cutting risk. Capital preservation first.
+- Unclassified: the video has no regime content at all (no read on the market or on risk).
+A speaker's phrase "regime shift" (a structural change in how markets work, e.g. a new monetary or technological regime) is NOT FT "Shifting". Judge the risk posture he recommends, not his vocabulary. If the evidence is mixed, choose the more cautious of the two best-fitting states and set confidence "low". Use "Unclassified" when there is no regime content; leave ft_regime.state null only if you cannot read the transcript.`
 
 const jordiExtras = `,
   "theme_changes_vs_prior_week": [string]|null — how this video's themes differ from the PRIOR VIDEO CONTEXT supplied with the transcript (new, dropped, or changed emphasis); null if no prior context is supplied`
@@ -404,9 +404,33 @@ func groundedQuote(q *string, segs []segment) (string, int, bool) {
 	if qt == "" || len(qt) > maxEvidenceLen {
 		return "", 0, false
 	}
-	at, ok := quoteTs(qt, segs)
-	return qt, at, ok
+	// A quote with an ellipsis is accepted only if EVERY fragment is verbatim (each of at
+	// least four words); it is stored as the model wrote it, timestamped at the first fragment.
+	frags := ellipsisRe.Split(qt, -1)
+	first, firstAt := true, 0
+	for _, f := range frags {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if len(frags) > 1 && len(strings.Fields(f)) < 4 {
+			return "", 0, false
+		}
+		at, ok := quoteTs(f, segs)
+		if !ok {
+			return "", 0, false
+		}
+		if first {
+			firstAt, first = at, false
+		}
+	}
+	if first {
+		return "", 0, false
+	}
+	return qt, firstAt, true
 }
+
+var ellipsisRe = regexp.MustCompile(`\s*(?:\.{3,}|…)\s*`)
 
 // sanitiseRegimeFields enforces the v2 regime schema. Only the four FT states pass
 // the enum; Stable, Shifting and Defensive additionally need a confidence and an
@@ -770,6 +794,69 @@ func boolInt(b bool) int {
 	}
 	return 0
 }
+
+// PreviewResult is one extraction run that is NOT stored: the raw model output, the sanitised
+// extraction, and what the run cost. Used to compare prompts or inputs before a re-extraction.
+type PreviewResult struct {
+	VideoID, Source, PublishedAt, Title string
+	WithPrior                           bool
+	PriorTitle                          string
+	Raw                                 string
+	Extraction                          Extraction
+	CostUSD                             float64
+	InputTokens                         int
+}
+
+// Preview runs the extraction for one stored package and returns it without writing anything.
+// withPrior=false leaves out the PRIOR VIDEO CONTEXT block (Jordi), so the effect of that block
+// on the regime and narrative can be compared.
+func (s *Service) Preview(ctx context.Context, videoID string, withPrior bool) (*PreviewResult, error) {
+	p, err := s.findPackage(videoID)
+	if err != nil {
+		return nil, err
+	}
+	m := p.Meta
+	vtt, err := os.ReadFile(filepath.Join(p.Dir, "transcript.vtt"))
+	if err != nil {
+		return nil, err
+	}
+	compact := CompactTranscript(string(vtt))
+	if compact == "" {
+		return nil, fmt.Errorf("transcript.vtt produced no text")
+	}
+	var pr *prior
+	if withPrior && m.Source == "jordi" {
+		if pr, err = s.priorFor(ctx, m); err != nil {
+			return nil, err
+		}
+	}
+	if s.LLM == nil {
+		return nil, fmt.Errorf("llm service not configured")
+	}
+	resp, err := s.LLM.Call(ctx, llm.CallRequest{
+		FeatureID:       FeatureID,
+		FeatureContext:  "preview " + m.Source + ":" + m.VideoID + " " + m.PublishedAt,
+		SystemPrompt:    systemPrompt(m.Source),
+		UserPrompt:      userPrompt(m, compact, pr),
+		MaxOutputTokens: maxOutputTokens,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("llm: %w", err)
+	}
+	ex, err := ParseExtraction(resp.Text, compact, m.Source)
+	if err != nil {
+		return nil, fmt.Errorf("parse: %w (raw: %.300s)", err, resp.Text)
+	}
+	out := &PreviewResult{VideoID: m.VideoID, Source: m.Source, PublishedAt: m.PublishedAt, Title: m.Title,
+		WithPrior: pr != nil, Raw: resp.Text, Extraction: ex, CostUSD: resp.CostUSD, InputTokens: resp.InputTokens}
+	if pr != nil {
+		out.PriorTitle = pr.Title
+	}
+	return out, nil
+}
+
+// SystemPromptText exposes the extraction prompt for review (the "prompt text in the repo" AC).
+func SystemPromptText(source string) string { return systemPrompt(source) }
 
 // ingestMu serialises ingests process-wide, so the scheduled sweep and a manual
 // ingest from the tab can't both insert the same video.

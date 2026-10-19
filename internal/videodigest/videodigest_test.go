@@ -308,6 +308,8 @@ func TestPromptCarriesFTRegimeDefinitions(t *testing.T) {
 	for _, src := range []string{"jordi", "cowen"} {
 		p := systemPrompt(src)
 		for _, want := range []string{"Stable:", "Shifting:", "Defensive:", "Unclassified:", "x0.6", "entry-zone alerts off",
+			"names no near-term risk event", "dated catalysts", "does NOT expect a material equity drawdown",
+			"explicitly expects or warns of a material drawdown, or advises cutting risk", "no regime content at all", "more cautious of the two best-fitting states",
 			`NOT FT "Shifting"`, "evidence_quote", "regime_narrative", "catalysts", "cross_asset_tilt", "accumulation_stance"} {
 			if !strings.Contains(p, want) {
 				t.Errorf("%s prompt missing %q", src, want)
@@ -324,6 +326,24 @@ func TestPromptCarriesFTRegimeDefinitions(t *testing.T) {
 		if strings.Contains(u, banned) {
 			t.Errorf("user prompt leaks %q", banned)
 		}
+	}
+}
+
+// A quote joined with an ellipsis is accepted only when every fragment is verbatim.
+func TestEvidenceQuoteWithEllipsis(t *testing.T) {
+	tr := CompactTranscript(sampleVTT)
+	segs := segments(tr)
+	good := "liquidity is the whole story this week"
+	if _, _, ok := groundedQuote(&good, segs); !ok {
+		t.Fatal("a verbatim quote must ground")
+	}
+	bad := "liquidity is the whole story this week... and nothing else matters at all"
+	if _, _, ok := groundedQuote(&bad, segs); ok {
+		t.Fatal("an ungrounded second fragment must reject the quote")
+	}
+	one := "..."
+	if _, _, ok := groundedQuote(&one, segs); ok {
+		t.Fatal("an empty quote must not ground")
 	}
 }
 

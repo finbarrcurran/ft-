@@ -10,6 +10,7 @@
 package main
 
 import (
+	"encoding/json"
 	"ft/internal/etoro"
 	"context"
 	"crypto/rand"
@@ -94,6 +95,8 @@ func main() {
 		runSnapshot(os.Args[2:])
 	case "etoro-import":
 		runEtoroImport(os.Args[2:])
+	case "video-digest-preview":
+		runVideoDigestPreview(os.Args[2:])
 	case "video-digest-reground":
 		runVideoDigestReground()
 		return
@@ -1205,6 +1208,73 @@ func runNexusFundamentals(args []string) {
 // runVideoDigestReground re-anchors stored video-digest mention/quote timestamps
 // to where they are actually spoken in each package transcript (SC-43 P1). No
 // LLM call; idempotent. Run as ft with FT_DB_PATH set.
+// runVideoDigestPreview extracts one stored video WITHOUT writing it (SC-52 P0 review): prints
+// the sanitised result as JSON, with and/or without the prior-video context block, plus the cost.
+// It still migrates and records its LLM spend in the database it opens, so point FT_DB_PATH at a
+// copy when the live schema must not change.
+func runVideoDigestPreview(args []string) {
+	fs := flag.NewFlagSet("video-digest-preview", flag.ExitOnError)
+	id := fs.String("video-id", "", "YouTube video id of a stored package")
+	prior := fs.String("prior", "both", "with | without | both (Jordi's PRIOR VIDEO CONTEXT block)")
+	prompt := fs.Bool("print-prompt", false, "print the system prompt for the video's source and exit")
+	src := fs.String("source", "jordi", "source for --print-prompt")
+	_ = fs.Parse(args)
+	if *prompt {
+		fmt.Println(videodigest.SystemPromptText(*src))
+		return
+	}
+	if *id == "" {
+		fmt.Fprintln(os.Stderr, "usage: ft video-digest-preview --video-id ID [--prior with|without|both]")
+		os.Exit(2)
+	}
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	svc := videodigest.New(st.DB, llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY")), os.Getenv("FT_VIDEO_DIGEST_ROOT"))
+	var modes []bool
+	switch *prior {
+	case "with":
+		modes = []bool{true}
+	case "without":
+		modes = []bool{false}
+	default:
+		modes = []bool{true, false}
+	}
+	for _, with := range modes {
+		res, err := svc.Preview(context.Background(), *id, with)
+		must("preview", err)
+		b, _ := json.MarshalIndent(map[string]any{
+			"video": res.Title, "source": res.Source, "publishedAt": res.PublishedAt,
+			"priorBlock": res.WithPrior, "priorVideo": res.PriorTitle, "costUsd": res.CostUSD, "inputTokens": res.InputTokens,
+			"proposedRegime": res.Extraction.ProposedRegime, "confidence": res.Extraction.ProposedConfidence,
+			"evidenceQuote": res.Extraction.ProposedQuote, "evidenceTs": res.Extraction.ProposedQuoteTs, "proposalRejected": res.Extraction.ProposalRejected,
+			"regimeNarrative": res.Extraction.RegimeNarrative, "catalysts": res.Extraction.CatalystsClean,
+			"crossAssetTilt": res.Extraction.Tilt, "crossAssetQuote": res.Extraction.TiltQuote,
+			"accumulationStance": res.Extraction.AccumStance, "accumulationQuote": res.Extraction.AccumQuote,
+			"modelFtRegime": rawField(res.Raw, "ft_regime"),
+			"executiveSummary": res.Extraction.ExecutiveSummary, "themes": res.Extraction.Themes, "themeChanges": res.Extraction.ThemeChanges,
+		}, "", "  ")
+		fmt.Printf("===== prior block: %v =====\n%s\n", with, b)
+	}
+}
+
+// rawField pulls one top-level key out of the model's raw JSON, for showing what the model said
+// before FT's sanitising dropped or kept it.
+func rawField(raw, key string) any {
+	i, j := strings.Index(raw, "{"), strings.LastIndex(raw, "}")
+	if i < 0 || j <= i {
+		return nil
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(raw[i:j+1]), &m) != nil {
+		return nil
+	}
+	return m[key]
+}
+
 func runVideoDigestReground() {
 	cfg, err := config.Load()
 	must("load config", err)
