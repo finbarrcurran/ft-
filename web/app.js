@@ -10044,6 +10044,7 @@ async function renderSignals() {
   const rows = payload.signals || [];
   const counts = payload.counts || { info: 0, flag: 0, alarm: 0 };
   state.signalsAlarmCount = counts.alarm || 0;
+  state.signalsCongressFeed = payload.congressFeed || null; // SC-52 P5
 
   // SC-24 — named-individual watchlist (best-effort; panel hidden on error).
   let tracked = [];
@@ -10191,6 +10192,11 @@ async function renderSignals() {
     const body = sectionRows.length === 0
       ? `<tr><td colspan="9"><div class="empty"><div class="dim">No ${cfg.type.replace('_', ' ')} signals in window. Try widening Range or hit ⟳ Refresh all.</div></div></td></tr>`
       : sectionRows.map(buildRowHTML).join('');
+    let feedLine = '';
+    if (cfg.type === 'congress' && state.signalsCongressFeed && state.signalsCongressFeed.lastSyncAt) {
+      const cf = state.signalsCongressFeed;
+      feedLine = `<div class="dim" style="font-size:0.78rem;margin:0.1rem 0 0.4rem" title="Bargo is the only live Congress source; the Capitol Trades rows (${cf.legacyRows}) are history kept for reference">Bargo feed synced ${escapeHTML(cf.lastSyncAt.slice(0, 16).replace('T', ' '))} UTC${cf.lastStatus && cf.lastStatus !== 'ok' ? ` (latest run: ${escapeHTML(cf.lastStatus)})` : ''} · newest disclosure ${escapeHTML(cf.newestFiled || '—')} · newest trade ${escapeHTML(cf.newestTrade || '—')} · ${cf.houseMembers} House / ${cf.senateMembers} Senate members</div>`;
+    }
     const caveatBanner = cfg.caveat
       ? `<div class="caveat-278t" title="Mandatory disclosure caveat">⚠️ ${escapeHTML(cfg.caveat)}</div>`
       : '';
@@ -10199,7 +10205,7 @@ async function renderSignals() {
         <h3 class="signal-section-h">
           ${cfg.label} <span class="dim" style="font-size:0.85rem;font-weight:normal">${count} row${count === 1 ? '' : 's'}</span>
         </h3>
-        ${caveatBanner}
+        ${caveatBanner}${feedLine}
         <div class="tablewrap">
           <table class="holdings signals-table">
             <thead>

@@ -36,10 +36,12 @@ func (s *Server) handleListSignals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	counts, _ := s.signals.Counts(r.Context(), rangeDays)
+	feed, _ := s.signals.CongressFeedStatus(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"signals":   rows,
-		"counts":    counts,
-		"rangeDays": rangeDays,
+		"signals":      rows,
+		"counts":       counts,
+		"rangeDays":    rangeDays,
+		"congressFeed": feed, // SC-52 P5: Bargo freshness, shown under the Congress section
 	})
 }
 
