@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.89.0 · 2026-10-19** — latest change: Capital flows from statements (SC-52 P4) (§13).
+> **Current version: v1.90.0 · 2026-10-19** — latest change: Bargo replaces Capitol Trades (SC-52 P5) (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.89.0 2026-10-19 -->
+<!-- reference_reviewed: v1.90.0 2026-10-19 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -159,7 +159,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | DB backup (cron, user `ft`) | 03:15 daily | `/opt/ft/bin/backup-db.sh` |
 | Jarvis config backup (cron) | Sun 03:30 | `/opt/ft/bin/backup-jarvis-config.sh` |
 | Whole-box backup (cron) | 03:30 daily | `jarvis_backup.sh` — restic to Backblaze B2 |
-| Capitol-trades fetch (cron) | **retired 2026-10-11** | Replaced by Bargo (SC-47). The `/etc/cron.d/ft-capitol-trades` entry was removed; `trades.json` (last written 2026-08-14) is kept only as history and was imported into `congress_trades_raw` |
+| Capitol-trades fetch (cron) | **retired; actually removed 2026-10-19** | Replaced by Bargo (SC-47, Fin's decision 2026-10-19). The 2026-10-11 entry here said the cron was removed, but `/etc/cron.d/ft-capitol-trades` was still installed and ran (and failed) every night at 23:05 UTC until it was deleted on 2026-10-19; the repo's `ft-capitol-trades.cron` is gone too. The script `capitol-trades-fetch.js` is kept until Fin says delete; `trades.json` (last written 2026-08-14) is history only, imported into `congress_trades_raw` (285 rows, 2024-08-20 to 2026-08-05) |
 | Farside ETF-flow fetch (cron, user `curran`) | 00:25 daily | Playwright scraper → `/var/lib/ft/data/farside/etf-flow.json` (the Crypto Indicators ETF-flow chart reads it; the card falls back to a live fetch when it is older than 36 h). **Working again since 2026-10-11.** Logs to `~curran/logs/ft-farside-fetch.log`. Scripts, cron entries and installer in `ops/scrapers/` |
 | FT Telegram bot | see §6 | Proactive alert crons |
 
@@ -224,7 +224,7 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 
 **Crypto Theses (9l):** adapters — `GET /api/crypto/adapters{,/{slug}{,/versions{,/{ver}}}}` **T**, `PUT /api/crypto/adapters/{slug}{,/status}`, `POST /api/crypto/adapters/preview`. Theses — `GET /api/crypto/theses` **T**, `GET /api/crypto/theses/drafts`, `POST /api/crypto/theses`, and per `{symbol}/{version}`: `GET` **T**, `PUT`, `DELETE`, `POST .../{lock,fork,acknowledge-cascade}`, `GET .../events` **T**. Allocation — `GET` **T** / `PUT /api/crypto/allocation`.
 
-**Signals (9k, SC-23, SC-24):** `GET /api/signals`, `POST /api/signals/{id}/ack`, `POST /api/signals/refresh-{insiders,congress,eo,committees,13f,278t-eo-link}`, `POST /api/signals/upload-{oge,278t}`, `GET /api/signals/universe`, `GET/POST /api/signals/tracked-individuals`, `GET/POST /api/signals/tracked-funds`, `POST /api/signals/tracked-funds/remove`, `GET /api/signals/fund-13f-diffs`
+**Signals (9k, SC-23, SC-24):** `GET /api/signals` (also returns `congressFeed`: Bargo's last good sync, newest disclosure and trade date, member counts per chamber; the Signals tab shows it under the Congress section — SC-52 P5), `POST /api/signals/{id}/ack`, `POST /api/signals/refresh-{insiders,congress,eo,committees,13f,278t-eo-link}`, `POST /api/signals/upload-{oge,278t}`, `GET /api/signals/universe`, `GET/POST /api/signals/tracked-individuals`, `GET/POST /api/signals/tracked-funds`, `POST /api/signals/tracked-funds/remove`, `GET /api/signals/fund-13f-diffs`
 
 **AI Nexus (SC-36, SC-39):** `POST /api/nexus/upload`, `GET /api/nexus/{universe,technical,exhaustion,fundamentals,entry-candidates}`
 
@@ -383,13 +383,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.90.0 · 2026-10-19 · pass 95 · SC-52
+
+**Bargo replaces Capitol Trades (SC-52 P5).** The Capitol Trades cron, wrongly recorded as removed on 2026-10-11, was still running and failing nightly; it is now deleted. The Signals tab shows Bargo's freshness under the Congress section. Parity measured and reported: Bargo has no party field and history only from 2026-07-13. Behaviour: Signals tab line. Migrations: none. Reference updated: §4, §5. Supersedes v1.89.0.
+
 ### v1.89.0 · 2026-10-19 · pass 94 · SC-52
 
 **Capital flows from statements (SC-52 P4).** Deposits, withdrawals and transfers to/from eToro Money are read from the statements' Account Activity, stored once each and reconciled to the Account Summary (93 rows, 2025-08-31 → 2026-06-01; none since). Shown on the Performance tab and quoted in the weekly snapshot's value notes; a manual entry endpoint is the fallback. Behaviour: import, display. Migrations: 0058. Reference updated: §3, §5, §11. Supersedes v1.88.0.
 
+
 ### v1.88.0 · 2026-10-19 · pass 93 · SC-52
 
 **Transcript store and search (SC-52 P2).** Every stored video's full captions are kept in the database with a full-text index and can be searched by word or phrase (endpoint, CLI and a read-only connector tool), returning video, date, snippet and a timestamped link. Free of LLM spend; covered by the DB backup. Behaviour: yes. Migrations: 0057. Reference updated: §3, §5, §11, §12. Supersedes v1.87.0.
+
 
 
 ### v1.87.0 · 2026-10-19 · pass 92 · SC-52
@@ -398,9 +404,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.86.1 · 2026-10-13 · pass 91 · SC-46
 
 **Snapshot v2.** Regimes show set date, age and stale flag, and unset/unclassified is never a change; stale regimes appear under Data health; value changes carry holdings-change notes from the audit log (capital flows stated as not recorded); a Watchlist line lists entry-zone tickers without a thesis. Behaviour: yes. Migrations: none. Reference updated: §4. Supersedes v1.86.0.
+
 
 
 
@@ -413,9 +421,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.85.0 · 2026-10-13 · pass 89 · SC-49b
 
 **Data-date freshness for FRED and stablecoin indicators.** The US 2-year yield, dollar index, CFNAI and stablecoin-supply cards now show the date of their data with an amber/red badge by a per-series rule (2Y 5/8 trading days, DXY 14/21 days, CFNAI 95/120 days, stablecoin 3/5 days), and the monitor alerts at amber naming fetch failure versus source not updated. Behaviour: yes. Migrations: none. Reference updated: §4, §8. Supersedes v1.84.1.
+
 
 
 
@@ -432,9 +442,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.84.0 · 2026-10-13 · pass 87 · SC-51
 
 **Trade statistics and statement coverage.** The Performance tab gains a USD trade-statistics panel (scope, year, win rate, payoff, profit factor, expectancy, median hold, by asset and year; small samples greyed) read from the stored closed positions, and tracks how far the imported statements reach: a 'data through' label, the next start date, a confirmed-gap warning on upload and a monitor alert after 35 days. Migration 0054 adds open date and invested amount. Behaviour: yes. Migrations: 0054. Reference updated: §2, §3, §4, §5. Supersedes v1.83.2.
+
 
 
 
@@ -455,21 +467,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.83.1 · 2026-10-13 · pass 85 · SC-50
-
-**eToro statements re-imported.** The performance rows were repaired by re-importing four statements through the new merge (backup first); 2026 now covers 2026-01-01 to 2026-10-09, and USD closed-position P&L and dividends match eToro's own 5-30→10-11 summary to the cent. New CLI `ft etoro-import [--dry-run]`. Behaviour: yes. Migrations: none. Reference updated: §11. Supersedes v1.83.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.89.0 -->
+<!-- END FT-master-spec v1.90.0 -->
