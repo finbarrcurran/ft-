@@ -105,6 +105,16 @@ const check = (n, ok, x) => { if (!ok) failures++; console.log(`${ok ? 'PASS' : 
   t = await cardText(page);
   check('stale with no proposal: says so, offers manual set, no approve button', t.includes('Jordi regime is stale') && t.includes('no usable proposal') && !(await page.$('#rp-approve')) && (await page.$$('.rp-set')).length === 3, t);
 
+  // 3b. A split vote shows "2 OF 3 RUNS" next to the (low) confidence.
+  scenario = { proposal: { show: true, reason: 'new_proposal', current: { state: 'stable', setAt: '2026-07-03T20:15:53Z', ageDays: 116, stale: true, source: 'manual' },
+    proposal: PROPOSAL({ confidence: 'low', runs: 3, agree: 2 }), consequence: CONSEQUENCES.shifting, consequences: CONSEQUENCES } };
+  page = await fresh(); await page.goto(base + '/'); await page.waitForSelector('#rp-overlay');
+  t = await cardText(page);
+  check('a split vote shows 2 OF 3 RUNS and the low confidence', t.includes('2 OF 3 RUNS') && t.includes('CONFIDENCE LOW'), t);
+  scenario.proposal.proposal = PROPOSAL({ runs: 3, agree: 3 });
+  page = await fresh(); await page.goto(base + '/'); await page.waitForSelector('#rp-overlay');
+  check('a unanimous vote shows 3 OF 3 RUNS', (await cardText(page)).includes('3 OF 3 RUNS'));
+
   // 4. Nothing to show.
   scenario = { proposal: { show: false, reason: 'none' } };
   page = await fresh(); await page.goto(base + '/'); await page.waitForTimeout(1200);
