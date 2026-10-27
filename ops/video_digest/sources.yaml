@@ -1,0 +1,55 @@
+# SC-43 Video Digest P0 — source + pipeline config.
+# Handover: FT_Build_Handover_Video_Digest_P0_2026-09-21.md (v1.1; §13 supersedes §3/§5/§6/§8/§11).
+# Channels are pinned by ID (A1): handles change, IDs don't.
+
+package_root: /var/lib/video_digest
+pipeline_version: "0.2.1"   # 0.2: en-orig captions, per-source frame overrides; 0.2.1: phash in frame_params
+lookback_days: 7            # weekly mode window when --since is not given
+whisper_model: small        # fallback only; both channels normally have captions (A6)
+
+frames:
+  video_format: "bv*[height<=720][vcodec^=avc1]/bv*[height<=720]/b[height<=720]"
+  scene_threshold: 0.30     # ffmpeg select='gt(scene,T)' — tune in P0
+  scene_sample_fps: 2       # scene detection runs on a 2 fps / 320px proxy (speed)
+  cue_offset_sec: 2         # frame at cue start + N s
+  min_gap_sec: 20
+  phash_max_distance: 6     # pHash Hamming distance at/below which frames are near-dupes
+  max_frames: 30
+  jpeg_quality: 85
+  cue_phrases:
+    - "as you can see"
+    - "this chart"
+    - "on the screen"
+    - "if we look at"
+    - "take a look at"
+    - "you can see here"
+    - "the risk metric"
+    - "log regression"
+
+sources:
+  jordi:
+    name: Jordi Visser
+    channel_id: UCSLOw8JrFTBb3qF-p4v0v_w      # @JordiVisserLabs — content-confirmed 2026-09-25
+    display_handle: "@JordiVisserLabs"
+    cadence: weekly
+    max_videos_per_week: 3
+    select: all_new
+    frame_priority: [chart, table, own_calculation]
+    frames:
+      extra_cue_phrases: ["look at", "chart"]   # Jordi never says the default phrases (P0 finding)
+
+  cowen:
+    name: Benjamin Cowen
+    channel_id: UCRvqjQPSeaWn-uEx-w0XOIg      # @benjaminjcowen / Into the Cryptoverse
+    display_handle: "@benjaminjcowen"
+    cadence: weekly_multi
+    max_videos_per_week: 5
+    select: flag_flagship
+    flagship:
+      weekday: sunday
+      timezone: America/New_York   # "channel local date" — assumption, config knob
+      fallback: longest            # no Sunday upload in the week -> longest video
+    frame_priority: [chart, log_band, risk_metric, dominance]
+    frames:
+      scene_threshold: 0.10   # gradual chart changes: 0.30 found 0, 0.10 found 33 (~60% charts) on iWBLplyqhl4
+      phash_max_distance: 4   # dark TradingView charts hash alike; 6 dropped 9/16 real charts (AC4, approved)

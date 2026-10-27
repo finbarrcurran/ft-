@@ -95,6 +95,8 @@ func main() {
 		runSnapshot(os.Args[2:])
 	case "etoro-import":
 		runEtoroImport(os.Args[2:])
+	case "video-digest-extract":
+		runVideoDigestExtract(os.Args[2:])
 	case "regime-history":
 		runRegimeHistory(os.Args[2:])
 	case "transcripts":
@@ -1267,6 +1269,71 @@ func runVideoDigestPreview(args []string) {
 
 // rawField pulls one top-level key out of the model's raw JSON, for showing what the model said
 // before FT's sanitising dropped or kept it.
+// runVideoDigestExtract: SC-52 P3. Digests stored packages that have no digest yet, with a hard
+// spend ceiling. --daily-cap lifts llm_budget_daily_usd for the run and ALWAYS puts the previous
+// value back when the run ends (also on Ctrl-C or SIGTERM); the monthly cap is never touched.
+func runVideoDigestExtract(args []string) {
+	fs := flag.NewFlagSet("video-digest-extract", flag.ExitOnError)
+	src := fs.String("source", "", "jordi | cowen")
+	flagship := fs.Bool("flagship-only", false, "Cowen: only the weekly flagship video")
+	newest := fs.Bool("newest-first", false, "newest first (default oldest first)")
+	from := fs.String("from", "", "published on/after YYYY-MM-DD")
+	to := fs.String("to", "", "published on/before YYYY-MM-DD")
+	maxV := fs.Int("max-videos", 0, "stop after this many videos (0 = no limit)")
+	maxCost := fs.Float64("max-cost", 3.40, "spend ceiling for this run in USD")
+	dailyCap := fs.Float64("daily-cap", 0, "lift the daily LLM cap to this for the run (0 = leave it)")
+	dry := fs.Bool("dry-run", false, "list what would be digested and exit")
+	_ = fs.Parse(args)
+	if *src != "jordi" && *src != "cowen" {
+		fmt.Fprintln(os.Stderr, "usage: ft video-digest-extract --source jordi|cowen [--flagship-only] [--newest-first] [--from D] [--to D] [--max-videos N] [--max-cost USD] [--daily-cap USD] [--dry-run]")
+		os.Exit(2)
+	}
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	svc := videodigest.New(st.DB, llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY")), os.Getenv("FT_VIDEO_DIGEST_ROOT"))
+	opt := videodigest.ExtractOptions{Source: *src, FlagshipOnly: *flagship, NewestFirst: *newest, From: *from, To: *to, MaxVideos: *maxV, MaxCostUSD: *maxCost}
+	if *dry {
+		todo, err := svc.Eligible(ctx, opt)
+		must("eligible", err)
+		fmt.Printf("%d package(s) would be digested\n", len(todo))
+		return
+	}
+	if *dailyCap > 0 {
+		prev, _ := st.GetPreference(context.Background(), "llm_budget_daily_usd")
+		must("lift daily cap", st.SetPreference(context.Background(), "llm_budget_daily_usd", fmt.Sprintf("%.2f", *dailyCap)))
+		fmt.Printf("daily cap lifted to $%.2f (was %s); it is restored when this run ends\n", *dailyCap, prev)
+		defer func() {
+			if prev == "" {
+				prev = "0.50"
+			}
+			if err := st.SetPreference(context.Background(), "llm_budget_daily_usd", prev); err != nil {
+				fmt.Fprintln(os.Stderr, "WARNING: could not restore the daily cap:", err)
+				return
+			}
+			fmt.Printf("daily cap restored to $%s\n", prev)
+		}()
+	}
+	run, err := svc.Extract(ctx, opt, func(r videodigest.Result, spent float64) {
+		fmt.Printf("%s %-5s %s -> %s cost=$%.4f cumulative=$%.4f %s\n", r.PublishedAt, r.Source, r.VideoID, r.Status, r.CostUSD, spent, r.Error)
+	})
+	must("extract", err)
+	ok, failed := 0, 0
+	for _, r := range run.Results {
+		if r.Status == "ingested" {
+			ok++
+		} else {
+			failed++
+		}
+	}
+	fmt.Printf("DONE: %d digested, %d failed, spent $%.4f of $%.2f ceiling, %d eligible left, stopped by: %q\n", ok, failed, run.SpentUSD, *maxCost, run.Remaining, run.StoppedBy)
+}
+
 // runRegimeHistory: SC-52 P6. `ft regime-history list [--framework jordi|cowen] [--from D] [--to D]`
 // shows rows with their ids and the seed flag; `flag --ids 1,2,3 [--clear]` sets or clears the flag
 // that keeps a row out of the weekly snapshot's seeded history. Rows are never deleted.
