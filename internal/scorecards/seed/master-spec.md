@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.91.0 · 2026-10-19** — latest change: Housekeeping (SC-52 P6) (§13).
+> **Current version: v1.92.0 · 2026-10-27** — latest change: Revised regime prompt (P0.1), entity fix, and the login regime card (P1) (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.91.0 2026-10-19 -->
+<!-- reference_reviewed: v1.92.0 2026-10-27 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -230,7 +230,8 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 **AI Nexus (SC-36, SC-39):** `POST /api/nexus/upload`, `GET /api/nexus/{universe,technical,exhaustion,fundamentals,entry-candidates}`
 
 **Video Digest (SC-43):** `GET /api/video-digest?source=`, `POST /api/video-digest/ingest`; **transcript search (SC-52 P2):** `GET /api/transcripts/search?q=&source=&from=&to=&limit=` (a word, several words that must all occur, or a "quoted phrase"; returns video, date, a highlighted snippet and a `youtu.be/…?t=` link; query text is never passed to FTS5 as an expression) and the read-only connector tool `search_transcripts`
-  **Extraction v2 (SC-52 P0, v1.87.0):** the prompt carries FT's own regime definitions (Stable / Shifting / Defensive / Unclassified, with the boundaries ai set: Stable = constructive and names no near-term risk event; Shifting = flags elevated uncertainty or named event risk but does not expect a material equity drawdown; Defensive = explicitly expects a material drawdown or advises cutting risk; Unclassified = no regime content) and says a speaker's "regime shift" is NOT FT "Shifting"; mixed evidence picks the more cautious state with confidence low. The model gets the transcript and the definitions only (no current regime, no scores). It returns `regime_narrative`, `catalysts`, `ft_regime` {state, confidence, evidence_quote}, `cross_asset_tilt` and `accumulation_stance` (context only, not regime states). A state is kept only if it is one of the four and its evidence quote is grounded in the transcript: verbatim as the model wrote it (`exact`; fragments joined by an ellipsis must each be verbatim), or else snapped to the transcript passage it overlaps most (`nearest`: the stored text is real transcript text by construction; at least half of the quote's content words must fall inside one 35-word window); otherwise the state is dropped. Stored for both sources, **never shown or applied** (D6, D7); the API shape is unchanged and legacy `suggested_regime` stays hidden. `ft regime-history [list|flag]   SC-52 P6: list regime history with ids and the seed flag / flag (or --clear) rows so they never seed the weekly snapshot; rows are never deleted
+  **Extraction v3 (SC-52 P0 + P0.1, v1.92.0):** the prompt carries FT's own regime definitions, written around the POSTURE the speaker recommends to his audience for adding or holding equity risk, not around what he names: Stable = holding and/or adding equity risk (risks, volatility or upcoming events may be mentioned); Shifting = caution about ADDING (wait for stability or a pullback, be selective, hedge or hold more cash) without expecting a broad material drawdown; Defensive = materially cutting equity risk, or explicitly expecting a broad material drawdown; Unclassified = no posture on equity risk. Naming catalysts, events, dates or volatility does NOT by itself make a view Shifting (before P0.1 it did, and all 8 Jordi digests came out Shifting), his crypto views go to `cross_asset_tilt`, and a speaker's "regime shift" is NOT FT "Shifting"; genuinely mixed evidence takes the more cautious state with confidence low. The accumulation stance has definitions too (accumulating / waiting / holding / reducing / unstated). The model gets the transcript and the definitions only (no current regime, no scores). It returns `regime_narrative`, `catalysts`, `ft_regime` {state, confidence, evidence_quote}, `cross_asset_tilt` and `accumulation_stance`. A state is kept only if it is one of the four and its evidence quote is grounded in the transcript: verbatim (`exact`; ellipsis fragments must each be verbatim) or snapped to the transcript passage it overlaps most (`nearest`, labelled "closest passage", never shown as proof of the state); otherwise dropped. Captions are HTML-unescaped before use (`&amp;` no longer reaches the model, the stored transcripts or the search snippets). Stored for both sources; `extraction_version` 3 marks the revised prompt. Never auto-applied (D6, D7). `ft video-digest-preview --video-id ID [--prior with|without|both]` runs an extraction without storing it.
+  **Login regime proposal (SC-52 P1, v1.92.0, Jordi only):** `GET /api/regime/proposal` returns whether to show a card and what it holds; `POST /api/regime/proposal/{approve,set,dismiss}`. The card shows when the newest Jordi digest (extraction v3) has a proposed state that Fin has not approved, set, dismissed or superseded (a manual regime set after the digest was ingested supersedes it), or when the Jordi regime is past the 14-day stale flag and the newest digest has not been handled. It shows the 2-3 line narrative, the proposed state with the confidence prominently, the evidence passage (labelled "closest passage" when snapped) with the video title, date and a timestamped link, the current state with its set date and age, FT's own macro suggestion (Spec 9p) beside it (a disagreement is stated, neither is preferred), a consequence preview computed at read time from the live alert logic (effective regime, alert margin, entry-zone alerts on/off and the watchlist tickers in the entry zone whose alert would switch), the stance and tilt as context only, and the named catalysts. Buttons: Approve the proposed state (the server applies the digest's own state; the client cannot name another), Set a different state (stable / shifting / defensive, each with its consequence on hover), Dismiss until the next video (snooze), or the corner x (decide later: hidden for the session). An approval or a different set writes through the manual regime path: preferences `regime_jordi*` with source `video-suggestion` and a `regime_history` row (source `manual`, because the table is CHECKed to manual|auto_cowen_form) whose note and `inputs_json` name the digest, video, quote, match type, confidence and the prior state. No LLM call at login; nothing is applied automatically; no Cowen card (Cowen stays manual); hidden in demo mode.
 ft transcripts [sync|search|stats]   SC-52 P2: store every on-disk package transcript (free, idempotent) / full-text search / corpus size
 ft video-digest-preview --video-id ID [--prior with|without|both]` runs an extraction without storing it.
 
@@ -365,6 +366,7 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 | P5 — FT snapshot report | Weekly snapshot persisted in the DB with deltas and 4-week trends, rendered to `FT-Bridge/reports/ft-snapshot.md` | **Built (SC-46, v1.86.0).** Phase 2 (P5b: read-only connector tools `get_snapshot` / `get_trends`) is a proposal only, awaiting Fin |
 | SC-43 P2 | OCR of Cowen chart frames to fill the snapshot columns left NULL in P1 (200WMA, log band, dominance, ETH/BTC) | Not built |
 | SC-52 P2 transcripts | Full transcripts stored and searchable | **Built (v1.88.0).** Every complete package is stored by the daily sweep (and by `ft transcripts sync`), digested or not; ~1 MB for the 33 stored so far, an estimated 8-10 MB for the full backfill. FTS5 works in the Go driver (tested). Not yet in the P3 backfill: fetching transcripts for videos with no package |
+| SC-52 P1 login regime card | Jordi regime proposal on login | **Built (v1.92.0).** Cowen has no card (manual). |
 | SC-43 P3 / P4 | Regime read surfaced in the UI; digest query tool | Not built — `suggested_regime` / `regime_read` are stored but not exposed. **SC-52 (2026-10-19) re-plans this:** P0 extraction v2 (built, v1.87.0), P1 login regime proposal for Jordi (held for ai's review of P0), P2 transcript store + search, P3 backfill, P4 capital flows from statements, P5 Bargo replaces Capitol Trades, P6 housekeeping |
 | SC-04 batch automation | Thesis updates at scale | Parked pending Fin's decisions on model / scope / sourcing |
 | Cron scrapers (Farside) | Restore on the Lenovo, or replace | **Farside: fixed 2026-10-11** — the post-migration breakage had three independent causes: (1) cron logs pointed at `/var/log` (now `~curran/logs`); (2) `curran` could not reach/write `/var/lib/ft/data/{farside,capitol-trades}` (`curran` joined group `ft`, dirs `curran:ft` 2775 — `/var/lib/ft` itself stays 750 and `ft.db` is mode 644, so it is not opened to everyone); (3) Playwright and Chromium were not installed (`node_modules` and `~/.cache` are outside the backups; installed 2026-10-11, v1.60). All captured in `ops/scrapers/install.sh`; a logrotate rule keeps 8 weekly logs. **Capitol Trades: replaced by Bargo (SC-47, 2026-10-11)** — the cron was removed. Farside: the ETF-flow **card** stays live regardless (FT ignores a cache file older than 36 h and fetches directly), but the **chart** reads the cache file with no freshness check, so a stale file shows silently |
@@ -385,13 +387,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.92.0 · 2026-10-27 · pass 97 · SC-52
+
+**Revised regime prompt (P0.1), entity fix, and the login regime card (P1).** States are now defined by the posture Jordi recommends for adding or holding equity risk, not by named catalysts (Jordi was Shifting 8 of 8; now Stable 6, Shifting 2, one dropped); caption HTML entities are unescaped. A Jordi-only card on login shows the narrative, proposed state and confidence, evidence passage, FT's macro suggestion beside it and a consequence preview, with Approve / Set differently / Dismiss; nothing is applied automatically. Behaviour: yes. Migrations: none. Reference updated: §5, §12. Supersedes v1.91.0.
+
 ### v1.91.0 · 2026-10-19 · pass 96 · SC-52
 
 **Housekeeping (SC-52 P6).** Regime-history rows can be flagged so they never seed the weekly snapshot (nothing deleted); the May-16 smoke-test rows are flagged, the June flips wait for Fin. NewsAPI becomes an explicit-only disabled fallback and its 2026-10-27 removal is cancelled. Behaviour: snapshot seeding, news default. Migrations: 0059. Reference updated: §3, §8, §11. Supersedes v1.90.0.
 
+
 ### v1.90.0 · 2026-10-19 · pass 95 · SC-52
 
 **Bargo replaces Capitol Trades (SC-52 P5).** The Capitol Trades cron, wrongly recorded as removed on 2026-10-11, was still running and failing nightly; it is now deleted. The Signals tab shows Bargo's freshness under the Congress section. Parity measured and reported: Bargo has no party field and history only from 2026-07-13. Behaviour: Signals tab line. Migrations: none. Reference updated: §4, §5. Supersedes v1.89.0.
+
 
 
 ### v1.89.0 · 2026-10-19 · pass 94 · SC-52
@@ -400,9 +408,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.88.0 · 2026-10-19 · pass 93 · SC-52
 
 **Transcript store and search (SC-52 P2).** Every stored video's full captions are kept in the database with a full-text index and can be searched by word or phrase (endpoint, CLI and a read-only connector tool), returning video, date, snippet and a timestamped link. Free of LLM spend; covered by the DB backup. Behaviour: yes. Migrations: 0057. Reference updated: §3, §5, §11, §12. Supersedes v1.87.0.
+
 
 
 
@@ -415,9 +425,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.86.1 · 2026-10-13 · pass 91 · SC-46
 
 **Snapshot v2.** Regimes show set date, age and stale flag, and unset/unclassified is never a change; stale regimes appear under Data health; value changes carry holdings-change notes from the audit log (capital flows stated as not recorded); a Watchlist line lists entry-zone tickers without a thesis. Behaviour: yes. Migrations: none. Reference updated: §4. Supersedes v1.86.0.
+
 
 
 
@@ -434,9 +446,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.85.0 · 2026-10-13 · pass 89 · SC-49b
 
 **Data-date freshness for FRED and stablecoin indicators.** The US 2-year yield, dollar index, CFNAI and stablecoin-supply cards now show the date of their data with an amber/red badge by a per-series rule (2Y 5/8 trading days, DXY 14/21 days, CFNAI 95/120 days, stablecoin 3/5 days), and the monitor alerts at amber naming fetch failure versus source not updated. Behaviour: yes. Migrations: none. Reference updated: §4, §8. Supersedes v1.84.1.
+
 
 
 
@@ -457,21 +471,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.84.0 · 2026-10-13 · pass 87 · SC-51
-
-**Trade statistics and statement coverage.** The Performance tab gains a USD trade-statistics panel (scope, year, win rate, payoff, profit factor, expectancy, median hold, by asset and year; small samples greyed) read from the stored closed positions, and tracks how far the imported statements reach: a 'data through' label, the next start date, a confirmed-gap warning on upload and a monitor alert after 35 days. Migration 0054 adds open date and invested amount. Behaviour: yes. Migrations: 0054. Reference updated: §2, §3, §4, §5. Supersedes v1.83.2.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.91.0 -->
+<!-- END FT-master-spec v1.92.0 -->

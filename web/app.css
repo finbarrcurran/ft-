@@ -5715,3 +5715,15 @@ a.score-badge { display: inline-block; }
 /* SC-51 Part B — statement coverage */
 .cov-label { font-size: 0.82rem; margin: 0.2rem 0 0.6rem; }
 .cov-chip { margin-left: 0.5rem; padding: 0.1rem 0.45rem; border-radius: 999px; background: rgba(217,164,65,0.18); color: #d9a441; font-size: 0.75rem; }
+
+/* SC-52 P1 — login regime proposal card */
+.rp-card { max-width: 720px; }
+.rp-chip { display: inline-block; border: 1px solid; border-radius: 999px; padding: 0.05rem 0.5rem; font-weight: 700; letter-spacing: 0.04em; font-size: 0.8rem; }
+.rp-conf { display: inline-block; border: 1px solid; border-radius: 4px; padding: 0.15rem 0.5rem; font-weight: 700; font-size: 0.95rem; letter-spacing: 0.05em; }
+.rp-proposal { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin: 0.7rem 0 0.4rem; }
+.rp-quote { margin: 0.4rem 0; padding: 0.4rem 0.8rem; border-left: 3px solid #3a4252; font-size: 0.9rem; }
+.rp-narr { font-size: 0.92rem; margin: 0.6rem 0; }
+.rp-conseq, .rp-macro, .rp-ctx, .rp-current, .rp-set-row { font-size: 0.85rem; margin: 0.55rem 0; }
+.rp-disagree { color: #ffb800; font-weight: 600; }
+.rp-stale { color: #ff5c5c; font-weight: 600; }
+.rp-set-row button { margin: 0 0.25rem; text-transform: capitalize; }
