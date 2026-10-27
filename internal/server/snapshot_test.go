@@ -269,7 +269,7 @@ func TestSnapshotRegimeFreshnessAndHealth(t *testing.T) {
 		t.Fatal("must not claim everything is ok")
 	}
 	// A fresh, set regime shows no stale marker and no health line.
-	setRegime(t, st, "jordi", "stable", now.AddDate(0, 0, -3))
+	setRegime(t, st, "jordi", "stable", time.Now().AddDate(0, 0, -3)) // the stale flag uses the real clock
 	res2, _ := s.RunWeeklySnapshot(context.Background(), now, SnapshotOptions{DryRun: true})
 	if strings.Contains(res2.Markdown, "Jordi regime:") || strings.Contains(res2.Markdown, "Regime (Jordi): stable — set 2026-10-10 (3 days ago, manual) — STALE") {
 		t.Fatalf("fresh regime flagged stale:\n%s", res2.Markdown)

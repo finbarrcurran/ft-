@@ -308,8 +308,10 @@ func TestPromptCarriesFTRegimeDefinitions(t *testing.T) {
 	for _, src := range []string{"jordi", "cowen"} {
 		p := systemPrompt(src)
 		for _, want := range []string{"Stable:", "Shifting:", "Defensive:", "Unclassified:", "x0.6", "entry-zone alerts off",
-			"names no near-term risk event", "dated catalysts", "does NOT expect a material equity drawdown",
-			"explicitly expects or warns of a material drawdown, or advises cutting risk", "no regime content at all", "more cautious of the two best-fitting states",
+			"POSTURE he recommends", "holding and/or adding equity risk", "caution about ADDING equity risk",
+			"does NOT by itself make a view Shifting", "a bullish view that lists risks is still Stable", "recommends materially cutting equity risk",
+			"gives no posture on equity risk at all", "more cautious of the two", "record them in cross_asset_tilt",
+			"accumulating:", "waiting:", "holding:", "reducing:", "unstated:",
 			`NOT FT "Shifting"`, "evidence_quote", "regime_narrative", "catalysts", "cross_asset_tilt", "accumulation_stance"} {
 			if !strings.Contains(p, want) {
 				t.Errorf("%s prompt missing %q", src, want)
@@ -436,4 +438,26 @@ func TestSnapQuoteToNearestTranscriptPassage(t *testing.T) {
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// SC-52 fix: captions carry HTML entities; the compact transcript (and so the stored transcript,
+// the search snippets and the model input) must not.
+func TestCompactTranscriptUnescapesEntities(t *testing.T) {
+	vtt := "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\nthe S&amp;P rallied &gt;&gt; Hedge funds don&#39;t sell&nbsp;quickly &lt;ok&gt;\n"
+	got := CompactTranscript(vtt)
+	for _, bad := range []string{"&amp;", "&gt;", "&#39;", "&nbsp;", "&lt;"} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("entity %s left in %q", bad, got)
+		}
+	}
+	if !strings.Contains(got, "S&P rallied >> Hedge funds don't sell quickly") {
+		t.Fatalf("unexpected text: %q", got)
+	}
+}
+
+func TestAccumulationStanceHasHolding(t *testing.T) {
+	ex, err := ParseExtraction(`{"accumulation_stance":{"stance":"holding"}}`, "[0s] hello there", "jordi")
+	if err != nil || ex.AccumStance == nil || *ex.AccumStance != "holding" {
+		t.Fatalf("%+v %v", ex.AccumStance, err)
+	}
 }

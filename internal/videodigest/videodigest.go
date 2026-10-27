@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"math"
 	"os"
@@ -41,8 +42,10 @@ const (
 	maxQuotes       = 2
 
 	// ExtractionVersion 2 = regime fields extracted against FT's definitions
-	// (migration 0056). Version 1 digests carry only the legacy suggested_regime.
-	ExtractionVersion = 2
+	// (migration 0056). Version 1 digests carry only the legacy suggested_regime. Version 3
+	// (SC-52 P0.1) defines the states by the posture he recommends for adding or holding equity
+	// risk, not by named catalysts, and defines the accumulation stance.
+	ExtractionVersion = 3
 )
 
 var (
@@ -205,8 +208,10 @@ func CompactTranscript(vtt string) string {
 			strings.HasPrefix(line, "Language:") || strings.HasPrefix(line, "NOTE") {
 			continue
 		}
+		// html.UnescapeString: YouTube captions carry HTML entities (&amp;, &gt;&gt;, &#39;) that
+		// otherwise reach the model, the stored transcript and the search snippets (SC-52 fix).
 		clean := strings.TrimSpace(bracketRe.ReplaceAllString(
-			strings.ReplaceAll(tagRe.ReplaceAllString(line, ""), "&nbsp;", " "), ""))
+			strings.ReplaceAll(html.UnescapeString(tagRe.ReplaceAllString(line, "")), "\u00a0", " "), ""))
 		if clean == "" || clean == last {
 			continue // auto-captions repeat the previous line in each rolling cue
 		}
@@ -243,19 +248,26 @@ const commonSchema = `{
                  "confidence": "high"|"medium"|"low"|null,
                  "evidence_quote": string|null — ONE contiguous passage copied exactly (word for word) from one place in the transcript, under 40 words, the passage that best supports the state; never join separate passages, never use "..." or paraphrase; required for Stable, Shifting and Defensive },
   "cross_asset_tilt": { "tilt": "equities"|"crypto"|"balanced"|"unstated", "quote": string|null — one contiguous passage copied exactly, under 40 words } — where he says he has more conviction, as stated,
-  "accumulation_stance": { "stance": "accumulating"|"waiting"|"reducing"|"unstated", "quote": string|null — one contiguous passage copied exactly, under 40 words }`
+  "accumulation_stance": { "stance": "accumulating"|"waiting"|"holding"|"reducing"|"unstated", "quote": string|null — one contiguous passage copied exactly, under 40 words }`
 
 // regimeDefinitions are FT's own regime states. The speaker's vocabulary is not FT's:
 // the model is given these and nothing else about regimes — no current regime, no prior
 // scores, no opinion (the no-steering rule).
 const regimeDefinitions = `
 
-FT regime definitions (classify his stated view into ONE of these, in FT's terms, not his):
-- Stable: he is constructive and names no near-term risk event. FT keeps its normal risk posture: normal alert margin, entry-zone alerts on.
-- Shifting: he flags elevated uncertainty or named event risk (dated catalysts) but does NOT expect a material equity drawdown. FT tightens its risk posture: alert margin x0.6, entry-zone alerts off.
-- Defensive: he explicitly expects or warns of a material drawdown, or advises cutting risk. Capital preservation first.
-- Unclassified: the video has no regime content at all (no read on the market or on risk).
-A speaker's phrase "regime shift" (a structural change in how markets work, e.g. a new monetary or technological regime) is NOT FT "Shifting". Judge the risk posture he recommends, not his vocabulary. If the evidence is mixed, choose the more cautious of the two best-fitting states and set confidence "low". Use "Unclassified" when there is no regime content; leave ft_regime.state null only if you cannot read the transcript.`
+FT regime definitions. Classify the POSTURE he recommends to his audience for adding or holding equity risk, in FT's terms, not his:
+- Stable: he recommends holding and/or adding equity risk. He may mention risks, volatility or upcoming events, but he does not tell people to hold back. FT keeps its normal posture: normal alert margin, entry-zone alerts on.
+- Shifting: he recommends caution about ADDING equity risk: wait for stability or a pullback first, be selective, hold what you have but do not add, hedge, or hold more cash; he does NOT expect a broad, material equity drawdown. FT tightens its posture: alert margin x0.6, entry-zone alerts off.
+- Defensive: he recommends materially cutting equity risk, or explicitly expects or warns of a broad, material equity drawdown. Capital preservation first.
+- Unclassified: he gives no posture on equity risk at all.
+Judge what he tells listeners to DO, not how many risks or dates he names. Naming catalysts, events, dates or volatility does NOT by itself make a view Shifting, and a bullish view that lists risks is still Stable. His crypto or other non-equity views are not the regime: record them in cross_asset_tilt. A speaker's phrase "regime shift" (a structural change in how markets work) is NOT FT "Shifting". If the evidence is genuinely mixed between two states, choose the more cautious of the two and set confidence "low". Use "Unclassified" when there is no posture; leave ft_regime.state null only if you cannot read the transcript.
+
+Accumulation stance (about the audience's equity and crypto buying, as he states it):
+- accumulating: he says he is buying or adding now, or tells people to add now.
+- waiting: he tells people to wait (for a pullback, stability, a data point or an event) before adding.
+- holding: he keeps positions and neither adds nor waits for a specific trigger.
+- reducing: he is trimming or tells people to trim.
+- unstated: he says nothing about buying or selling.`
 
 const jordiExtras = `,
   "theme_changes_vs_prior_week": [string]|null — how this video's themes differ from the PRIOR VIDEO CONTEXT supplied with the transcript (new, dropped, or changed emphasis); null if no prior context is supplied`
@@ -561,7 +573,7 @@ func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment, toks 
 		}
 	}
 	if a := r.Accumulation; a != nil {
-		ex.AccumStance = enum(a.Stance, "accumulating", "waiting", "reducing", "unstated")
+		ex.AccumStance = enum(a.Stance, "accumulating", "waiting", "holding", "reducing", "unstated")
 		if qt, _, _, ok := ground(a.Quote); ok {
 			ex.AccumQuote = &qt
 		}

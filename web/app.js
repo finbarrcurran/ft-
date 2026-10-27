@@ -728,6 +728,7 @@ function renderDashboard(user) {
   loadRefreshStatus();
   startMarketPill();
   startRegimePills();
+  maybeShowRegimeProposal(); // SC-52 P1
 }
 
 // ---------- market status pill (top bar) — Spec 5 D4 -------------------
@@ -932,6 +933,114 @@ function formatCountdown(iso) {
 // Pills also flag stale (>14d): renders "⚠ STABLE (Jordi · 17d)".
 
 let regimeState = null;
+
+// ---------- SC-52 P1 — login regime proposal (Jordi only) --------------------
+// The newest video digest proposes a Jordi regime; Fin approves, sets another state or dismisses.
+// Never applied automatically. Everything shown was generated at ingest (no LLM call here).
+const RP_COLORS = { stable: '#10c87c', shifting: '#ffb800', defensive: '#ff5c5c', unclassified: '#8c98aa' };
+
+function rpChip(state, big) {
+  const c = RP_COLORS[state] || RP_COLORS.unclassified;
+  return `<span class="rp-chip" style="border-color:${c};color:${c};${big ? 'font-size:1.15rem;padding:0.2rem 0.7rem' : ''}">${escapeHTML(String(state || '—').toUpperCase())}</span>`;
+}
+
+function rpConsequence(c) {
+  if (!c) return '';
+  const on = (b) => (b ? 'ON' : 'OFF');
+  const parts = [`effective regime ${escapeHTML(c.EffectiveNow)} → <strong>${escapeHTML(c.EffectiveIf)}</strong>`,
+    `alert margin ${c.MarginPctNow.toFixed(1)}% → <strong>${c.MarginPctIf.toFixed(1)}%</strong>`,
+    `entry-zone alerts ${on(c.EntryAlertsNow)} → <strong>${on(c.EntryAlertsIf)}</strong>`];
+  let aff = '';
+  if (c.EntryAlertsNow !== c.EntryAlertsIf) {
+    aff = c.AffectedTickers && c.AffectedTickers.length
+      ? ` · switches entry alerts ${c.EntryAlertsIf ? 'on' : 'off'} for: <strong>${c.AffectedTickers.map(escapeHTML).join(', ')}</strong>`
+      : ' · no watchlist entry is in the entry zone right now, so no alert changes today';
+  }
+  return parts.join(' · ') + aff;
+}
+
+async function maybeShowRegimeProposal() {
+  let p;
+  try { p = await api('/api/regime/proposal'); } catch (_) { return; }
+  if (!p || !p.show) return;
+  const key = p.proposal ? String(p.proposal.digestId) : 'none';
+  try { if (sessionStorage.getItem('ft.regimeCardLater') === key) return; } catch (_) {}
+  renderRegimeProposalCard(p);
+}
+
+function renderRegimeProposalCard(p) {
+  const old = $('#regime-proposal-root');
+  if (old) old.remove();
+  const pr = p.proposal || null;
+  const cur = p.current || {};
+  const hasState = pr && pr.state && pr.state !== 'unclassified';
+  const conf = hasState ? String(pr.confidence || 'unstated') : '';
+  const confColor = { high: '#10c87c', medium: '#ffb800', low: '#ff5c5c' }[conf] || '#8c98aa';
+  const when = pr && pr.quoteTs != null ? ` at ${Math.floor(pr.quoteTs / 60)}:${String(pr.quoteTs % 60).padStart(2, '0')}` : '';
+  const macro = p.macro && p.macro.suggestedJordi ? p.macro : null;
+  const disagree = hasState && macro && macro.suggestedJordi !== 'unclassified' && macro.suggestedJordi !== pr.state;
+  const curLine = `${rpChip(cur.state)} <span class="dim">${cur.setAt ? `set ${escapeHTML(String(cur.setAt).slice(0, 10))} (${cur.ageDays} days ago${cur.source ? ', ' + escapeHTML(cur.source) : ''})` : 'never set'}</span>${cur.stale ? ' <span class="rp-stale">STALE (older than 14 days)</span>' : ''}`;
+  const headline = !pr ? 'Jordi regime needs a look'
+    : hasState ? 'Proposed Jordi regime from the latest video' : 'Jordi regime is stale';
+  const narrative = pr && pr.narrative ? `<p class="rp-narr">${escapeHTML(pr.narrative)}</p>` : '';
+  const proposalBlock = hasState ? `
+    <div class="rp-proposal">
+      ${rpChip(pr.state, true)}
+      <span class="rp-conf" style="border-color:${confColor};color:${confColor}" title="How sure the extraction was. Low means the evidence was mixed.">CONFIDENCE ${escapeHTML(conf.toUpperCase())}</span>
+      <span class="dim">from <a href="${escapeHTML(pr.link)}" target="_blank" rel="noopener">${escapeHTML(pr.title)}</a> · ${escapeHTML(pr.publishedAt)}</span>
+    </div>
+    ${pr.quote ? `<blockquote class="rp-quote">“${escapeHTML(pr.quote)}”<div class="dim">${pr.quoteMatch === 'nearest' ? 'Closest passage in the transcript — it is context, not proof of the state.' : 'Passage from the transcript.'}${when ? ' ' + escapeHTML(when.trim()) : ''}</div></blockquote>` : ''}
+    <div class="rp-conseq"><strong>If approved:</strong> ${rpConsequence(p.consequence)}</div>` : `
+    <p class="dim">The latest video gave no usable proposal${pr ? ' (' + escapeHTML(pr.title) + ', ' + escapeHTML(pr.publishedAt) + ')' : ''}. Set the regime yourself, or dismiss until the next video.</p>`;
+  const macroBlock = macro ? `<div class="rp-macro"><strong>FT macro regime (Spec 9p)</strong> suggests ${rpChip(macro.suggestedJordi)} <span class="dim">(${escapeHTML(macro.quadrant || '')} ${escapeHTML(macro.shorthand || '')})</span>${disagree ? ' <span class="rp-disagree">The two suggestions disagree. FT does not pick one.</span>' : ''}</div>` : '';
+  const ctx = pr && (pr.stance || pr.tilt) ? `<div class="rp-ctx dim"><strong>Context only (not a trade trigger):</strong> stance <em>${escapeHTML(pr.stance || 'unstated')}</em>${pr.stanceQuote ? ` — “${escapeHTML(pr.stanceQuote)}”` : ''}; tilt <em>${escapeHTML(pr.tilt || 'unstated')}</em>${pr.tiltQuote ? ` — “${escapeHTML(pr.tiltQuote)}”` : ''}</div>` : '';
+  const cats = pr && Array.isArray(pr.catalysts) && pr.catalysts.length ? `<div class="rp-ctx dim"><strong>Named catalysts:</strong> ${pr.catalysts.map((c) => escapeHTML(c.event) + (c.date ? ' (' + escapeHTML(c.date) + ')' : '')).join(' · ')}</div>` : '';
+  const setBtns = ['stable', 'shifting', 'defensive'].map((st) => {
+    const cc = (p.consequences || {})[st];
+    return `<button class="btn-secondary rp-set" data-state="${st}" title="${escapeHTML(cc ? rpConsequence(cc).replace(/<[^>]+>/g, '') : '')}">${st}</button>`;
+  }).join('');
+  const root = document.createElement('div');
+  root.id = 'regime-proposal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="rp-overlay">
+      <div class="modal rp-card" role="dialog" aria-modal="true" aria-label="Regime proposal">
+        <div class="modal-header"><div><div class="title">${escapeHTML(headline)}</div>
+          <div class="desc">Nothing changes unless you press a button.</div></div>
+          <button class="modal-close" id="rp-later" aria-label="Decide later" title="Decide later (back on next load)">×</button></div>
+        <div class="modal-body">
+          <div class="rp-current"><strong>Current:</strong> ${curLine}</div>
+          ${proposalBlock}${narrative}${macroBlock}${ctx}${cats}
+          <div class="rp-set-row"><strong>Set a different state:</strong> ${setBtns}<span class="dim" id="rp-set-note"></span></div>
+          <div id="rp-error" class="error" style="display:none"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-secondary" id="rp-dismiss" title="Hide until the next video is digested">Dismiss until next video</button>
+          ${hasState ? `<button class="btn-primary" id="rp-approve">Approve ${escapeHTML(pr.state)}</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  const close = () => root.remove();
+  const digestId = pr ? pr.digestId : null;
+  const fail = (e) => { const el = $('#rp-error'); el.style.display = 'block'; el.textContent = e.message || String(e); };
+  const done = async () => { close(); await refreshRegime(); };
+  $('#rp-later').addEventListener('click', () => { try { sessionStorage.setItem('ft.regimeCardLater', pr ? String(pr.digestId) : 'none'); } catch (_) {} close(); });
+  $('#rp-dismiss').addEventListener('click', async () => {
+    if (digestId == null) { close(); return; }
+    try { await api('/api/regime/proposal/dismiss', { method: 'POST', body: JSON.stringify({ digestId }) }); await done(); } catch (e) { fail(e); }
+  });
+  const ap = $('#rp-approve');
+  if (ap) ap.addEventListener('click', async () => {
+    try { await api('/api/regime/proposal/approve', { method: 'POST', body: JSON.stringify({ digestId }) }); await done(); } catch (e) { fail(e); }
+  });
+  for (const b of root.querySelectorAll('.rp-set')) {
+    b.addEventListener('mouseenter', () => { const cc = (p.consequences || {})[b.dataset.state]; $('#rp-set-note').textContent = cc ? ' ' + rpConsequence(cc).replace(/<[^>]+>/g, '') : ''; });
+    b.addEventListener('click', async () => {
+      if (digestId == null) { fail(new Error('There is no video digest to attach this to.')); return; }
+      try { await api('/api/regime/proposal/set', { method: 'POST', body: JSON.stringify({ digestId, state: b.dataset.state }) }); await done(); } catch (e) { fail(e); }
+    });
+  }
+}
 
 async function startRegimePills() {
   await refreshRegime();

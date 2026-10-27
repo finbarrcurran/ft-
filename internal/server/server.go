@@ -164,6 +164,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/regime/jordi", s.requireUser(s.handleSetJordiRegime))
 	s.mux.HandleFunc("POST /api/regime/cowen/manual", s.requireUser(s.handleSetCowenManual))
 	s.mux.HandleFunc("POST /api/regime/cowen/auto", s.requireUser(s.handleSetCowenAuto))
+	s.mux.HandleFunc("GET /api/regime/proposal", s.requireUser(s.handleRegimeProposal))                       // SC-52 P1
+	s.mux.HandleFunc("POST /api/regime/proposal/approve", s.requireUser(s.handleRegimeProposalApprove))     // SC-52 P1
+	s.mux.HandleFunc("POST /api/regime/proposal/set", s.requireUser(s.handleRegimeProposalSet))             // SC-52 P1
+	s.mux.HandleFunc("POST /api/regime/proposal/dismiss", s.requireUser(s.handleRegimeProposalDismiss))     // SC-52 P1
 	s.mux.HandleFunc("GET /api/regime/history", s.requireUser(s.handleListRegimeHistory))
 
 	// Spec 9p — Macro Regime & Sector Rotation.
