@@ -37,15 +37,17 @@ const FeatureID = "video_digest"
 
 const (
 	maxOutputTokens = 4000 // needs llm_max_output_tokens_per_call >= 4000 (raised from 2000, Fin 2026-09-26)
-	markerEverySec  = 30   // timestamp marker spacing in the compact transcript
+	markerEverySec  = 15   // timestamp marker spacing in the compact transcript (15 s since SC-52 P0.2: finer citations and links)
 	maxMentions     = 20
 	maxQuotes       = 2
 
 	// ExtractionVersion 2 = regime fields extracted against FT's definitions
 	// (migration 0056). Version 1 digests carry only the legacy suggested_regime. Version 3
 	// (SC-52 P0.1) defines the states by the posture he recommends for adding or holding equity
-	// risk, not by named catalysts, and defines the accumulation stance.
-	ExtractionVersion = 3
+	// risk, not by named catalysts, and defines the accumulation stance. Version 4 (P0.2) has
+	// the model CITE the supporting transcript segment (start/end seconds) and FT supplies the
+	// quote text from the transcript.
+	ExtractionVersion = 4
 )
 
 var (
@@ -93,6 +95,10 @@ type packageMeta struct {
 	FrameParams      json.RawMessage `json:"frame_params"`
 	PipelineVersion  string          `json:"pipeline_version"`
 	Status           string          `json:"status"`
+	// Extract is false for a transcript-only package (SC-52 P3): its transcript is stored and
+	// searchable, but the scheduled sweep does not spend LLM money on it. `ft video-digest-extract`
+	// digests such packages on request. Missing = true (every package before P3).
+	Extract *bool `json:"extract"`
 }
 
 type pkg struct {
@@ -246,9 +252,10 @@ const commonSchema = `{
   "catalysts": [ { "event": string, "date": string|null } ] — events or dates he names as mattering (data releases, meetings, elections, unwinds); at most 6,
   "ft_regime": { "state": "Stable"|"Shifting"|"Defensive"|"Unclassified"|null,
                  "confidence": "high"|"medium"|"low"|null,
-                 "evidence_quote": string|null — ONE contiguous passage copied exactly (word for word) from one place in the transcript, under 40 words, the passage that best supports the state; never join separate passages, never use "..." or paraphrase; required for Stable, Shifting and Defensive },
-  "cross_asset_tilt": { "tilt": "equities"|"crypto"|"balanced"|"unstated", "quote": string|null — one contiguous passage copied exactly, under 40 words } — where he says he has more conviction, as stated,
-  "accumulation_stance": { "stance": "accumulating"|"waiting"|"holding"|"reducing"|"unstated", "quote": string|null — one contiguous passage copied exactly, under 40 words }`
+                 "evidence_ref": { "start_sec": integer, "end_sec": integer }|null — the [NNNs] markers (in seconds, as printed in the transcript) where the passage that best supports the state begins and ends; end_sec equals start_sec for one segment and is at most 30 seconds after it (the shortest passage that supports the state). Do NOT copy or paraphrase the words: FT supplies the text from the transcript. Required for Stable, Shifting and Defensive,
+                 "evidence_quote": string|null — leave null unless you cannot give a reference; then one short passage copied exactly },
+  "cross_asset_tilt": { "tilt": "equities"|"crypto"|"balanced"|"unstated", "ref": { "start_sec": integer, "end_sec": integer }|null — marker seconds of the passage where he says it; no copied text } — where he says he has more conviction, as stated,
+  "accumulation_stance": { "stance": "accumulating"|"waiting"|"holding"|"reducing"|"unstated", "ref": { "start_sec": integer, "end_sec": integer }|null — marker seconds of the passage where he says it; no copied text }`
 
 // regimeDefinitions are FT's own regime states. The speaker's vocabulary is not FT's:
 // the model is given these and nothing else about regimes — no current regime, no prior
@@ -256,8 +263,8 @@ const commonSchema = `{
 const regimeDefinitions = `
 
 FT regime definitions. Classify the POSTURE he recommends to his audience for adding or holding equity risk, in FT's terms, not his:
-- Stable: he recommends holding and/or adding equity risk. He may mention risks, volatility or upcoming events, but he does not tell people to hold back. FT keeps its normal posture: normal alert margin, entry-zone alerts on.
-- Shifting: he recommends caution about ADDING equity risk: wait for stability or a pullback first, be selective, hold what you have but do not add, hedge, or hold more cash; he does NOT expect a broad, material equity drawdown. FT tightens its posture: alert margin x0.6, entry-zone alerts off.
+- Stable: he recommends holding and/or adding equity risk. Holding without adding is Stable, unless he tells people to wait for stability, a pullback or an event before adding. He may mention risks, volatility or upcoming events, but he does not tell people to hold back. FT keeps its normal posture: normal alert margin, entry-zone alerts on.
+- Shifting: he recommends caution about ADDING equity risk: he tells people to wait for stability, a pullback or an event before adding, to be selective about what to add, to hedge, or to hold more cash; he does NOT expect a broad, material equity drawdown. FT tightens its posture: alert margin x0.6, entry-zone alerts off.
 - Defensive: he recommends materially cutting equity risk, or explicitly expects or warns of a broad, material equity drawdown. Capital preservation first.
 - Unclassified: he gives no posture on equity risk at all.
 Judge what he tells listeners to DO, not how many risks or dates he names. Naming catalysts, events, dates or volatility does NOT by itself make a view Shifting, and a bullish view that lists risks is still Stable. His crypto or other non-equity views are not the regime: record them in cross_asset_tilt. A speaker's phrase "regime shift" (a structural change in how markets work) is NOT FT "Shifting". If the evidence is genuinely mixed between two states, choose the more cautious of the two and set confidence "low". Use "Unclassified" when there is no posture; leave ft_regime.state null only if you cannot read the transcript.
@@ -353,17 +360,24 @@ type rawCatalyst struct {
 	Event string  `json:"event"`
 	Date  *string `json:"date"`
 }
+type rawRef struct {
+	Start *float64 `json:"start_sec"`
+	End   *float64 `json:"end_sec"`
+}
 type rawRegime struct {
 	State         *string `json:"state"`
 	Confidence    *string `json:"confidence"`
+	EvidenceRef   *rawRef `json:"evidence_ref"`
 	EvidenceQuote *string `json:"evidence_quote"`
 }
 type rawTilt struct {
 	Tilt  *string `json:"tilt"`
+	Ref   *rawRef `json:"ref"`
 	Quote *string `json:"quote"`
 }
 type rawStance struct {
 	Stance *string `json:"stance"`
+	Ref    *rawRef `json:"ref"`
 	Quote  *string `json:"quote"`
 }
 type rawExtraction struct {
@@ -395,7 +409,7 @@ type Extraction struct {
 	ProposedConfidence *string
 	ProposedQuote      *string
 	ProposedQuoteTs    *int
-	ProposedQuoteMatch *string // "exact" (verbatim as the model wrote it) | "nearest" (snapped to the closest transcript passage)
+	ProposedQuoteMatch *string // "cited" (the model cited the segment, FT supplied the text) | "exact" (verbatim as the model wrote it) | "nearest" (snapped to the closest transcript passage)
 	ProposalRejected   string  // why a stated state was dropped; "" if none
 	Tilt               *string
 	TiltQuote          *string
@@ -542,6 +556,82 @@ func snapQuote(quote string, toks []wordTok) (string, int, bool) {
 	return strings.TrimSpace(strings.Join(words, " ")), toks[bestAt].ts, true
 }
 
+// citedPassage turns the model's segment reference into transcript text (SC-52 P0.2). The words
+// are copied from the transcript by FT, so they are verbatim by construction; the model only
+// says where. start/end are the [NNNs] marker seconds; the start is matched to the nearest
+// marker (within 20 s), the end must be within 60 s of the start, and the passage is capped at
+// maxCitedWords, cut at a sentence end where one exists.
+const (
+	maxCitedWords  = 60
+	maxCitedSpanS  = 45 // a wider reference is clamped to this, not rejected
+	refSnapSeconds = 20
+)
+
+func citedPassage(ref *rawRef, toks []wordTok) (string, int, bool) {
+	if ref == nil || ref.Start == nil || len(toks) == 0 {
+		return "", 0, false
+	}
+	start := int(*ref.Start)
+	end := start
+	if ref.End != nil {
+		end = int(*ref.End)
+	}
+	if end < start {
+		start, end = end, start
+	}
+	if start < 0 {
+		return "", 0, false
+	}
+	if end-start > maxCitedSpanS {
+		end = start + maxCitedSpanS
+	}
+	// Nearest marker at or before start (markers are the ts values the tokens carry).
+	markers := []int{}
+	last := -1
+	for _, t := range toks {
+		if t.ts != last {
+			markers = append(markers, t.ts)
+			last = t.ts
+		}
+	}
+	m0, best := -1, 1<<30
+	for _, m := range markers {
+		if d := abs(m - start); d < best {
+			m0, best = m, d
+		}
+	}
+	if m0 < 0 || best > refSnapSeconds {
+		return "", 0, false
+	}
+	var words []string
+	for _, t := range toks {
+		if t.ts >= m0 && t.ts <= end {
+			words = append(words, t.orig)
+		}
+	}
+	if len(words) < 4 {
+		return "", 0, false
+	}
+	if len(words) > maxCitedWords {
+		cut := maxCitedWords
+		for i := maxCitedWords - 1; i >= 25; i-- { // prefer to end on a sentence
+			if w := words[i]; strings.HasSuffix(w, ".") || strings.HasSuffix(w, "?") || strings.HasSuffix(w, "!") {
+				cut = i + 1
+				break
+			}
+		}
+		words = words[:cut]
+	}
+	return strings.TrimSpace(strings.Join(words, " ")), m0, true
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
 var ellipsisRe = regexp.MustCompile(`\s*(?:\.{3,}|…)\s*`)
 
 // sanitiseRegimeFields enforces the v2 regime schema. Only the four FT states pass
@@ -550,7 +640,11 @@ var ellipsisRe = regexp.MustCompile(`\s*(?:\.{3,}|…)\s*`)
 // dropped (and ProposalRejected says why) rather than shown unsupported.
 func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment, toks []wordTok) {
 	// ground tries the exact test, then the nearest-passage snap. match is "exact" or "nearest".
-	ground := func(q *string) (text string, ts int, match string, ok bool) {
+	ground := func(ref *rawRef, q *string) (text string, ts int, match string, ok bool) {
+		// P0.2: the model cites the segment; FT supplies the words from the transcript.
+		if t, at, ok := citedPassage(ref, toks); ok {
+			return t, at, "cited", true
+		}
 		if t, at, ok := groundedQuote(q, segs); ok {
 			return t, at, "exact", true
 		}
@@ -568,13 +662,13 @@ func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment, toks 
 	}
 	if t := r.CrossAssetTilt; t != nil {
 		ex.Tilt = enum(t.Tilt, "equities", "crypto", "balanced", "unstated")
-		if qt, _, _, ok := ground(t.Quote); ok {
+		if qt, _, _, ok := ground(t.Ref, t.Quote); ok {
 			ex.TiltQuote = &qt
 		}
 	}
 	if a := r.Accumulation; a != nil {
 		ex.AccumStance = enum(a.Stance, "accumulating", "waiting", "holding", "reducing", "unstated")
-		if qt, _, _, ok := ground(a.Quote); ok {
+		if qt, _, _, ok := ground(a.Ref, a.Quote); ok {
 			ex.AccumQuote = &qt
 		}
 	}
@@ -593,12 +687,12 @@ func sanitiseRegimeFields(ex *Extraction, r rawExtraction, segs []segment, toks 
 		ex.ProposedRegime, ex.ProposedConfidence = &lower, conf
 		return
 	}
-	qt, at, match, ok := ground(f.EvidenceQuote)
+	qt, at, match, ok := ground(f.EvidenceRef, f.EvidenceQuote)
 	switch {
 	case conf == nil:
 		ex.ProposalRejected = "no valid confidence"
 	case !ok:
-		ex.ProposalRejected = "evidence quote missing or not verbatim in the transcript"
+		ex.ProposalRejected = "no usable evidence: the cited segment is out of range and the quote is missing or not in the transcript"
 	default:
 		ex.ProposedRegime, ex.ProposedConfidence, ex.ProposedQuote, ex.ProposedQuoteTs = &lower, conf, &qt, &at
 		ex.ProposedQuoteMatch = &match
@@ -1300,6 +1394,9 @@ func (s *Service) Sweep(ctx context.Context) ([]Result, error) {
 	}
 	var out []Result
 	for _, p := range all {
+		if p.Meta.Extract != nil && !*p.Meta.Extract {
+			continue // transcript-only package: stored above, extracted only on request
+		}
 		id, err := s.existingID(ctx, p.Meta.VideoID)
 		if err != nil {
 			return out, err

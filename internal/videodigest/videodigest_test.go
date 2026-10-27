@@ -308,7 +308,7 @@ func TestPromptCarriesFTRegimeDefinitions(t *testing.T) {
 	for _, src := range []string{"jordi", "cowen"} {
 		p := systemPrompt(src)
 		for _, want := range []string{"Stable:", "Shifting:", "Defensive:", "Unclassified:", "x0.6", "entry-zone alerts off",
-			"POSTURE he recommends", "holding and/or adding equity risk", "caution about ADDING equity risk",
+			"POSTURE he recommends", "holding and/or adding equity risk", "Holding without adding is Stable, unless he tells people to wait for stability, a pullback or an event before adding", "caution about ADDING equity risk", "evidence_ref", "FT supplies the text",
 			"does NOT by itself make a view Shifting", "a bullish view that lists risks is still Stable", "recommends materially cutting equity risk",
 			"gives no posture on equity risk at all", "more cautious of the two", "record them in cross_asset_tilt",
 			"accumulating:", "waiting:", "holding:", "reducing:", "unstated:",
@@ -324,6 +324,9 @@ func TestPromptCarriesFTRegimeDefinitions(t *testing.T) {
 	// No-steering: the user prompt is title/date/duration, optional prior-video themes
 	// and the transcript. Nothing about the current regime.
 	u := strings.ToLower(userPrompt(packageMeta{Title: "t", PublishedAt: "2026-10-12", DurationSec: 600}, "[0s] hi", nil))
+	if strings.Contains(systemPrompt("jordi"), "hold what you have") {
+		t.Error("ai's P0.1 fix: 'hold what you have' must not be in the Shifting definition")
+	}
 	for _, banned := range []string{"current regime", "defensive", "shifting", "stable", "score"} {
 		if strings.Contains(u, banned) {
 			t.Errorf("user prompt leaks %q", banned)
@@ -459,5 +462,95 @@ func TestAccumulationStanceHasHolding(t *testing.T) {
 	ex, err := ParseExtraction(`{"accumulation_stance":{"stance":"holding"}}`, "[0s] hello there", "jordi")
 	if err != nil || ex.AccumStance == nil || *ex.AccumStance != "holding" {
 		t.Fatalf("%+v %v", ex.AccumStance, err)
+	}
+}
+
+// SC-52 P0.2: the model cites a segment; FT supplies the words. Verbatim by construction.
+const citeTranscript = `[0s] welcome back everyone today is a big one
+[15s] hedge funds were already delevered at this point and they are not delevered as much as they should have been
+[30s] based on all the metrics that I got so this is a hedge fund deleveraging event and you will hear me talk about it more
+[45s] the second thing is the midterms which could change regulation for ai and crypto
+[60s] thanks for watching and see you next week with another update on the markets`
+
+func ref(a, b float64) *rawRef { return &rawRef{Start: &a, End: &b} }
+
+func TestCitedPassageComesFromTheTranscript(t *testing.T) {
+	toks := transcriptTokens(citeTranscript)
+	text, ts, ok := citedPassage(ref(15, 30), toks)
+	if !ok || ts != 15 || !strings.HasPrefix(text, "hedge funds were already delevered") || !strings.HasSuffix(text, "talk about it more") {
+		t.Fatalf("cited: ok=%v ts=%d %q", ok, ts, text)
+	}
+	if !strings.Contains(strings.Join(strings.Fields(markerRe.ReplaceAllString(citeTranscript, " ")), " "), text) {
+		t.Fatalf("the cited text must be a verbatim stretch of the transcript: %q", text)
+	}
+	// A start a few seconds off a marker snaps to it; a single segment works with end omitted.
+	if text, ts, ok := citedPassage(&rawRef{Start: fptr(47)}, toks); !ok || ts != 45 || !strings.HasPrefix(text, "the second thing is the midterms") {
+		t.Fatalf("snap: %v %d %q", ok, ts, text)
+	}
+	// A too-wide reference is clamped to the cap, not rejected: [0,120] resolves to the first 45 s only (markers 0 to 45).
+	if text, ts, ok := citedPassage(ref(0, 120), toks); !ok || ts != 0 || strings.Contains(text, "thanks for watching") || !strings.Contains(text, "midterms") {
+		t.Fatalf("clamp: %v %d %q", ok, ts, text)
+	}
+	// Swapped start/end are tolerated; out of range, too wide or missing refs are refused.
+	if _, _, ok := citedPassage(ref(30, 15), toks); !ok {
+		t.Error("swapped start/end should still resolve")
+	}
+	for name, r := range map[string]*rawRef{"nil": nil, "far from any marker": ref(500, 505), "negative": ref(-5, 10), "no start": {End: fptr(30)}} {
+		if _, _, ok := citedPassage(r, toks); ok {
+			t.Errorf("%s must not resolve", name)
+		}
+	}
+}
+
+func fptr(f float64) *float64 { return &f }
+
+func TestCitedPassageIsCappedAtASentence(t *testing.T) {
+	long := "[0s] " + strings.Repeat("alpha beta gamma delta ", 12) + "ends here. " + strings.Repeat("omega sigma tau ", 20)
+	text, _, ok := citedPassage(ref(0, 0), transcriptTokens(long))
+	if !ok || len(strings.Fields(text)) > maxCitedWords || !strings.HasSuffix(text, "ends here.") {
+		t.Fatalf("cap: ok=%v words=%d %q", ok, len(strings.Fields(text)), text)
+	}
+}
+
+// Through the sanitiser: a cited segment beats the model's own quote; a bad reference falls back to the
+// old exact / nearest tests; nothing usable drops the state.
+func TestParseUsesCitationThenFallsBack(t *testing.T) {
+	parse := func(ft string) Extraction {
+		ex, err := ParseExtraction(`{"ft_regime":`+ft+`}`, citeTranscript, "jordi")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ex
+	}
+	ex := parse(`{"state":"Shifting","confidence":"medium","evidence_ref":{"start_sec":30,"end_sec":30},"evidence_quote":"a stitched paraphrase that is not in the transcript at all"}`)
+	if ex.ProposedRegime == nil || *ex.ProposedQuoteMatch != "cited" || *ex.ProposedQuoteTs != 30 || !strings.HasPrefix(*ex.ProposedQuote, "based on all the metrics") {
+		t.Fatalf("cited: %+v", ex)
+	}
+	// Out-of-range reference + exact quote: exact.
+	ex = parse(`{"state":"Stable","confidence":"high","evidence_ref":{"start_sec":900,"end_sec":900},"evidence_quote":"the second thing is the midterms"}`)
+	if ex.ProposedRegime == nil || *ex.ProposedQuoteMatch != "exact" {
+		t.Fatalf("fallback to exact: %+v", ex)
+	}
+	// Out-of-range reference + stitched quote: nearest.
+	ex = parse(`{"state":"Stable","confidence":"high","evidence_ref":{"start_sec":900,"end_sec":900},"evidence_quote":"Hedge funds were already delevered at this scenario. Not delevered as much as they should have been based on the metrics."}`)
+	if ex.ProposedRegime == nil || *ex.ProposedQuoteMatch != "nearest" {
+		t.Fatalf("fallback to nearest: %+v", ex)
+	}
+	// Nothing usable: dropped, with a reason.
+	ex = parse(`{"state":"Stable","confidence":"high","evidence_ref":{"start_sec":900,"end_sec":900}}`)
+	if ex.ProposedRegime != nil || !strings.Contains(ex.ProposalRejected, "no usable evidence") {
+		t.Fatalf("dropped: %+v", ex)
+	}
+	// State determination is unchanged: Unclassified needs no evidence; an unknown state is rejected.
+	if ex := parse(`{"state":"Unclassified","confidence":"low"}`); ex.ProposedRegime == nil || *ex.ProposedRegime != "unclassified" {
+		t.Fatal("unclassified needs no evidence")
+	}
+	if ex := parse(`{"state":"Bearish","confidence":"high","evidence_ref":{"start_sec":30,"end_sec":30}}`); ex.ProposedRegime != nil {
+		t.Fatal("a non-FT state must still be rejected")
+	}
+	// Tilt and stance take references too.
+	ex2, err := ParseExtraction(`{"cross_asset_tilt":{"tilt":"crypto","ref":{"start_sec":45,"end_sec":45}},"accumulation_stance":{"stance":"waiting","ref":{"start_sec":15,"end_sec":15}}}`, citeTranscript, "jordi")
+	if err != nil || ex2.TiltQuote == nil || !strings.HasPrefix(*ex2.TiltQuote, "the second thing") || ex2.AccumQuote == nil || !strings.HasPrefix(*ex2.AccumQuote, "hedge funds were already") {
+		t.Fatalf("tilt/stance refs: %+v %v", ex2, err)
 	}
 }
