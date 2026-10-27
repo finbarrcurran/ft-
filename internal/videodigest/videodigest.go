@@ -61,6 +61,9 @@ type Service struct {
 	DB   *sql.DB
 	LLM  *llm.Service
 	Root string
+	// VoteRuns > 1 makes the SWEEP extract the newest Jordi digest that many times and keep the
+	// majority state (set to 3 by the server; the backfill and `ft video-digest-extract` never vote).
+	VoteRuns int
 }
 
 // New returns a Service. An empty root means DefaultRoot.
@@ -1057,7 +1060,7 @@ func (s *Service) Preview(ctx context.Context, videoID string, withPrior bool) (
 		FeatureContext:  "preview " + m.Source + ":" + m.VideoID + " " + m.PublishedAt,
 		SystemPrompt:    systemPrompt(m.Source),
 		UserPrompt:      userPrompt(m, compact, pr),
-		MaxOutputTokens: maxOutputTokens,
+		MaxOutputTokens: s.maxOutput(ctx),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("llm: %w", err)
@@ -1072,6 +1075,21 @@ func (s *Service) Preview(ctx context.Context, videoID string, withPrior bool) (
 		out.PriorTitle = pr.Title
 	}
 	return out, nil
+}
+
+// maxOutput is the output-token request: maxOutputTokens, but never more than the governor's
+// per-call cap (a lowered cap shortens the output rather than failing every call).
+func (s *Service) maxOutput(ctx context.Context) int {
+	maxOut := maxOutputTokens
+	if v, _ := s.LLM.Store.GetPreference(ctx, "llm_max_output_tokens_per_call"); v != "" {
+		var c int
+		if _, err := fmt.Sscanf(v, "%d", &c); err == nil && c > 0 && c < maxOut {
+			maxOut = c
+		}
+	} else if maxOut > 2000 {
+		maxOut = 2000 // governor default when the preference is unset
+	}
+	return maxOut
 }
 
 // SystemPromptText exposes the extraction prompt for review (the "prompt text in the repo" AC).
@@ -1406,6 +1424,11 @@ func (s *Service) Sweep(ctx context.Context) ([]Result, error) {
 		}
 		r := s.ingest(ctx, p, false)
 		out = append(out, r)
+		if r.Status == "ingested" && s.VoteRuns > 1 && p.Meta.Source == "jordi" && s.isNewestJordi(ctx, p.Meta.VideoID) {
+			if _, err := s.VoteNewest(ctx, p.Meta.VideoID, s.VoteRuns); err != nil {
+				slog.Warn("videodigest: vote failed (the single extraction stands)", "video", p.Meta.VideoID, "err", err)
+			}
+		}
 		if r.Status == "failed" && (strings.Contains(r.Error, llm.ErrBudgetBlocked.Error()) ||
 			strings.Contains(r.Error, llm.ErrGloballyPaused.Error()) ||
 			strings.Contains(r.Error, llm.ErrFeatureDisabled.Error()) ||

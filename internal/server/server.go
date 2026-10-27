@@ -83,6 +83,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 	}
 	s.cryptoWrite = cryptotheses.NewThesisWriteService(st.DB, s.cryptoAdapters, s.cryptoCascade)
 	s.videoDigest = videodigest.New(st.DB, llmSvc, os.Getenv("FT_VIDEO_DIGEST_ROOT")) // SC-43 P1
+	s.videoDigest.VoteRuns = 3                                                       // SC-52: newest Jordi digest = majority of 3 extractions
 	s.etoroSync = etorosync.New(st, os.Getenv("FT_ETORO_API_BASE"),
 		os.Getenv("FT_ETORO_API_KEY"), os.Getenv("FT_ETORO_USER_KEY")) // SC-42
 	s.initOAuth()
