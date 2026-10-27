@@ -95,6 +95,8 @@ func main() {
 		runSnapshot(os.Args[2:])
 	case "etoro-import":
 		runEtoroImport(os.Args[2:])
+	case "video-digest-vote":
+		runVideoDigestVote(os.Args[2:])
 	case "video-digest-extract":
 		runVideoDigestExtract(os.Args[2:])
 	case "regime-history":
@@ -1269,6 +1271,30 @@ func runVideoDigestPreview(args []string) {
 
 // rawField pulls one top-level key out of the model's raw JSON, for showing what the model said
 // before FT's sanitising dropped or kept it.
+// runVideoDigestVote: SC-52. Extracts a stored video's regime proposal again (runs-1 times, nothing
+// stored from those runs) and keeps the majority state on the stored digest; a split sets confidence
+// low and records "N of M runs". Meant for the NEWEST Jordi digest only.
+func runVideoDigestVote(args []string) {
+	fs := flag.NewFlagSet("video-digest-vote", flag.ExitOnError)
+	id := fs.String("video-id", "", "YouTube video id of the digest")
+	runs := fs.Int("runs", 3, "total extractions (the stored one counts as one)")
+	_ = fs.Parse(args)
+	if *id == "" {
+		fmt.Fprintln(os.Stderr, "usage: ft video-digest-vote --video-id ID [--runs 3]")
+		os.Exit(2)
+	}
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	svc := videodigest.New(st.DB, llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY")), os.Getenv("FT_VIDEO_DIGEST_ROOT"))
+	r, err := svc.VoteNewest(context.Background(), *id, *runs)
+	must("vote", err)
+	fmt.Printf("runs %d | counts %v | kept %q (%d of %d agree) | split=%v changed=%v | extra cost $%.4f\n", r.Runs, r.Counts, r.State, r.Agree, r.Runs, r.Split, r.Changed, r.CostUSD)
+}
+
 // runVideoDigestExtract: SC-52 P3. Digests stored packages that have no digest yet, with a hard
 // spend ceiling. --daily-cap lifts llm_budget_daily_usd for the run and ALWAYS puts the previous
 // value back when the run ends (also on Ctrl-C or SIGTERM); the monthly cap is never touched.

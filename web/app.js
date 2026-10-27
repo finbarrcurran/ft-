@@ -986,7 +986,7 @@ function renderRegimeProposalCard(p) {
   const proposalBlock = hasState ? `
     <div class="rp-proposal">
       ${rpChip(pr.state, true)}
-      <span class="rp-conf" style="border-color:${confColor};color:${confColor}" title="How sure the extraction was. Low means the evidence was mixed.">CONFIDENCE ${escapeHTML(conf.toUpperCase())}</span>
+      <span class="rp-conf" style="border-color:${confColor};color:${confColor}" title="How sure the extraction was. Low means the evidence was mixed.">CONFIDENCE ${escapeHTML(conf.toUpperCase())}</span>${pr.runs > 1 ? `<span class="rp-conf" style="border-color:${pr.agree < pr.runs ? '#ffb800' : '#10c87c'};color:${pr.agree < pr.runs ? '#ffb800' : '#10c87c'}" title="The newest video is extracted ${pr.runs} times and the majority state is kept. A split lowers the confidence.">${pr.agree} OF ${pr.runs} RUNS</span>` : ''}
       <span class="dim">from <a href="${escapeHTML(pr.link)}" target="_blank" rel="noopener">${escapeHTML(pr.title)}</a> · ${escapeHTML(pr.publishedAt)}</span>
     </div>
     ${pr.quote ? `<blockquote class="rp-quote">“${escapeHTML(pr.quote)}”<div class="dim">${pr.quoteMatch === 'nearest' ? 'Closest passage in the transcript — it is context, not proof of the state.' : pr.quoteMatch === 'cited' ? 'Passage the extraction pointed to (text taken from the transcript) — context, not proof of the state.' : 'Passage from the transcript.'}${when ? ' ' + escapeHTML(when.trim()) : ''}</div></blockquote>` : ''}
