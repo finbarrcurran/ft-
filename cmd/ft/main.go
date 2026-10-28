@@ -53,6 +53,27 @@ import (
 	"time"
 )
 
+// requireExistingDB stops a CLI command from silently creating an empty database when FT_DB_PATH
+// is unset or wrong (the 2026-10-28 stray ./data/ft.db). serve and seed may create one;
+// FT_ALLOW_NEW_DB=1 overrides for any other command.
+func requireExistingDB(cmd string) {
+	switch cmd {
+	case "serve", "seed", "help", "-h", "--help":
+		return
+	}
+	if os.Getenv("FT_ALLOW_NEW_DB") == "1" {
+		return
+	}
+	path := os.Getenv("FT_DB_PATH")
+	if path == "" {
+		path = "./data/ft.db"
+	}
+	if _, err := os.Stat(path); err != nil {
+		fmt.Fprintf(os.Stderr, "ft %s: database %q does not exist (set FT_DB_PATH, or FT_ALLOW_NEW_DB=1 to create one)\n", cmd, path)
+		os.Exit(2)
+	}
+}
+
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -63,6 +84,8 @@ func main() {
 	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
 		cmd = os.Args[1]
 	}
+
+	requireExistingDB(cmd)
 
 	switch cmd {
 	case "serve":
@@ -1442,7 +1465,7 @@ func runTranscripts(args []string) {
 	from := fs.String("from", "", "published on/after YYYY-MM-DD")
 	to := fs.String("to", "", "published on/before YYYY-MM-DD")
 	limit := fs.Int("limit", 10, "max videos")
-	_ = fs.Parse(args)
+	query := parseInterleaved(fs, args)
 	cfg, err := config.Load()
 	must("load config", err)
 	st, err := store.Open(cfg.DBPath)
@@ -1457,7 +1480,7 @@ func runTranscripts(args []string) {
 		must("sync", err)
 		fmt.Printf("packages %d | written %d | unchanged %d | failed %d\n", r.Packages, r.Written, r.Unchanged, r.Failed)
 	case "search":
-		hits, err := svc.SearchTranscripts(ctx, strings.Join(fs.Args(), " "), videodigest.SearchOptions{Source: *src, From: *from, To: *to, Limit: *limit})
+		hits, err := svc.SearchTranscripts(ctx, strings.Join(query, " "), videodigest.SearchOptions{Source: *src, From: *from, To: *to, Limit: *limit})
 		must("search", err)
 		for _, h := range hits {
 			fmt.Printf("%s  %-5s  %s\n    %s\n    %s\n", h.PublishedAt, h.Source, h.Title, h.Snippet, h.Link)
@@ -1467,6 +1490,21 @@ func runTranscripts(args []string) {
 		c, err := svc.TranscriptStats(ctx)
 		must("stats", err)
 		fmt.Printf("transcripts %d (%v) | %d KB | %s .. %s\n", c.Total, c.BySource, c.Bytes/1024, c.Oldest, c.Newest)
+	}
+}
+
+// parseInterleaved parses flags that may come before or after positional words (Go's flag package
+// stops at the first non-flag, which turned `search halving --source cowen` into a query).
+func parseInterleaved(fs *flag.FlagSet, args []string) []string {
+	var words []string
+	for {
+		_ = fs.Parse(args)
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return words
+		}
+		words = append(words, rest[0])
+		args = rest[1:]
 	}
 }
 
