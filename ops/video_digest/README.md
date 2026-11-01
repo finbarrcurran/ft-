@@ -15,3 +15,9 @@ spends LLM money on the package. `ft video-digest-extract --source cowen --flags
 digests those packages on request, with a hard ceiling. Video metadata is cached in
 `/var/lib/video_digest/cache/<source>_infos.json` (a run resumes without asking YouTube again); a run stops at
 once and reports if YouTube rate-limits.
+
+## ticker_aliases.tsv (v5 grounding check, scratch tooling)
+One line per name: `ticker<TAB>name<TAB>source`. Used by the v5 grounding check to decide whether a ticker in an extracted item is
+backed by the passage (the symbol, or one of these names, must be in the passage) and whether a company name maps to the ticker given.
+A new name is a one-line addition. `source`: `db` = derived from FT's tables (theses, watchlist, holdings, eToro instruments, 2026-11-01);
+`manual` = added by hand (review); `manual-late` = added after the first grounding pass. No FT code reads this file yet.
