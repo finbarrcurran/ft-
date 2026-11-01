@@ -121,6 +121,14 @@ class RateLimited(RuntimeError):
     """YouTube is throttling us: stop the run and report (never retry in a loop)."""
 
 
+def too_short(info: dict, cfg: dict, src: dict) -> bool:
+    """Configurable skip rule: `min_duration_sec` (global, overridable per source; 0 turns it off).
+    Clips under ~3 minutes carry no analysis worth extracting (e.g. a 2-minute event promo)."""
+    floor = src.get("min_duration_sec", cfg.get("min_duration_sec", 180))
+    dur = info.get("duration") or 0
+    return bool(floor) and 0 < dur < floor
+
+
 # --------------------------------------------------------------------------- discovery
 
 def existing_packages(src_dir: Path) -> dict:
@@ -468,6 +476,9 @@ def collect_range(key: str, src: dict, cfg: dict, args) -> tuple:
         if info["upload_date"] < lo:
             break                                            # newest first: everything after is older
         if info["upload_date"] <= hi:
+            if too_short(info, cfg, src):
+                results.append({"source": key, "video_id": v, "status": f"skipped (under {src.get('min_duration_sec', cfg.get('min_duration_sec', 180))} s: {info.get('duration')} s)"})
+                continue
             infos.append(info)
     cache_path.write_text(json.dumps(cache))
     log.info("%s: %d video(s) in %s..%s (%d metadata call(s) this run)", key, len(infos), args.from_date, args.to_date or "now", fetched)
@@ -538,6 +549,9 @@ def process_source(key: str, src: dict, cfg: dict, args) -> list:
             continue
         if info["live_status"] in ("is_upcoming", "is_live", "post_live"):
             results.append({"source": key, "video_id": v, "status": f"skipped ({info['live_status']})"})
+            continue
+        if too_short(info, cfg, src):
+            results.append({"source": key, "video_id": v, "status": f"skipped (under {src.get('min_duration_sec', cfg.get('min_duration_sec', 180))} s: {info.get('duration')} s)"})
             continue
         infos.append(info)
 
