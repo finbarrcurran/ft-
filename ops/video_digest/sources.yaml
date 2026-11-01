@@ -4,6 +4,7 @@
 
 package_root: /var/lib/video_digest
 pipeline_version: "0.2.1"   # 0.2: en-orig captions, per-source frame overrides; 0.2.1: phash in frame_params
+min_duration_sec: 180      # skip videos shorter than this (0 = off); override per source with sources.<key>.min_duration_sec
 lookback_days: 7            # weekly mode window when --since is not given
 whisper_model: small        # fallback only; both channels normally have captions (A6)
 
