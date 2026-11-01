@@ -1,4 +1,4 @@
-# ticker<TAB>name<TAB>source. One line per name; a new name is a one-line addition. source: db = derived from FT tables (theses, watchlist, holdings, eToro instruments); manual = added by cc 2026-11-01 (review); manual-late = added after the first grounding pass.
+# ticker<TAB>name<TAB>source. One line per name; a new name is a one-line addition. source: db = derived from FT tables (theses, watchlist, holdings, eToro instruments); manual = added by cc 2026-11-01 (review); manual-late = added after the first grounding pass; manual-2026-11-01b = added after ai review (Zcash, Ford, Lumentum incl. the ASR spelling "lummentum", Lumen, SpaceX = SPCX).
 373220.KS	lg energy solution	db
 3750.HK	contemporary amperex limited	db
 4063.T	shin etsu chemical	db
@@ -160,3 +160,10 @@ XLK	xlk	manual
 XOM	exxon mobil	db
 XRP	ripple	manual
 XRP	xrp	manual
+ZEC	zcash	manual-2026-11-01b
+F	ford	manual-2026-11-01b
+LITE	lumentum	manual-2026-11-01b
+LITE	lummentum	manual-2026-11-01b
+LUMN	lumen	manual-2026-11-01b
+SPCX	spacex	manual-2026-11-01b
+SPCX	space exploration technologies	manual-2026-11-01b
