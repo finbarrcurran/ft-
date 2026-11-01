@@ -24,13 +24,13 @@ var ModelRates = map[string]Rates{
 	"claude-haiku-4-5":   {Input: 1.0, Output: 5.0, CacheRead: 0.10, CacheWrite: 1.25},
 	"claude-sonnet-4-6":  {Input: 3.0, Output: 15.0, CacheRead: 0.30, CacheWrite: 3.75},
 	"claude-opus-4-7":    {Input: 5.0, Output: 25.0, CacheRead: 0.50, CacheWrite: 6.25},
-	// Current generation (snapshot 2026-11-01). Haiku 5.5 is $0.50 in / $2.50 out beyond a 100K-token
-	// prompt (FT never sends that much); its cache rates are not published in the source used, so they
-	// stay 0 until checked: do not rely on caching cost for it.
-	"claude-haiku-5-5":  {Input: 0.10, Output: 0.50},
-	"claude-sonnet-5-5": {Input: 2.0, Output: 10.0, CacheRead: 0.20},
-	"claude-opus-5-5":   {Input: 4.0, Output: 20.0, CacheRead: 0.20},
-	"claude-fable-5-1":  {Input: 10.0, Output: 50.0},
+	// Current generation, verified 2026-11-01 against platform.claude.com/docs/en/about-claude/pricing
+	// (CacheWrite = 5-minute cache write). Haiku 5.5 costs $0.50 in / $2.50 out for prompts over 100K tokens;
+	// that tier is not modelled (FT sends about 25K tokens at most).
+	"claude-haiku-5-5":  {Input: 0.10, Output: 0.50, CacheRead: 0.01, CacheWrite: 0.125},
+	"claude-sonnet-5-5": {Input: 2.0, Output: 10.0, CacheRead: 0.10, CacheWrite: 2.50},
+	"claude-opus-5-5":   {Input: 4.0, Output: 20.0, CacheRead: 0.20, CacheWrite: 5.0},
+	"claude-fable-5-1":  {Input: 10.0, Output: 50.0, CacheRead: 0.25, CacheWrite: 12.50},
 	// Aliases — Anthropic uses dated and non-dated model ids interchangeably.
 	"claude-haiku-latest":  {Input: 1.0, Output: 5.0, CacheRead: 0.10, CacheWrite: 1.25},
 	"claude-sonnet-latest": {Input: 3.0, Output: 15.0, CacheRead: 0.30, CacheWrite: 3.75},

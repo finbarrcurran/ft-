@@ -392,7 +392,7 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 ### v1.94.2 · 2026-11-01 · pass 101 · SC-52
 
-**Current-generation rates and a short-video skip rule.** The LLM rate table gains Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.1; the video pipeline skips videos under `min_duration_sec` (default 180 s, per-source override, 0 = off). Behaviour: cost accounting for those models, video ingest. Migrations: none. Reference updated: §5. Supersedes v1.94.1.
+**Current-generation rates and a short-video skip rule.** The LLM rate table gains Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.1 (verified against the pricing page); the video pipeline skips videos under `min_duration_sec` (default 180 s, 0 = off). Behaviour: cost accounting, video ingest. Migrations: none. Reference updated: §5. Supersedes v1.94.1.
 
 ### v1.94.1 · 2026-10-28 · pass 100 · SC-52
 
