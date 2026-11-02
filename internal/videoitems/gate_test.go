@@ -259,3 +259,11 @@ func TestV1952Kinds(t *testing.T) {
 		t.Errorf("oil = %+v", got)
 	}
 }
+
+func TestTickerSpokenElsewhereIsFar(t *testing.T) {
+	g := NewGate(Default, WordsFromCompact("[0s] intro words\n[600s] the eli lilly report was strong\n[615s] end"))
+	v := g.Check(item("predictions", &Ref{0, 10}, map[string]any{"asset": "LLY", "claim": "bigger", "direction": "up"}))
+	if v.Class != ClassFar || !v.SignalOK {
+		t.Errorf("want far, got %s %+v", v.Class, v.Issues)
+	}
+}
