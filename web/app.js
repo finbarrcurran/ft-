@@ -6816,7 +6816,6 @@ async function renderEquitiesScreener() {
     const tagPills = [
       r.held ? '<span class="screener-tag held">HELD</span>' : '',
       r.onWatchlist ? '<span class="screener-tag wl">✓ WL</span>' : '',
-      r.visser46 ? `<span class="screener-tag" title="${escapeHTML(r.vertical || '')}${r.outsideTop250 ? ' · outside the CoinGecko top 250' : ''}">V46${r.outsideTop250 ? ' &gt;250' : ''}</span>` : '',
     ].join('');
     return `
       <tr data-ticker="${escapeHTML(r.ticker)}">
@@ -7033,6 +7032,7 @@ async function renderCryptoScreener() {
     const tagPills = [
       r.held ? '<span class="screener-tag held">HELD</span>' : '',
       r.onWatchlist ? '<span class="screener-tag wl">✓ WL</span>' : '',
+      r.visser46 ? `<span class="screener-tag" title="${escapeHTML(r.vertical || '')}${r.outsideTop250 ? ' · outside the CoinGecko top 250' : ''}">V46${r.outsideTop250 ? ' &gt;250' : ''}</span>` : '',
     ].join('');
     return `
       <tr data-symbol="${escapeHTML(r.symbol)}">

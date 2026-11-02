@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.99.0 · 2026-11-02** — latest change: Visser 46 reference table and screener tag (§13).
+> **Current version: v1.99.1 · 2026-11-02** — latest change: Index stock exchanges and a screener pill fix (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.99.0 2026-11-02 -->
+<!-- reference_reviewed: v1.99.1 2026-11-02 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -114,6 +114,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0057 | `video_transcripts` | SC-52 P2 — `video_transcripts` (one row per video: id, source, title, date, captions text with `[NNNs]` markers, sha) + `video_transcripts_fts` (FTS5 external-content index kept by triggers); free of LLM spend, carried by any DB backup |
 | 0058 | `etoro_capital_flows` | SC-52 P4 — `etoro_capital_flows` (dated deposits, transfers to/from eToro Money, withdrawals, reversals and FX conversion fees from the statements' Account Activity; idempotent on a hash of the activity row; `manual = 1` rows are the deletable fallback) and `etoro_statement_periods.flows_summary_json` (the Account Summary vs rows reconciliation of each statement) |
 | 0059 | `regime_history_seed_flag` | SC-52 P6 — `regime_history.seed_excluded` (rows kept, but skipped when the weekly snapshot seeds its history); the four 2026-05-16 smoke-test / reset rows are flagged by the migration; the June 2026 Jordi flips wait for Fin's confirmation (`ft regime-history flag --ids …`) |
+| 0064 | `crypto_index_exchanges` | Jordi-46 follow-up — records the exchange of COIN and HOOD (Nasdaq) and CRCL (NYSE) in `crypto_index_members`, checked against Finnhub and Yahoo responses |
 | 0063 | `crypto_index_members` | Jordi-46 Phase 1 — the 46 constituents of the Visser-Labs tokenized index (list_version 2026-09-21; 42 tokens with CoinGecko ids, 4 stocks COIN/HOOD/CRCL/FIGR; 10 verticals; soft `removed_at`); reference only, read by the screener and the list endpoint and by nothing else (no alert, gap-report, entry-zone, watchlist, holdings or thesis code) |
 | 0062 | `video_frame_reads` | SC-54 — `video_frame_reads` (what the vision model read off each chart frame: series, visible values, confidence, model, date; re-reads add rows) and `video_frame_runs` (one row per pass: status, reason, frames, calls, reads, cost) |
 | 0061 | `video_items` | SC-53 — `video_item_runs` (one per digest: model, chunks, tokens, cost, gate counts, status) and `video_items` (block, fields, cited span, gate class + issues, chart-unverified numbers, ticker resolution, direction verdict/speaker view/reason) |
@@ -296,7 +297,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 | ~~Twelve Data~~ | **retired 2026-10-12 (SC-48)** | | Its free plan is US-only and capped at 800 credits/day; FT spent ~3,400/day on it and every call failed (Yahoo supplied the data). No key use remains; the variable may stay in env unused |
 | Congress trades | Bargo Congress API (`bargo.ai/free-apis/congress/v1`) | — | Free key (`FT_BARGO_API_KEY`, Bearer header): 100 requests + 1,000 rows/day, 250 rows/page; free tier serves only the last ~3 months, so FT keeps its own history in `congress_trades_raw`. Terms: visible attribution (Signals tab footer) and no bulk redistribution |
 | Broker positions, SL/TP, invested USD | eToro Public API (`public-api.etoro.com`) | manual `.xlsx` statement upload | Key pair in env; 60 req/60 s shared limit; one call per 30-min sync; the sync transaction is `BEGIN IMMEDIATE` |
-| Crypto quote | CoinGecko `/simple/price` | serve-stale | Demo key `FT_COINGECKO_API_KEY`; free Demo plan 10,000 calls/month (the per-minute figure is unverified: CoinGecko's pricing page says 30/min for Demo). **Measured call volume (corrected v1.98.0):** before v1.98.0 FT made about 2,600 CoinGecko calls a day (every 15-minute refresh made 1 `/simple/price` plus 2 `/market_chart` per held coin × 13 coins = 27 calls × 96), almost all keyless and uncounted; `provider_daily` showed only the 96 `/simple/price` calls. Since v1.98.0 the refresh makes 1 keyless `/simple/price` per 15 minutes (96/day) plus 1 keyed `/coins/markets` for all held coins' 7d/30d changes at most once an hour (24/day), the 04:00 daily job makes 13 keyed `/market_chart` calls, and the indicator job's calls are counted too; every call is recorded in `provider_daily` as `coingecko` (keyless) or `coingecko_key` (Demo key) |
+| Crypto quote | CoinGecko `/simple/price` | serve-stale | Demo key `FT_COINGECKO_API_KEY`; free Demo plan 10,000 calls/month and 100 calls/min (checked on CoinGecko's pricing page 2026-11-02: "Call credits /mo 10k, Rate limit /min 100" for the free plan). **Measured call volume (corrected v1.98.0):** before v1.98.0 FT made about 2,600 CoinGecko calls a day (every 15-minute refresh made 1 `/simple/price` plus 2 `/market_chart` per held coin × 13 coins = 27 calls × 96), almost all keyless and uncounted; `provider_daily` showed only the 96 `/simple/price` calls. Since v1.98.0 the refresh makes 1 keyless `/simple/price` per 15 minutes (96/day) plus 1 keyed `/coins/markets` for all held coins' 7d/30d changes at most once an hour (24/day), the 04:00 daily job makes 13 keyed `/market_chart` calls, and the indicator job's calls are counted too; every call is recorded in `provider_daily` as `coingecko` (keyless) or `coingecko_key` (Demo key) |
 | Crypto history | CoinGecko `/market_chart` | — | Sequential w/ 2.5s gap |
 | Crypto market screener | CoinGecko top 250 | — | SC-21 |
 | Macro + Pal indicators | FRED | manual ISM entry | `FRED_API_KEY`. **Freshness (SC-49b, v1.85.0):** `data_as_of` = the newest observation date used (FRED) or the newest point of DefiLlama's array (stablecoin supply; a real dated element, so a provider that stops publishing stops advancing it). One rule per series in `internal/cryptoindicators/freshness` (cards, Diagnostics and the monitor all use it; age >= amber is amber, >= red is red): `pal_us2y` 5 / 8 US trading days; `pal_dxy` 14 / 21 calendar days (daily series published weekly, 6-11 day lag); `pal_cfnai` 95 / 120 calendar days from the observation date (dated the 1st, released ~3-4 weeks after month end: the real FRED release dates 2025-2026 give a longest normal wait of ~87 days; a fixed number was used rather than "next release + 7 days"); `universal_stablecoin_supply` 3 / 5 calendar days. A fresh refresh time with an old data date is stale. Error pill still takes precedence; stale data is never hidden |
@@ -394,13 +395,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.99.1 · 2026-11-02 · pass 111 · Jordi-46
+
+**Index stock exchanges and a screener pill fix.** Migration 0064 records COIN and HOOD (Nasdaq) and CRCL (NYSE), checked against Finnhub and Yahoo; the V46 pill moves into the crypto screener; §8 states the Demo plan's 100 calls/min per the pricing page. Behaviour: Screener tab, data rows. Migrations: 0064. Reference updated: §5, §8. Supersedes v1.99.0.
+
 ### v1.99.0 · 2026-11-02 · pass 110 · Jordi-46
 
 **Visser 46 reference table and screener tag.** `crypto_index_members` (migration 0063) holds the 46 index constituents (42 tokens with verified CoinGecko ids, 4 stocks, 10 verticals); the crypto screener gets a Visser 46 filter and vertical column, fetching members outside the top 250 with one extra keyed call; read-only `GET /api/crypto-index/visser46`. Reference only: no alerts, watchlist, holdings or thesis effect. Behaviour: Screener tab. Migrations: 0063. Reference updated: §3, §5. Supersedes v1.98.0.
 
+
 ### v1.98.0 · 2026-11-02 · pass 109 · Jordi-46
 
 **CoinGecko call chatter fixed and counted.** Measured about 2,600 calls a day (not the stated 100-200): the 15-minute refresh made 27 calls. 7d/30d changes now come from one keyed `/coins/markets` call at most hourly; every CoinGecko call is counted in `provider_daily` (`coingecko` keyless, `coingecko_key` keyed); the 04:00 history job now uses the key and retries 429s (5 of 13 coins became 13 of 13). §8 corrected. Behaviour: refresh, daily job, counters. Migrations: none. Reference updated: §8. Supersedes v1.97.0.
+
 
 
 ### v1.97.0 · 2026-11-02 · pass 108 · SC-54
@@ -409,9 +416,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.96.1 · 2026-11-02 · pass 107 · SC-53
 
 **Gate stop words.** Named-ticker name text is not scanned for tickers; stop list gains GLP, SK, NAND, DRAM. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.96.0.
+
 
 
 
@@ -424,9 +433,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.3 · 2026-11-02 · pass 105 · SC-53
 
 **Ticker spoken forms.** A ticker is invented only if no spoken form of the company (phrases included) occurs anywhere in the transcript; otherwise near or far. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.2.
+
 
 
 
@@ -443,9 +454,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.1 · 2026-11-02 · pass 103 · SC-53
 
 **Gate name matching.** In tickers_named the gate no longer looks for ticker letters in the passage, matches spoken names across spacing, and accepts alias spoken forms (Citigroup, "cityroup" added for C). Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.0.
+
 
 
 
@@ -466,21 +479,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.94.2 · 2026-11-01 · pass 101 · SC-52
-
-**Current-generation rates and a short-video skip rule.** The LLM rate table gains Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.1 (verified against the pricing page); the video pipeline skips videos under `min_duration_sec` (default 180 s, 0 = off). Behaviour: cost accounting, video ingest. Migrations: none. Reference updated: §5. Supersedes v1.94.1.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.99.0 -->
+<!-- END FT-master-spec v1.99.1 -->
