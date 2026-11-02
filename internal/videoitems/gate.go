@@ -154,13 +154,22 @@ func (g *Gate) Check(it Item) Verdict {
 			wYears = append(wYears, int(v))
 		}
 	}
-	txt := nameNumsRe.ReplaceAllString(ItemText(it), " ")
+	scan := it
+	if it.Block == "tickers_named" && nameSpoken(it, win) { // the ticker is the lookup of a spoken name: its letters are not searched for
+		scan = Item{Block: it.Block, Ref: it.Ref, Fields: map[string]any{}}
+		for k, v := range it.Fields {
+			if k != "ticker" {
+				scan.Fields[k] = v
+			}
+		}
+	}
+	txt := nameNumsRe.ReplaceAllString(ItemText(scan), " ")
 	fieldTk, claimed := fieldTickers(it)
 	tickers := map[string]bool{}
 	for _, t := range fieldTk {
 		// in tickers_named the ticker is the model's lookup of the spoken name, not spoken itself: the name is
 		// checked instead, and the ticker only when the alias file knows it (a mismatch is then a real flag)
-		if it.Block != "tickers_named" || g.A.Has(t) {
+		if it.Block != "tickers_named" || (g.A.Has(t) && !nameSpoken(it, win)) {
 			tickers[t] = true
 		}
 	}
@@ -272,7 +281,7 @@ func (g *Gate) Check(it Item) Verdict {
 	if name, _ := it.Fields["name"].(string); it.Block == "tickers_named" && strings.TrimSpace(name) != "" {
 		nn := NormName(name)
 		if nn != "" && !strings.Contains(" "+NormName(win)+" ", " "+nn+" ") && !strings.Contains(" "+NormName(win)+" ", " "+nn+"s ") &&
-			!fuzzyIn(nn, NormName(win)) {
+			!fuzzyIn(nn, NormName(win)) && !compactIn(nn, NormName(win)) && !g.A.aliasSpoken(name, win) {
 			var times []int
 			for _, tok := range strings.Fields(nn) {
 				if len(tok) >= 4 {
@@ -365,6 +374,46 @@ func fuzzyIn(name, text string) bool {
 	}
 	for _, w := range strings.Fields(text) {
 		if len(w) >= 6 && abs(len(w)-len(name)) <= 2 && editDistance(name, w, 2) <= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// compactIn matches a name with the spaces removed on both sides, and a spoken word that begins with
+// the name ("robinhood" for "robin hood", "open router" for "openrouter", "cityroup" for "citi").
+func compactIn(name, text string) bool {
+	n := strings.ReplaceAll(name, " ", "")
+	if len(n) < 4 {
+		return false
+	}
+	t := strings.ReplaceAll(text, " ", "")
+	if strings.Contains(t, n) {
+		return len(n) >= 6 || strings.Contains(" "+text+" ", " "+name)
+	}
+	return false
+}
+
+// nameSpoken reports whether a tickers_named item's company name is in the passage (the ticker is then
+// the model's lookup of a spoken name, not something to find in the passage).
+func nameSpoken(it Item, win string) bool {
+	name, _ := it.Fields["name"].(string)
+	nn, w := NormName(name), NormName(win)
+	if nn == "" {
+		return false
+	}
+	return strings.Contains(" "+w+" ", " "+nn+" ") || strings.Contains(" "+w+" ", " "+nn+"s ") || fuzzyIn(nn, w) || compactIn(nn, w) || Default.aliasSpoken(name, win)
+}
+
+// aliasSpoken reports whether the name maps (alias file) to a ticker whose spoken form is in the passage.
+func (a *Aliases) aliasSpoken(name, win string) bool {
+	want := a.Tickers(name)
+	if len(want) == 0 {
+		return false
+	}
+	hits := a.Hits(win)
+	for _, t := range want {
+		if hits[t] {
 			return true
 		}
 	}

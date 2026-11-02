@@ -203,3 +203,16 @@ func TestParseDirectionSalvagesTruncatedArray(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 }
+
+func TestNameSpacingAndTickerLookup(t *testing.T) {
+	g := NewGate(Default, WordsFromCompact("[0s] I wired money to Robin Hood and moved it. They just acquired Open Router. Cityroup 226,000 employees. like Cisco at 100 PE"))
+	for _, c := range []struct{ name, tk string }{{"Robinhood", "HOOD"}, {"OpenRouter", ""}, {"Cisco", "CSCO"}, {"Citi", "C"}} {
+		f := map[string]any{"name": c.name, "stance": "neutral"}
+		if c.tk != "" {
+			f["ticker"] = c.tk
+		}
+		if v := g.Check(item("tickers_named", &Ref{0, 10}, f)); v.Class != ClassGrounded {
+			t.Errorf("%s: want grounded, got %s %+v", c.name, v.Class, v.Issues)
+		}
+	}
+}
