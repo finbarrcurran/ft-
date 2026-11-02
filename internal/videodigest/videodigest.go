@@ -64,6 +64,8 @@ type Service struct {
 	// VoteRuns > 1 makes the SWEEP extract the newest Jordi digest that many times and keep the
 	// majority state (set to 3 by the server; the backfill and `ft video-digest-extract` never vote).
 	VoteRuns int
+	// ExtractV5Items makes the sweep run the SC-53 v5 item extraction after each ingest (set by the server).
+	ExtractV5Items bool
 }
 
 // New returns a Service. An empty root means DefaultRoot.
@@ -1429,6 +1431,14 @@ func (s *Service) Sweep(ctx context.Context) ([]Result, error) {
 				slog.Warn("videodigest: vote failed (the single extraction stands)", "video", p.Meta.VideoID, "err", err)
 			}
 		}
+		if r.Status == "ingested" && s.ExtractV5Items { // SC-53: the v5 items, after the digest and its vote; a failure never fails the digest
+			if ir := s.ExtractItems(ctx, p.Meta.VideoID, ItemsOptions{}); ir.Status == "failed" {
+				slog.Warn("videodigest: v5 items not extracted", "video", p.Meta.VideoID, "err", ir.Error)
+			} else {
+				slog.Info("videodigest: v5 items", "video", p.Meta.VideoID, "items", ir.Items, "counts", ir.Counts, "unresolved", ir.Unresolved,
+					"contradicts", ir.Contradicts, "costUsd", ir.CostUSD, "directionCostUsd", ir.DirectionCost)
+			}
+		}
 		if r.Status == "failed" && (strings.Contains(r.Error, llm.ErrBudgetBlocked.Error()) ||
 			strings.Contains(r.Error, llm.ErrGloballyPaused.Error()) ||
 			strings.Contains(r.Error, llm.ErrFeatureDisabled.Error()) ||
@@ -1491,6 +1501,9 @@ type Digest struct {
 	Quotes           []Quote   `json:"quotes"`
 	Snapshot         *Snapshot `json:"snapshot"`
 	FrameCount       int       `json:"frameCount"`
+	// Items is the SC-53 v5 extraction summary (nil until a run exists); the items come from
+	// GET /api/video-digest/{id}/items.
+	Items *ItemsRun `json:"items"`
 }
 
 func nullStr(n sql.NullString) *string {
@@ -1560,6 +1573,7 @@ func (s *Service) List(ctx context.Context, source string) ([]Digest, error) {
 			return nil, err
 		}
 	}
+	s.fillItemRuns(ctx, out)
 	return out, nil
 }
 

@@ -120,6 +120,8 @@ func main() {
 		runEtoroImport(os.Args[2:])
 	case "video-digest-vote":
 		runVideoDigestVote(os.Args[2:])
+	case "video-digest-items":
+		runVideoDigestItems(os.Args[2:])
 	case "video-digest-extract":
 		runVideoDigestExtract(os.Args[2:])
 	case "regime-history":
@@ -1316,6 +1318,59 @@ func runVideoDigestVote(args []string) {
 	r, err := svc.VoteNewest(context.Background(), *id, *runs)
 	must("vote", err)
 	fmt.Printf("runs %d | counts %v | kept %q (%d of %d agree) | split=%v changed=%v | extra cost $%.4f\n", r.Runs, r.Counts, r.State, r.Agree, r.Runs, r.Split, r.Changed, r.CostUSD)
+}
+
+// runVideoDigestItems: SC-53. Runs the v5 item extraction (Haiku 5.5 through the governor, so every call
+// is in the ledger), the grounding gate, the ticker resolver and the direction flag for stored digests.
+// --dry-run stores nothing; --show prints every item with its flag.
+func runVideoDigestItems(args []string) {
+	fs := flag.NewFlagSet("video-digest-items", flag.ExitOnError)
+	ids := fs.String("video-id", "", "YouTube video id of a stored digest (comma-separated for several)")
+	force := fs.Bool("force", false, "replace an existing run")
+	dry := fs.Bool("dry-run", false, "do the work but store nothing")
+	show := fs.Bool("show", false, "print every item with its gate class, resolution and direction flag")
+	_ = fs.Parse(args)
+	if *ids == "" {
+		fmt.Fprintln(os.Stderr, "usage: ft video-digest-items --video-id ID[,ID…] [--force] [--dry-run] [--show]")
+		os.Exit(2)
+	}
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	svc := videodigest.New(st.DB, llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY")), os.Getenv("FT_VIDEO_DIGEST_ROOT"))
+	for _, id := range strings.Split(*ids, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		r := svc.ExtractItems(context.Background(), id, videodigest.ItemsOptions{Force: *force, DryRun: *dry})
+		fmt.Printf("%s | %s | items %d %v | chunks %d | tokens in %d out %d | cost $%.4f + direction $%.4f | unresolved tickers %d | direction contradicts %d | stored=%v %s\n",
+			r.VideoID, r.Status, r.Items, r.Counts, r.Chunks, r.InputTokens, r.OutputTokens, r.CostUSD, r.DirectionCost, r.Unresolved, r.Contradicts, r.Stored, r.Error)
+		if *show {
+			for _, it := range r.Preview {
+				name, _ := it.Fields["name"].(string)
+				if name == "" {
+					for _, k := range []string{"claim", "cause", "level", "pattern", "then", "what"} {
+						if v, ok := it.Fields[k].(string); ok {
+							name = v
+							break
+						}
+					}
+				}
+				extra := ""
+				if it.Resolution != nil {
+					extra = fmt.Sprintf(" [%s %s %s]", it.Resolution.Status, it.Resolution.Ticker, it.Resolution.Source)
+				}
+				if it.Direction != nil && it.Direction.Verdict == "contradicts" {
+					extra += " DIRECTION: " + it.Direction.View
+				}
+				fmt.Printf("  %-16s %-13s %.70s%s %v\n", it.Block, it.Class, name, extra, it.Issues)
+			}
+		}
+	}
 }
 
 // runVideoDigestExtract: SC-52 P3. Digests stored packages that have no digest yet, with a hard
