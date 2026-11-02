@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.98.0 · 2026-11-02** — latest change: CoinGecko call chatter fixed and counted (§13).
+> **Current version: v1.99.0 · 2026-11-02** — latest change: Visser 46 reference table and screener tag (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.98.0 2026-11-02 -->
+<!-- reference_reviewed: v1.99.0 2026-11-02 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -39,7 +39,7 @@ Nineteen tabs, in nav order:
 | 5 | Crypto Theses | 9l | 12-adapter repository + per-coin scored theses with lock / fork / cascade acknowledgement, and the crypto allocation table |
 | 6 | Signals | 9k, SC-23, SC-24 | Insider (SEC Form 4), Congress (Bargo feed, with a visible attribution line), executive-order, OGE 278-T, named political-figure tracker, 13F institutional tracker. Tab badge on alarms |
 | 7 | Performance | 9d, SC-17, SC-26, SC-30 | Leads with real eToro realised history (annual + YTD from statement imports), copy-vs-systematic split; closed-trade retrospective below. Hosts "Upload statement" and "Reconcile holdings". **SC-51:** a "Statement data through <date>" label (amber chip after 35 days) and a trade-statistics panel (win rate, payoff, profit factor, expectancy, median hold by scope/year). **One scope control (Discretionary default / Copy-CFD / All, v1.84.1)** drives the year tables and the statistics panel together; in the filtered views only realised P&L and trade counts are scoped, dividends/fees/interest/refunds show once as an "Account-level (not split by strategy)" row and no Net is computed; Net exists only in All and on the YTD card ("YTD <year> · realised"). Browser test: `tools/e2e/performance_scope.js` (Playwright) |
-| 8 | Screener | 9b, SC-21 | Stock screener ("+ watchlist") and the crypto market screener (CoinGecko top 250) |
+| 8 | Screener | 9b, SC-21, Jordi-46 | Stock screener ("+ watchlist") and the crypto market screener (CoinGecko top 250, plus a "Visser 46" filter and vertical column for the 46-name index, members outside the top 250 fetched by one extra call) |
 | 9 | Macro Regime & Sector Rotation | 9f, 9p | Macro regime band (growth × inflation, FRED-driven, playbook) above the 34-row sector taxonomy with multi-window returns, RS vs SPY, tag pills, weekly digest |
 | 10 | AI Nexus | SC-36, SC-39 | Visser replication: Trend Score, Exhaustion, Forward PEG over the Nexus universe; Entry Candidates view |
 | 11 | Video Digest | SC-43 | LLM digests of Jordi Visser / Benjamin Cowen videos: summary, themes, mentions with timestamp links, verified quotes, Cowen snapshot fields |
@@ -114,6 +114,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0057 | `video_transcripts` | SC-52 P2 — `video_transcripts` (one row per video: id, source, title, date, captions text with `[NNNs]` markers, sha) + `video_transcripts_fts` (FTS5 external-content index kept by triggers); free of LLM spend, carried by any DB backup |
 | 0058 | `etoro_capital_flows` | SC-52 P4 — `etoro_capital_flows` (dated deposits, transfers to/from eToro Money, withdrawals, reversals and FX conversion fees from the statements' Account Activity; idempotent on a hash of the activity row; `manual = 1` rows are the deletable fallback) and `etoro_statement_periods.flows_summary_json` (the Account Summary vs rows reconciliation of each statement) |
 | 0059 | `regime_history_seed_flag` | SC-52 P6 — `regime_history.seed_excluded` (rows kept, but skipped when the weekly snapshot seeds its history); the four 2026-05-16 smoke-test / reset rows are flagged by the migration; the June 2026 Jordi flips wait for Fin's confirmation (`ft regime-history flag --ids …`) |
+| 0063 | `crypto_index_members` | Jordi-46 Phase 1 — the 46 constituents of the Visser-Labs tokenized index (list_version 2026-09-21; 42 tokens with CoinGecko ids, 4 stocks COIN/HOOD/CRCL/FIGR; 10 verticals; soft `removed_at`); reference only, read by the screener and the list endpoint and by nothing else (no alert, gap-report, entry-zone, watchlist, holdings or thesis code) |
 | 0062 | `video_frame_reads` | SC-54 — `video_frame_reads` (what the vision model read off each chart frame: series, visible values, confidence, model, date; re-reads add rows) and `video_frame_runs` (one row per pass: status, reason, frames, calls, reads, cost) |
 | 0061 | `video_items` | SC-53 — `video_item_runs` (one per digest: model, chunks, tokens, cost, gate counts, status) and `video_items` (block, fields, cited span, gate class + issues, chart-unverified numbers, ticker resolution, direction verdict/speaker view/reason) |
 | 0060 | `digest_proposal_votes` | SC-52 — `video_digests.proposal_runs` / `proposal_agree` (how many extractions voted on the newest Jordi digest and how many gave the kept state; NULL for every other digest) |
@@ -202,7 +203,7 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 
 **Regime (9b) + macro (9p):** `GET /api/regime` **T**, `POST /api/regime/{jordi,cowen/manual,cowen/auto}`, `GET /api/regime/history`. `GET /api/macro/regime` **T**, `POST /api/macro/{refresh,ism}`, `GET/POST /api/macro/playbook`, `DELETE /api/macro/playbook/{id}`, `GET /api/macro`
 
-**Screeners:** `GET /api/screener`, `GET /api/crypto-screener` (SC-21)
+**Screeners:** `GET /api/screener`, `GET /api/crypto-screener` (SC-21; rows carry `visser46`, `vertical`, `outsideTop250`), `GET /api/crypto-index/visser46` (Jordi-46 Phase 1: the reference list of the 46 members with verticals and ids; read-only, no portfolio data)
 
 **Percoco levels + risk (9c, SC-35):** `GET /api/holdings/{stocks,crypto}/{id}/levels` **T**, `POST .../autoscore`, `GET /api/risk/dashboard` **T**, `POST /api/risk/snapshot` **T**
 
@@ -393,13 +394,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.99.0 · 2026-11-02 · pass 110 · Jordi-46
+
+**Visser 46 reference table and screener tag.** `crypto_index_members` (migration 0063) holds the 46 index constituents (42 tokens with verified CoinGecko ids, 4 stocks, 10 verticals); the crypto screener gets a Visser 46 filter and vertical column, fetching members outside the top 250 with one extra keyed call; read-only `GET /api/crypto-index/visser46`. Reference only: no alerts, watchlist, holdings or thesis effect. Behaviour: Screener tab. Migrations: 0063. Reference updated: §3, §5. Supersedes v1.98.0.
+
 ### v1.98.0 · 2026-11-02 · pass 109 · Jordi-46
 
 **CoinGecko call chatter fixed and counted.** Measured about 2,600 calls a day (not the stated 100-200): the 15-minute refresh made 27 calls. 7d/30d changes now come from one keyed `/coins/markets` call at most hourly; every CoinGecko call is counted in `provider_daily` (`coingecko` keyless, `coingecko_key` keyed); the 04:00 history job now uses the key and retries 429s (5 of 13 coins became 13 of 13). §8 corrected. Behaviour: refresh, daily job, counters. Migrations: none. Reference updated: §8. Supersedes v1.97.0.
 
+
 ### v1.97.0 · 2026-11-02 · pass 108 · SC-54
 
 **Frame archive to Drive, built and off.** Public-video frames can be copied to Drive `FT-Frames/` (outside FT-Bridge) with MD5 verification, an upload-failure marker and a Telegram alert (monitor source `drive_frames`); off unless `/etc/ft/frames-archive.enabled` exists; nothing is deleted. Behaviour: ops, monitor. Migrations: none. Reference updated: §5. Supersedes v1.96.1.
+
 
 
 ### v1.96.1 · 2026-11-02 · pass 107 · SC-53
@@ -408,9 +415,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.96.0 · 2026-11-02 · pass 106 · SC-54
 
 **Chart-frame reads.** Haiku 5.5 reads the chart frames of public videos after each ingest (governor feature `video_frames`, sub-caps $0.05/video and $0.25/day; a hit cap shows "frames skipped"); reads are display-only "from chart, unverified" rows with thumbnails, never signals; a re-read adds rows; public-only check from package availability; Jordi frame cap 30 to 45. Behaviour: Video Digest tab, governor. Migrations: 0062. Reference updated: §5. Supersedes v1.95.3.
+
 
 
 
@@ -423,9 +432,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.2 · 2026-11-02 · pass 104 · SC-53
 
 **Gate and resolver follow-ups.** Invented only if the name is absent from the whole transcript; number-word names match; wrong-place window 180 s for Cowen; new resolution kinds proxy (display only) and not_listed; alias additions. Governor gains image blocks and video_frames sub-caps (unused until SC-54). Behaviour: grounding gate, resolver, Video Digest tab. Migrations: none. Reference updated: §5. Supersedes v1.95.1.
+
 
 
 
@@ -442,9 +453,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.0 · 2026-11-02 · pass 102 · SC-53
 
 **v5 items and grounding gate.** A separate Haiku 5.5 call extracts every claim, prediction, level, indicator and named ticker from each video digest; a gate classes each item grounded / wrong place / far / invented / name mapping (flags shown, only invented and name-mapping kept out of signals); tickers are resolved by alias file, fuzzy match, then symbol search; a direction flag shows contradictions beside the speaker's net view. Behaviour: Video Digest tab, governor feature caps. Migrations: 0061. Reference updated: §5. Supersedes v1.94.2.
+
 
 
 
@@ -465,21 +478,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.94.1 · 2026-10-28 · pass 100 · SC-52
-
-**CLI fixes.** `ft transcripts search` accepts flags after the query; CLI commands refuse to create a database at a path that does not exist (FT_ALLOW_NEW_DB=1 overrides). Behaviour: CLI only. Migrations: none. Reference updated: §10. Supersedes v1.94.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.98.0 -->
+<!-- END FT-master-spec v1.99.0 -->
