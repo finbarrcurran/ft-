@@ -171,6 +171,7 @@ def video_info(vid: str) -> dict:
         "timestamp": j.get("timestamp"),              # epoch, may be None
         "duration": int(j.get("duration") or 0),
         "live_status": j.get("live_status"),
+        "availability": j.get("availability"),        # SC-54: frames are read only for public videos
     }
 
 
@@ -393,6 +394,7 @@ def build_package(key: str, src: dict, info: dict, cfg: dict, args) -> dict:
             "published_at": date,
             "duration_sec": info["duration"],
             "is_flagship": info.get("is_flagship", False),
+            "availability": info.get("availability"),
             "transcript_method": tr["method"],
             "transcript_caption_track": tr.get("caption_track"),
             "transcript_cue_granularity": tr["cue_granularity"],

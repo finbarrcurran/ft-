@@ -2226,7 +2226,51 @@ function vdItemsHTML(d, v) {
   return head + blocks;
 }
 
+// SC-54 — what the vision model read off the chart frames. Values are "from chart, unverified" and
+// never feed a signal; a skipped pass says why ("frames skipped").
+function vdFramesToggle(d) {
+  if (!d.frameCount) return '';
+  return `<details class="vd-items" data-vd-frames="${d.id}">
+    <summary>Chart reads <span class="dim">· ${d.frameCount} frames · from chart, unverified</span></summary>
+    <div class="vd-items-body dim">loading…</div></details>`;
+}
+
+function vdFramesHTML(v) {
+  const run = v.run;
+  let head = '<div class="dim vd-items-head">Not read yet.</div>';
+  if (run) {
+    const when = new Date(run.runAt * 1000).toLocaleDateString();
+    head = `<div class="dim vd-items-head">${run.status}${run.reason ? ' — ' + escapeHTML(run.reason) : ''} · ${run.frames} frames · ${run.reads} reads · ${run.model} · $${run.costUsd.toFixed(4)} · ${when}</div>`;
+  }
+  if (!v.reads.length) return head;
+  const rows = v.reads.map((r) => `<tr>
+    <td>${r.frameId ? `<a href="/api/video-frame/${r.frameId}" target="_blank" rel="noopener"><img class="vd-thumb" loading="lazy" src="/api/video-frame/${r.frameId}" alt="frame at ${r.tsSec}s"></a>` : ''}</td>
+    <td class="num">${vdClock(r.tsSec)}</td><td>${escapeHTML(r.series)}</td>
+    <td>${escapeHTML(r.values)} <span class="vd-flag vd-flag-chart">from chart, unverified</span></td>
+    <td class="dim">${escapeHTML(r.confidence)} · ${escapeHTML(r.model)}</td></tr>`).join('');
+  return head + `<table class="vd-table"><thead><tr><th></th><th>Time</th><th>Chart</th><th>Read</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function vdWireFrames(root) {
+  root.querySelectorAll('details[data-vd-frames]').forEach((el) => {
+    el.addEventListener('toggle', async () => {
+      if (!el.open || el.dataset.loaded) return;
+      el.dataset.loaded = '1';
+      const body = el.querySelector('.vd-items-body');
+      try {
+        const v = await api(`/api/video-digest/${el.dataset.vdFrames}/frames`);
+        body.classList.remove('dim');
+        body.innerHTML = vdFramesHTML(v);
+      } catch (err) {
+        body.textContent = 'Could not load chart reads: ' + err.message;
+        delete el.dataset.loaded;
+      }
+    });
+  });
+}
+
 function vdWireItems(root, ds) {
+  vdWireFrames(root);
   root.querySelectorAll('details.vd-items').forEach((el) => {
     el.addEventListener('toggle', async () => {
       if (!el.open || el.dataset.loaded) return;
@@ -2283,6 +2327,7 @@ function vdCard(d) {
     ${mentions}
     ${quotes}
     ${vdItemsToggle(d)}
+    ${vdFramesToggle(d)}
   </article>`;
 }
 

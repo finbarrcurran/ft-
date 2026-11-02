@@ -5742,3 +5742,4 @@ a.score-badge { display: inline-block; }
 .vd-flag-dir { border-color: #8e44ad; color: #8e44ad; }
 .vd-flag-detail { font-size: 11px; }
 .vd-passage { margin-top: 3px; font-size: 12px; }
+.vd-thumb { width: 96px; height: auto; border-radius: 4px; display: block; }
