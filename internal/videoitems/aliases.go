@@ -14,6 +14,37 @@ import (
 //go:embed ticker_aliases.tsv
 var aliasTSV string
 
+//go:embed name_kinds.tsv
+var kindsTSV string
+
+// NameKind is how a spoken name that is not a company is classed (SC-53 follow-up, v1.95.2).
+type NameKind struct {
+	Kind   string // proxy | not_listed
+	Ticker string // proxy only; display only
+}
+
+var nameKinds = func() map[string]NameKind {
+	m := map[string]NameKind{}
+	for _, line := range strings.Split(kindsTSV, "\n") {
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		f := strings.Split(line, "\t")
+		if len(f) < 2 {
+			continue
+		}
+		k := NameKind{Kind: strings.TrimSpace(f[1])}
+		if len(f) > 2 {
+			k.Ticker = strings.TrimSpace(f[2])
+		}
+		m[normSpoken(f[0])] = k
+	}
+	return m
+}()
+
+// KindOf looks a spoken name up in name_kinds.tsv ("total two" finds "total 2").
+func KindOf(name string) (NameKind, bool) { k, ok := nameKinds[normSpoken(name)]; return k, ok }
+
 // Aliases maps a ticker to the lower-case company names that ground it. One line per name in
 // ticker_aliases.tsv (ticker<TAB>name<TAB>source); a new name is a one-line change.
 type Aliases struct {

@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.95.1 · 2026-11-02** — latest change: Gate name matching (§13).
+> **Current version: v1.95.2 · 2026-11-02** — latest change: Gate and resolver follow-ups (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.95.1 2026-11-02 -->
+<!-- reference_reviewed: v1.95.2 2026-11-02 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -392,13 +392,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.95.2 · 2026-11-02 · pass 104 · SC-53
+
+**Gate and resolver follow-ups.** Invented only if the name is absent from the whole transcript; number-word names match; wrong-place window 180 s for Cowen; new resolution kinds proxy (display only) and not_listed; alias additions. Governor gains image blocks and video_frames sub-caps (unused until SC-54). Behaviour: grounding gate, resolver, Video Digest tab. Migrations: none. Reference updated: §5. Supersedes v1.95.1.
+
 ### v1.95.1 · 2026-11-02 · pass 103 · SC-53
 
 **Gate name matching.** In tickers_named the gate no longer looks for ticker letters in the passage, matches spoken names across spacing, and accepts alias spoken forms (Citigroup, "cityroup" added for C). Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.0.
 
+
 ### v1.95.0 · 2026-11-02 · pass 102 · SC-53
 
 **v5 items and grounding gate.** A separate Haiku 5.5 call extracts every claim, prediction, level, indicator and named ticker from each video digest; a gate classes each item grounded / wrong place / far / invented / name mapping (flags shown, only invented and name-mapping kept out of signals); tickers are resolved by alias file, fuzzy match, then symbol search; a direction flag shows contradictions beside the speaker's net view. Behaviour: Video Digest tab, governor feature caps. Migrations: 0061. Reference updated: §5. Supersedes v1.94.2.
+
 
 
 ### v1.94.2 · 2026-11-01 · pass 101 · SC-52
@@ -407,9 +413,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.94.1 · 2026-10-28 · pass 100 · SC-52
 
 **CLI fixes.** `ft transcripts search` accepts flags after the query; CLI commands refuse to create a database at a path that does not exist (FT_ALLOW_NEW_DB=1 overrides). Behaviour: CLI only. Migrations: none. Reference updated: §10. Supersedes v1.94.0.
+
 
 
 
@@ -422,9 +430,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.93.0 · 2026-10-27 · pass 98 · SC-52
 
 **Cited evidence (P0.2) and the backfill tooling (P3).** The extraction now cites the supporting transcript segment and FT supplies the words, so evidence quotes are verbatim by construction (15-second markers); Jordi's Stable/Shifting wording is fixed as ai asked. The Jarvis package builder gets a captions-only range mode; transcript-only packages are stored and searchable but never swept by the LLM; `ft video-digest-extract` digests on request within a spend ceiling and restores the daily cap. Behaviour: ingest only. Migrations: none. Reference updated: §5, §11. Supersedes v1.92.0.
+
 
 
 
@@ -441,9 +451,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.91.0 · 2026-10-19 · pass 96 · SC-52
 
 **Housekeeping (SC-52 P6).** Regime-history rows can be flagged so they never seed the weekly snapshot (nothing deleted); the May-16 smoke-test rows are flagged, the June flips wait for Fin. NewsAPI becomes an explicit-only disabled fallback and its 2026-10-27 removal is cancelled. Behaviour: snapshot seeding, news default. Migrations: 0059. Reference updated: §3, §8, §11. Supersedes v1.90.0.
+
 
 
 
@@ -464,21 +476,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.89.0 · 2026-10-19 · pass 94 · SC-52
-
-**Capital flows from statements (SC-52 P4).** Deposits, withdrawals and transfers to/from eToro Money are read from the statements' Account Activity, stored once each and reconciled to the Account Summary (93 rows, 2025-08-31 → 2026-06-01; none since). Shown on the Performance tab and quoted in the weekly snapshot's value notes; a manual entry endpoint is the fallback. Behaviour: import, display. Migrations: 0058. Reference updated: §3, §5, §11. Supersedes v1.88.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.95.1 -->
+<!-- END FT-master-spec v1.95.2 -->

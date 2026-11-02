@@ -49,6 +49,10 @@ type CallRequest struct {
 	CacheableContext string
 	UserPrompt       string
 
+	// Images are sent ahead of UserPrompt in the one user turn (SC-54: chart frames). Each counts
+	// imageTokenEstimate input tokens in the gate; the real count comes back in the response.
+	Images []Image
+
 	// MaxOutputTokens — capped at user_preferences cap. Defaults to 1024.
 	MaxOutputTokens int
 
@@ -89,6 +93,7 @@ var (
 	ErrToolUseNotAllowed  = errors.New("llm: tool use is disabled in v1 (no agentic loops)")
 	ErrInputTooLarge      = errors.New("llm: input exceeds max_input_tokens_per_call")
 	ErrOutputCapTooLarge  = errors.New("llm: requested max_output_tokens exceeds cap")
+	ErrFeatureCap         = errors.New("llm: feature sub-cap would be exceeded")
 	ErrUnknownModel       = errors.New("llm: model not in ModelRates table")
 	ErrAPIKeyMissing      = errors.New("llm: ANTHROPIC_API_KEY not configured")
 )
@@ -185,7 +190,7 @@ func (s *Service) Call(ctx context.Context, req CallRequest) (CallResponse, erro
 
 	// Rough input-token estimate: 4 chars ≈ 1 token. This is good enough
 	// for the gate; real count comes back in the response.
-	approxInputTokens := approxTokens(req.SystemPrompt + req.CacheableContext + req.UserPrompt)
+	approxInputTokens := approxTokens(req.SystemPrompt+req.CacheableContext+req.UserPrompt) + imageTokenEstimate*len(req.Images)
 	maxInCap := s.intPref(ctx, "llm_max_input_tokens_per_call", 20000)
 	if approxInputTokens > maxInCap {
 		return out, ErrInputTooLarge
@@ -225,6 +230,25 @@ func (s *Service) Call(ctx context.Context, req CallRequest) (CallResponse, erro
 				monthSpend, predicted, effectiveMonthlyCap, overrideTag(overrideExtraCap)))
 			out.Outcome = "budget_blocked"
 			return out, ErrBudgetBlocked
+		}
+	}
+
+	// Per-feature sub-caps (SC-54: frame reads $0.25 a day, $0.05 per video), inside the global caps.
+	if fc, ok := featureCaps[req.FeatureID]; ok {
+		day := s.clock().UTC().Format("2006-01-02")
+		if fc.DailyUSD > 0 {
+			if spent, _ := s.Store.FeatureCostSince(ctx, req.FeatureID, day, ""); spent+predicted > fc.DailyUSD {
+				s.logBlocked(ctx, req, fmt.Sprintf("%s daily sub-cap exceeded (today $%.4f + predicted $%.4f > $%.2f)", req.FeatureID, spent, predicted, fc.DailyUSD))
+				out.Outcome = "budget_blocked"
+				return out, ErrFeatureCap
+			}
+		}
+		if fc.PerContextUSD > 0 && req.FeatureContext != "" {
+			if spent, _ := s.Store.FeatureCostSince(ctx, req.FeatureID, "", strings.SplitN(req.FeatureContext, " ", 2)[0]); spent+predicted > fc.PerContextUSD {
+				s.logBlocked(ctx, req, fmt.Sprintf("%s per-video sub-cap exceeded ($%.4f + predicted $%.4f > $%.2f)", req.FeatureID, spent, predicted, fc.PerContextUSD))
+				out.Outcome = "budget_blocked"
+				return out, ErrFeatureCap
+			}
 		}
 	}
 
@@ -273,7 +297,25 @@ func (s *Service) Call(ctx context.Context, req CallRequest) (CallResponse, erro
 // featureOutputCaps are per-feature output ceilings that apply when the global
 // llm_max_output_tokens_per_call is lower (SC-53, Fin 2026-11-01: 8,000 for the v5 item extraction,
 // whose output reaches about 5,000 tokens). The global cap still applies to every other feature.
-var featureOutputCaps = map[string]int{"video_items": 8000, "video_direction": 4000}
+var featureOutputCaps = map[string]int{"video_items": 8000, "video_direction": 4000, "video_frames": 4000}
+
+// Image is one picture in a call (SC-54).
+type Image struct {
+	MediaType string // image/jpeg or image/png
+	Data      []byte
+}
+
+// imageTokenEstimate is the gate's input-token estimate per image (a downscaled chart frame is about 1,500).
+const imageTokenEstimate = 1600
+
+// FeatureCap is a sub-cap inside the global budget. FeatureContext is the per-video key: every call for one
+// video must use the same FeatureContext prefix up to the first space ("jordi:ID").
+type FeatureCap struct {
+	DailyUSD      float64
+	PerContextUSD float64
+}
+
+var featureCaps = map[string]FeatureCap{"video_frames": {DailyUSD: 0.25, PerContextUSD: 0.05}}
 
 func effectiveOutputCap(featureID string, global int) int {
 	if c, ok := featureOutputCaps[featureID]; ok && c > global {
@@ -299,6 +341,8 @@ func (s *Service) featureEnabled(ctx context.Context, featureID string) bool {
 		return s.boolPref(ctx, "llm_feature_video_digest", true)
 	case "video_items": // SC-53 v5 item extraction
 		return s.boolPref(ctx, "llm_feature_video_items", true)
+	case "video_frames":
+		return s.boolPref(ctx, "llm_feature_video_frames", true)
 	case "video_direction": // SC-53 direction flag
 		return s.boolPref(ctx, "llm_feature_video_direction", true)
 	}
