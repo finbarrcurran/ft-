@@ -1,0 +1,8 @@
+[Unit]
+Description=SC-54: copy chart frames of public videos to Google Drive (FT-Frames) — does nothing unless /etc/ft/frames-archive.enabled exists
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ft-frames-archive

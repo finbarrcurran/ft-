@@ -1,0 +1,56 @@
+#!/bin/bash
+# SC-54 — archive the chart frames of PUBLIC videos to Google Drive (FT-Frames/, a folder OUTSIDE
+# FT-Bridge, through the separate rclone remote `ftframes`). OFF by default: nothing happens unless
+# /etc/ft/frames-archive.enabled exists. Frames stay on Jarvis either way (local + restic); this is an
+# extra copy, never a deletion: no frame is ever removed here or on Drive.
+# Per frame: upload, then verify the Drive MD5 against the local file. A failure writes the marker
+# /var/lib/ft/data/bridge/frames.failed (first line = reason) which the FT monitor turns into a Telegram
+# alert; the frame is not recorded as archived, so the next run retries it. A clean run removes the
+# marker and touches frames.ok.
+set -uo pipefail
+FLAG=/etc/ft/frames-archive.enabled
+[ -f "$FLAG" ] || exit 0
+exec 9>/run/ft-frames-archive.lock
+flock -n 9 || exit 0
+ROOT=/var/lib/video_digest
+OKDIR=/var/lib/ft/data/bridge
+W=/var/lib/ft_bridge/frames
+RUSER=curran
+MAXPERRUN=${FT_FRAMES_MAX_PER_RUN:-300}
+install -d -m 750 -o root -g "$RUSER" /var/lib/ft_bridge "$W"
+install -d -m 755 -o ft -g ft "$OKDIR"
+STATE=$W/archived.tsv
+touch "$STATE"
+
+fail() {  # reason
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" > "$OKDIR/frames.failed"
+  chown ft:ft "$OKDIR/frames.failed"
+  echo "FAILED: $1" >&2
+  exit 1
+}
+
+runuser -u "$RUSER" -- rclone listremotes 2>/dev/null | grep -q '^ftframes:$' || fail "rclone remote 'ftframes' is missing (run 3_create_frames_folder.sh)"
+
+n=0
+for meta in "$ROOT"/*/*/meta.json; do
+  [ -f "$meta" ] || continue
+  pdir=$(dirname "$meta")
+  # public videos only: the package records YouTube's availability
+  [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("availability") or "")' "$meta" 2>/dev/null)" = "public" ] || continue
+  for f in "$pdir"/frames/*.jpg; do
+    [ -f "$f" ] || continue
+    rel=${f#"$ROOT"/}
+    grep -qxF -- "$rel"$'\t'"$(md5sum "$f" | cut -d' ' -f1)" "$STATE" && continue
+    n=$((n+1)); [ "$n" -gt "$MAXPERRUN" ] && break 2
+    sum=$(md5sum "$f" | cut -d' ' -f1)
+    install -m 640 -o root -g "$RUSER" "$f" "$W/upload.jpg"
+    runuser -u "$RUSER" -- rclone copyto "$W/upload.jpg" "ftframes:$rel" >"$W/rclone.err" 2>&1 || fail "$rel: upload error: $(tr '\n' ' ' < "$W/rclone.err" | cut -c1-200)"
+    remote=$(runuser -u "$RUSER" -- rclone md5sum "ftframes:$rel" 2>"$W/rclone.err" | awk '{print $1}')
+    [ "$remote" = "$sum" ] || fail "$rel: checksum mismatch after upload (local $sum, Drive ${remote:-none})"
+    printf '%s\t%s\n' "$rel" "$sum" >> "$STATE"
+  done
+done
+rm -f "$W/upload.jpg" "$OKDIR/frames.failed"
+touch "$OKDIR/frames.ok"; chown ft:ft "$OKDIR/frames.ok"
+[ "$n" -gt 0 ] && echo "archived $((n>MAXPERRUN?MAXPERRUN:n)) frame(s) to FT-Frames"
+exit 0

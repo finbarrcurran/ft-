@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.96.1 · 2026-11-02** — latest change: Gate stop words (§13).
+> **Current version: v1.97.0 · 2026-11-02** — latest change: Frame archive to Drive, built and off (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.96.1 2026-11-02 -->
+<!-- reference_reviewed: v1.97.0 2026-11-02 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -393,13 +393,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.97.0 · 2026-11-02 · pass 108 · SC-54
+
+**Frame archive to Drive, built and off.** Public-video frames can be copied to Drive `FT-Frames/` (outside FT-Bridge) with MD5 verification, an upload-failure marker and a Telegram alert (monitor source `drive_frames`); off unless `/etc/ft/frames-archive.enabled` exists; nothing is deleted. Behaviour: ops, monitor. Migrations: none. Reference updated: §5. Supersedes v1.96.1.
+
 ### v1.96.1 · 2026-11-02 · pass 107 · SC-53
 
 **Gate stop words.** Named-ticker name text is not scanned for tickers; stop list gains GLP, SK, NAND, DRAM. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.96.0.
 
+
 ### v1.96.0 · 2026-11-02 · pass 106 · SC-54
 
 **Chart-frame reads.** Haiku 5.5 reads the chart frames of public videos after each ingest (governor feature `video_frames`, sub-caps $0.05/video and $0.25/day; a hit cap shows "frames skipped"); reads are display-only "from chart, unverified" rows with thumbnails, never signals; a re-read adds rows; public-only check from package availability; Jordi frame cap 30 to 45. Behaviour: Video Digest tab, governor. Migrations: 0062. Reference updated: §5. Supersedes v1.95.3.
+
 
 
 ### v1.95.3 · 2026-11-02 · pass 105 · SC-53
@@ -408,9 +414,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.2 · 2026-11-02 · pass 104 · SC-53
 
 **Gate and resolver follow-ups.** Invented only if the name is absent from the whole transcript; number-word names match; wrong-place window 180 s for Cowen; new resolution kinds proxy (display only) and not_listed; alias additions. Governor gains image blocks and video_frames sub-caps (unused until SC-54). Behaviour: grounding gate, resolver, Video Digest tab. Migrations: none. Reference updated: §5. Supersedes v1.95.1.
+
 
 
 
@@ -423,9 +431,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.0 · 2026-11-02 · pass 102 · SC-53
 
 **v5 items and grounding gate.** A separate Haiku 5.5 call extracts every claim, prediction, level, indicator and named ticker from each video digest; a gate classes each item grounded / wrong place / far / invented / name mapping (flags shown, only invented and name-mapping kept out of signals); tickers are resolved by alias file, fuzzy match, then symbol search; a direction flag shows contradictions beside the speaker's net view. Behaviour: Video Digest tab, governor feature caps. Migrations: 0061. Reference updated: §5. Supersedes v1.94.2.
+
 
 
 
@@ -442,9 +452,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.94.1 · 2026-10-28 · pass 100 · SC-52
 
 **CLI fixes.** `ft transcripts search` accepts flags after the query; CLI commands refuse to create a database at a path that does not exist (FT_ALLOW_NEW_DB=1 overrides). Behaviour: CLI only. Migrations: none. Reference updated: §10. Supersedes v1.94.0.
+
 
 
 
@@ -465,21 +477,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.93.0 · 2026-10-27 · pass 98 · SC-52
-
-**Cited evidence (P0.2) and the backfill tooling (P3).** The extraction now cites the supporting transcript segment and FT supplies the words, so evidence quotes are verbatim by construction (15-second markers); Jordi's Stable/Shifting wording is fixed as ai asked. The Jarvis package builder gets a captions-only range mode; transcript-only packages are stored and searchable but never swept by the LLM; `ft video-digest-extract` digests on request within a spend ceiling and restores the daily cap. Behaviour: ingest only. Migrations: none. Reference updated: §5, §11. Supersedes v1.92.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.96.1 -->
+<!-- END FT-master-spec v1.97.0 -->

@@ -56,3 +56,11 @@ sudo /usr/local/sbin/ft-bridge-library --force                  # re-upload ever
 rclone lsf -R ftbridge:library --drive-export-formats txt       # as curran
 ```
 Source of truth is the research clone `/var/lib/ft/research` (FT's own GitHub sync keeps it current) and the FT database; never edit on Drive. Per-document hashes are in `/var/lib/ft_bridge/library/library.state`; delete that file to force a full re-sync. If a run fails the state is not advanced and the next tick retries; the monitor alerts when `library.ok` is older than 2 h. A first full upload (~140 docs) takes about 10 minutes.
+
+## Frame archive (SC-54) — built, OFF by default
+
+`ft-frames-archive` (+ `.service` / `.timer`, installed to `/usr/local/sbin` and `/etc/systemd/system/` by `install.sh`, **timer not enabled**) copies the chart frames of PUBLIC videos (package `meta.json` `availability` = `public`) from `/var/lib/video_digest/` to a Drive folder **`FT-Frames/`, outside `FT-Bridge/`**, through a second rclone remote `ftframes` (same consent and `drive.file` scope as `ftbridge`). It never deletes anything, locally or on Drive; frames stay on Jarvis and in the restic backup either way.
+
+Switch on (by hand, once): `~/scripts/ft_bridge/3_create_frames_folder.sh` (as curran; creates the folder and the remote), then `sudo touch /etc/ft/frames-archive.enabled && sudo systemctl enable --now ft-frames-archive.timer`. Switch off: remove the flag file (the script and the monitor both go quiet).
+
+Each frame is uploaded and its Drive MD5 compared with the local file. On any failure the script writes `/var/lib/ft/data/bridge/frames.failed` (first line = reason) and exits 1; the FT monitor (source `drive_frames`) alerts on Telegram at once, and the frame is retried on the next run. A clean run removes the marker and touches `frames.ok`; the monitor also alerts if `frames.ok` is older than 3 h while the archive is on. State: `/var/lib/ft_bridge/frames/archived.tsv` (path, md5); delete a line to re-upload that frame.

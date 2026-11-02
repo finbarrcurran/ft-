@@ -1,0 +1,10 @@
+[Unit]
+Description=SC-54: frame archive every 10 minutes (installed but NOT enabled by default)
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

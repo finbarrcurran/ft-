@@ -10,12 +10,13 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 RUSER=${RUSER:-curran}                       # owns the rclone remote
 id "$RUSER" >/dev/null
 
-install -m 755 -o root -g root "$HERE/ft-bridge-spec" "$HERE/ft-bridge-library" "$HERE/ft-bridge-snapshot" /usr/local/sbin/
-install -m 644 "$HERE/ft-bridge-spec.service" "$HERE/ft-bridge-spec.timer" "$HERE/ft-bridge-library.service" "$HERE/ft-bridge-library.timer" "$HERE/ft-bridge-snapshot.service" "$HERE/ft-bridge-snapshot.timer" /etc/systemd/system/
+install -m 755 -o root -g root "$HERE/ft-bridge-spec" "$HERE/ft-bridge-library" "$HERE/ft-bridge-snapshot" "$HERE/ft-frames-archive" /usr/local/sbin/
+install -m 644 "$HERE/ft-bridge-spec.service" "$HERE/ft-bridge-spec.timer" "$HERE/ft-bridge-library.service" "$HERE/ft-bridge-library.timer" "$HERE/ft-bridge-snapshot.service" "$HERE/ft-bridge-snapshot.timer" "$HERE/ft-frames-archive.service" "$HERE/ft-frames-archive.timer" /etc/systemd/system/
 install -d -m 755 -o "$RUSER" -g "$RUSER" "/home/$RUSER/scripts/ft_bridge"
 install -m 750 -o "$RUSER" -g "$RUSER" "$HERE"/user-scripts/*.sh "/home/$RUSER/scripts/ft_bridge/"
 systemctl daemon-reload
 systemctl enable --now ft-bridge-spec.timer ft-bridge-library.timer ft-bridge-snapshot.timer
+echo "SC-54: ft-frames-archive installed but NOT enabled (off by default; see README)"
 echo "installed: /usr/local/sbin/ft-bridge-{spec,library,snapshot}, ft-bridge-{spec,library,snapshot}.{service,timer}, ~$RUSER/scripts/ft_bridge/*.sh"
 
 if runuser -u "$RUSER" -- rclone listremotes 2>/dev/null | grep -q '^ftbridge:$'; then
