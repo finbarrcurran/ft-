@@ -49,7 +49,7 @@ var stopTickers = func() map[string]bool {
 	for _, s := range strings.Fields(`AI US USD GDP CPI PCE FOMC ETF ETFS IPO CEO CFO ATH YTD QE QT EPS PE PEG VIX NAV SEC FED UK EU GPU CPU SAAS LLM API
 		OK TV PM AM DJIA PPI ISM NFP BLS IMF OPEC WTI DCF ROI ROE PMI HFT LP LPS OTC IV VS OR AND THE FOR TO IN ON OF AT BY AS IS IT IF NO SO UP II III
 		HY OAS GFC MA EMA SMA RSI MACD TTM YOY QOQ MOM ROC LBO AUM CDS REIT REITS SPAC OEM ARR TAM CAPEX OPEX EBITDA GAAP IRS DOJ FTC ESG CTA CTAS PPO LTCM
-		TBD NA ASAP FYI MIT NYSE DOW NASDAQ`) {
+		TBD NA ASAP FYI MIT NYSE DOW NASDAQ GLP GLP1 SK HBM2 NAND DRAM`) {
 		m[s] = true
 	}
 	return m
@@ -160,12 +160,14 @@ func (g *Gate) Check(it Item) Verdict {
 		}
 	}
 	scan := it
-	if it.Block == "tickers_named" && nameSpoken(it, win) { // the ticker is the lookup of a spoken name: its letters are not searched for
+	if it.Block == "tickers_named" { // the name is checked as a name (its capitals are not tickers); the ticker is the lookup of a spoken name
+		spoken := nameSpoken(it, win)
 		scan = Item{Block: it.Block, Ref: it.Ref, Fields: map[string]any{}}
 		for k, v := range it.Fields {
-			if k != "ticker" {
-				scan.Fields[k] = v
+			if k == "name" || (k == "ticker" && spoken) {
+				continue
 			}
+			scan.Fields[k] = v
 		}
 	}
 	txt := nameNumsRe.ReplaceAllString(ItemText(scan), " ")
