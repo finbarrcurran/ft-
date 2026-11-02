@@ -263,10 +263,8 @@ func (g *Gate) Check(it Item) Verdict {
 			continue
 		}
 		times := append([]int(nil), g.symTimes[base]...)
-		for _, n := range g.A.Names(tk) {
-			if f := strings.Fields(n); len(f) == 1 {
-				times = append(times, g.symTimes[tokenSplit.ReplaceAllString(f[0], "")]...)
-			}
+		for _, n := range g.A.Names(tk) { // every spoken form of the company, phrases included
+			times = append(times, g.phraseTimes(strings.Fields(normSpoken(n)))...)
 		}
 		detail := tk
 		if len(times) == 0 && len(hits) > 0 {
@@ -440,27 +438,34 @@ func (g *Gate) nameTimes(nn, name string) []int {
 		}
 	}
 	for _, ph := range phrases {
-		if len(ph) == 0 {
-			continue
-		}
-		for i := range g.toks {
-			ok := true
-			for j, w := range ph {
-				if i+j >= len(g.toks) || g.toks[i+j] != tokenSplit.ReplaceAllString(w, "") {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				out = append(out, g.words[i].T)
-			}
-		}
+		out = append(out, g.phraseTimes(ph)...)
 	}
 	if len(nn) >= 4 && !strings.Contains(nn, " ") {
 		for i, tk := range g.toks {
 			if tk == nn || (len(nn) >= 6 && len(tk) >= 6 && abs(len(tk)-len(nn)) <= 2 && editDistance(nn, tk, 2) <= 2) {
 				out = append(out, g.words[i].T)
 			}
+		}
+	}
+	return out
+}
+
+// phraseTimes returns the time of every occurrence of the words in the transcript.
+func (g *Gate) phraseTimes(ph []string) []int {
+	var out []int
+	if len(ph) == 0 {
+		return nil
+	}
+	for i := range g.toks {
+		ok := true
+		for j, w := range ph {
+			if i+j >= len(g.toks) || g.toks[i+j] != tokenSplit.ReplaceAllString(w, "") {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out = append(out, g.words[i].T)
 		}
 	}
 	return out
