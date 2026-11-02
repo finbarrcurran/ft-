@@ -206,7 +206,7 @@ func TestParseDirectionSalvagesTruncatedArray(t *testing.T) {
 
 func TestNameSpacingAndTickerLookup(t *testing.T) {
 	g := NewGate(Default, WordsFromCompact("[0s] I wired money to Robin Hood and moved it. They just acquired Open Router. Cityroup 226,000 employees. like Cisco at 100 PE"))
-	for _, c := range []struct{ name, tk string }{{"Robinhood", "HOOD"}, {"OpenRouter", ""}, {"Cisco", "CSCO"}} {
+	for _, c := range []struct{ name, tk string }{{"Robinhood", "HOOD"}, {"OpenRouter", ""}, {"Cisco", "CSCO"}, {"Citi", "C"}} {
 		f := map[string]any{"name": c.name, "stance": "neutral"}
 		if c.tk != "" {
 			f["ticker"] = c.tk

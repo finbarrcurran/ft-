@@ -281,7 +281,7 @@ func (g *Gate) Check(it Item) Verdict {
 	if name, _ := it.Fields["name"].(string); it.Block == "tickers_named" && strings.TrimSpace(name) != "" {
 		nn := NormName(name)
 		if nn != "" && !strings.Contains(" "+NormName(win)+" ", " "+nn+" ") && !strings.Contains(" "+NormName(win)+" ", " "+nn+"s ") &&
-			!fuzzyIn(nn, NormName(win)) && !compactIn(nn, NormName(win)) {
+			!fuzzyIn(nn, NormName(win)) && !compactIn(nn, NormName(win)) && !g.A.aliasSpoken(name, win) {
 			var times []int
 			for _, tok := range strings.Fields(nn) {
 				if len(tok) >= 4 {
@@ -402,5 +402,20 @@ func nameSpoken(it Item, win string) bool {
 	if nn == "" {
 		return false
 	}
-	return strings.Contains(" "+w+" ", " "+nn+" ") || strings.Contains(" "+w+" ", " "+nn+"s ") || fuzzyIn(nn, w) || compactIn(nn, w)
+	return strings.Contains(" "+w+" ", " "+nn+" ") || strings.Contains(" "+w+" ", " "+nn+"s ") || fuzzyIn(nn, w) || compactIn(nn, w) || Default.aliasSpoken(name, win)
+}
+
+// aliasSpoken reports whether the name maps (alias file) to a ticker whose spoken form is in the passage.
+func (a *Aliases) aliasSpoken(name, win string) bool {
+	want := a.Tickers(name)
+	if len(want) == 0 {
+		return false
+	}
+	hits := a.Hits(win)
+	for _, t := range want {
+		if hits[t] {
+			return true
+		}
+	}
+	return false
 }
