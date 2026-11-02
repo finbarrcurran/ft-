@@ -66,6 +66,8 @@ type Service struct {
 	VoteRuns int
 	// ExtractV5Items makes the sweep run the SC-53 v5 item extraction after each ingest (set by the server).
 	ExtractV5Items bool
+	// ReadChartFrames makes the sweep read the chart frames of each new public video (SC-54, set by the server).
+	ReadChartFrames bool
 }
 
 // New returns a Service. An empty root means DefaultRoot.
@@ -94,6 +96,7 @@ type packageMeta struct {
 	PublishedAt      string          `json:"published_at"`
 	DurationSec      int             `json:"duration_sec"`
 	IsFlagship       bool            `json:"is_flagship"`
+	Availability     string          `json:"availability"` // public | unlisted | private ... (empty before SC-54)
 	TranscriptMethod string          `json:"transcript_method"`
 	CaptionTrack     *string         `json:"transcript_caption_track"`
 	Frames           []metaFrame     `json:"frames"`
@@ -1437,6 +1440,13 @@ func (s *Service) Sweep(ctx context.Context) ([]Result, error) {
 			} else {
 				slog.Info("videodigest: v5 items", "video", p.Meta.VideoID, "items", ir.Items, "counts", ir.Counts, "unresolved", ir.Unresolved,
 					"contradicts", ir.Contradicts, "costUsd", ir.CostUSD, "directionCostUsd", ir.DirectionCost)
+			}
+		}
+		if r.Status == "ingested" && s.ReadChartFrames { // SC-54: frames of public videos; a failure never fails the digest
+			if fr := s.ReadFrames(ctx, p.Meta.VideoID, FrameReadOptions{}); fr.Status == "failed" {
+				slog.Warn("videodigest: frames not read", "video", p.Meta.VideoID, "err", fr.Reason)
+			} else {
+				slog.Info("videodigest: frames", "video", p.Meta.VideoID, "status", fr.Status, "reason", fr.Reason, "frames", fr.Frames, "reads", fr.Reads, "costUsd", fr.CostUSD)
 			}
 		}
 		if r.Status == "failed" && (strings.Contains(r.Error, llm.ErrBudgetBlocked.Error()) ||

@@ -38,6 +38,7 @@ sources:
     frame_priority: [chart, table, own_calculation]
     frames:
       extra_cue_phrases: ["look at", "chart"]   # Jordi never says the default phrases (P0 finding)
+      max_frames: 45                            # SC-54: raised from 30 (his videos give 35-41 distinct frames)
 
   cowen:
     name: Benjamin Cowen

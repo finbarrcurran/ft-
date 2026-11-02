@@ -120,6 +120,8 @@ func main() {
 		runEtoroImport(os.Args[2:])
 	case "video-digest-vote":
 		runVideoDigestVote(os.Args[2:])
+	case "video-digest-frames":
+		runVideoDigestFrames(os.Args[2:])
 	case "video-digest-items":
 		runVideoDigestItems(os.Args[2:])
 	case "video-digest-extract":
@@ -1744,6 +1746,42 @@ func runEtoroImport(args []string) {
 		}
 		for _, w := range res.Warnings {
 			fmt.Println("   WARNING:", w)
+		}
+	}
+}
+
+// runVideoDigestFrames: ft video-digest-frames --video-id ID[,ID] [--force] [--dry-run] [--assume-public] [--max N] [--show] (SC-54).
+func runVideoDigestFrames(args []string) {
+	fs := flag.NewFlagSet("video-digest-frames", flag.ExitOnError)
+	ids := fs.String("video-id", "", "YouTube video id of a stored digest (comma-separated for several)")
+	force := fs.Bool("force", false, "read again (adds rows)")
+	dry := fs.Bool("dry-run", false, "do the work but store nothing")
+	pub := fs.Bool("assume-public", false, "skip the availability check for a package built before SC-54, for a video you know is public")
+	max := fs.Int("max", 0, "read at most this many frames")
+	show := fs.Bool("show", false, "print every read")
+	_ = fs.Parse(args)
+	if *ids == "" {
+		fmt.Fprintln(os.Stderr, "usage: ft video-digest-frames --video-id ID[,ID…] [--force] [--dry-run] [--assume-public] [--max N] [--show]")
+		os.Exit(2)
+	}
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	svc := videodigest.New(st.DB, llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY")), os.Getenv("FT_VIDEO_DIGEST_ROOT"))
+	for _, id := range strings.Split(*ids, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		r := svc.ReadFrames(context.Background(), id, videodigest.FrameReadOptions{Force: *force, DryRun: *dry, AssumePublic: *pub, Max: *max})
+		fmt.Printf("%s | %s | frames %d | calls %d | reads %d | cost $%.4f | %s\n", r.VideoID, r.Status, r.Frames, r.Calls, r.Reads, r.CostUSD, r.Reason)
+		if *show {
+			for _, v := range r.Preview {
+				fmt.Printf("  %5ds %-6s %-40.40s %.120s\n", v.TsSec, v.Confidence, v.Series, v.Values)
+			}
 		}
 	}
 }

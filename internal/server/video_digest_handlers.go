@@ -189,3 +189,34 @@ func (s *Server) handleVideoDigestItems(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, view)
 }
+
+// handleVideoDigestFrames returns the frame-read pass and reads of a digest (SC-54).
+func (s *Server) handleVideoDigestFrames(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "bad digest id")
+		return
+	}
+	view, err := s.videoDigest.Frames(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// handleVideoDigestFrameImage serves one stored frame (the thumbnail under a chart read).
+func (s *Server) handleVideoDigestFrameImage(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "bad frame id")
+		return
+	}
+	p, err := s.videoDigest.FramePath(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no such frame")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	http.ServeFile(w, r, p)
+}
