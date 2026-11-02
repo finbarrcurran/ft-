@@ -35,3 +35,19 @@ func TestThinkingOffBody(t *testing.T) {
 		t.Fatal("thinking must be absent unless asked for")
 	}
 }
+
+func TestImageBlocksBody(t *testing.T) {
+	b, err := buildAnthropicBody("claude-haiku-5-5", CallRequest{FeatureID: "video_frames", UserPrompt: "read", Images: []Image{{MediaType: "image/jpeg", Data: []byte("abc")}}}, 100, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	c := m["messages"].([]any)[0].(map[string]any)["content"].([]any)
+	if len(c) != 2 || c[0].(map[string]any)["type"] != "image" || c[1].(map[string]any)["type"] != "text" {
+		t.Fatalf("content = %v", c)
+	}
+	if c[0].(map[string]any)["source"].(map[string]any)["data"] != "YWJj" {
+		t.Fatalf("image data not base64: %v", c[0])
+	}
+}

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/base64"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -131,12 +132,22 @@ func buildAnthropicBody(model string, req CallRequest, maxOut int, cachingEnable
 	// for a multi-turn conversation here.
 	type msg struct {
 		Role    string `json:"role"`
-		Content string `json:"content"`
+		Content any    `json:"content"`
+	}
+	var content any = req.UserPrompt
+	if len(req.Images) > 0 { // SC-54: images first, then the text, as one user turn
+		blocks := []map[string]any{}
+		for _, im := range req.Images {
+			blocks = append(blocks, map[string]any{"type": "image", "source": map[string]string{
+				"type": "base64", "media_type": im.MediaType, "data": base64.StdEncoding.EncodeToString(im.Data)}})
+		}
+		blocks = append(blocks, map[string]any{"type": "text", "text": req.UserPrompt})
+		content = blocks
 	}
 	body := map[string]any{
-		"model":       model,
-		"max_tokens":  maxOut,
-		"messages":    []msg{{Role: "user", Content: req.UserPrompt}},
+		"model":      model,
+		"max_tokens": maxOut,
+		"messages":   []msg{{Role: "user", Content: content}},
 	}
 	if len(systemBlocks) > 0 {
 		body["system"] = systemBlocks

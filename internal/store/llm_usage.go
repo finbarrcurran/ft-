@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -255,4 +256,26 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// FeatureCostSince sums llm_usage_log cost for one feature: from the UTC date (YYYY-MM-DD, "" = all time) and
+// for calls whose feature_context starts with ctxPrefix ("" = any). SC-54 sub-caps use it.
+func (s *Store) FeatureCostSince(ctx context.Context, feature, date, ctxPrefix string) (float64, error) {
+	q := `SELECT COALESCE(SUM(cost_usd),0) FROM llm_usage_log WHERE feature_id = ?`
+	args := []any{feature}
+	if date != "" {
+		t, err := time.Parse("2006-01-02", date)
+		if err != nil {
+			return 0, err
+		}
+		q += ` AND called_at >= ?`
+		args = append(args, t.Unix())
+	}
+	if ctxPrefix != "" {
+		q += ` AND feature_context LIKE ? ESCAPE '\'`
+		args = append(args, strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(ctxPrefix)+"%")
+	}
+	var v float64
+	err := s.DB.QueryRowContext(ctx, q, args...).Scan(&v)
+	return v, err
 }
