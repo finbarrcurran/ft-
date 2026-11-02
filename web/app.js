@@ -2191,7 +2191,7 @@ function vdItemText(it) {
     case 'seasonality': return j(f.pattern, f.asset);
     case 'key_levels': return `${f.asset || ''} ${f.level || ''} (${f.role || ''})` + (f.invalidation ? ` · invalidated by ${f.invalidation}` : '');
     case 'indicators_cited': return `${f.name || ''}: ${f.reading || '—'}`;
-    case 'tickers_named': return `${f.name || ''}${it.resolution && it.resolution.ticker ? ` (${it.resolution.ticker})` : (f.ticker ? ` (${f.ticker}?)` : '')} · ${f.stance || ''}`;
+    case 'tickers_named': return `${f.name || ''}${it.resolution && it.resolution.status === 'resolved' ? ` (${it.resolution.ticker})` : (f.ticker ? ` (${f.ticker}?)` : '')} · ${f.stance || ''}`;
     case 'predictions': return `${f.claim || ''}` + (j(f.direction, f.horizon, f.condition ? 'if ' + f.condition : '') ? ` (${j(f.direction, f.horizon, f.condition ? 'if ' + f.condition : '')})` : '');
     default: return f.what || '';
   }
@@ -2204,6 +2204,8 @@ function vdItemRow(d, it) {
   if ((it.chartUnverified || []).length) flags.push(`<span class="vd-flag vd-flag-chart">from chart, unverified: ${escapeHTML(it.chartUnverified.join(', '))}</span>`);
   const res = it.resolution;
   if (res && res.status === 'unresolved') flags.push(`<span class="vd-flag vd-flag-unres">ticker unresolved${res.modelTicker ? ' (model said ' + escapeHTML(res.modelTicker) + ', unverified)' : ''}</span>`);
+  if (res && res.status === 'proxy') flags.push(`<span class="vd-flag vd-flag-chart">proxy: ${escapeHTML(res.ticker)} (display only)</span>`);
+  if (res && res.status === 'not_listed') flags.push(`<span class="vd-flag vd-flag-chart">not a listed company</span>`);
   if (res && res.conflict) flags.push(`<span class="vd-flag vd-flag-wrong_place">lookup says ${escapeHTML(res.ticker)}, model said ${escapeHTML(res.modelTicker)}</span>`);
   if (it.direction && it.direction.verdict === 'contradicts') flags.push(`<span class="vd-flag vd-flag-dir">direction flag: the speaker's net view — ${escapeHTML(it.direction.speakerView || '')}</span>`);
   const at = it.refStart != null ? vdTsLink(d, it.refStart) : '';

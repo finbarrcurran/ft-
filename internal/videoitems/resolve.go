@@ -20,7 +20,7 @@ type Lookup func(ctx context.Context, query string) ([]Candidate, error)
 type Resolution struct {
 	Name        string      `json:"name"`
 	Ticker      string      `json:"ticker,omitempty"`
-	Status      string      `json:"status"` // resolved | unresolved
+	Status      string      `json:"status"` // resolved | unresolved | proxy (display-only stand-in) | not_listed
 	Source      string      `json:"source,omitempty"`
 	Matched     string      `json:"matched,omitempty"`
 	ModelTicker string      `json:"modelTicker,omitempty"` // what the model proposed; unverified
@@ -64,6 +64,14 @@ func (r *Resolver) Resolve(ctx context.Context, name, modelTicker string) Resolu
 	}
 	n := NormName(name)
 	if n == "" {
+		return res
+	}
+	if k, ok := KindOf(name); ok { // proxies and non-companies are decided before any lookup
+		if k.Kind == "proxy" {
+			res.Status, res.Source, res.Ticker, res.Matched = "proxy", "proxy", k.Ticker, normSpoken(name)
+		} else {
+			res.Status, res.Source = "not_listed", "kind"
+		}
 		return res
 	}
 	if ts := a.Tickers(n); len(ts) > 0 {

@@ -28,13 +28,13 @@ const (
 	// ItemsModel is the model of both calls (Fin 2026-11-01).
 	ItemsModel = "claude-haiku-5-5"
 
-	itemsMaxOut      = 8000
-	directionMaxOut  = 4000
-	directionBatch   = 40
-	chunkOverSec     = 3600 // a video longer than this is read in chunks
-	chunkSec         = 1800
-	chunkOverlapSec  = 60
-	resolveTimeout   = 8 * time.Second
+	itemsMaxOut       = 8000
+	directionMaxOut   = 4000
+	directionBatch    = 40
+	chunkOverSec      = 3600 // a video longer than this is read in chunks
+	chunkSec          = 1800
+	chunkOverlapSec   = 60
+	resolveTimeout    = 8 * time.Second
 	maxResolvesPerRun = 40
 )
 
@@ -202,6 +202,9 @@ func (s *Service) ExtractItems(ctx context.Context, videoID string, opt ItemsOpt
 
 	// gate
 	gate := videoitems.NewGate(videoitems.Default, words)
+	if source == "cowen" {
+		gate.NearSec = 180 // Cowen's transcript is sparser: a 'wrong place' window of 180 s, Jordi stays 120 s
+	}
 	verdicts := make([]videoitems.Verdict, len(ex.Items))
 	res.Counts = map[string]int{}
 	for i, it := range ex.Items {

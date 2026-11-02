@@ -70,6 +70,10 @@ type Gate struct {
 	words    []Word
 	valTimes map[float64][]int
 	symTimes map[string][]int
+	toks     []string // lower-case alphanumeric form of every transcript word, for phrase search
+	// NearSec is the "wrong place" window: a value this close to the passage is cited at the wrong place,
+	// further away it is "far" (Jordi 120 s; Cowen 180 s, whose transcript is sparser).
+	NearSec int
 }
 
 // NewGate indexes the transcript words once.
@@ -77,11 +81,12 @@ func NewGate(a *Aliases, words []Word) *Gate {
 	if a == nil {
 		a = Default
 	}
-	g := &Gate{A: a, words: words, valTimes: map[float64][]int{}, symTimes: map[string][]int{}}
+	g := &Gate{A: a, words: words, valTimes: map[float64][]int{}, symTimes: map[string][]int{}, NearSec: nearSec}
 	for _, w := range words {
 		for _, v := range NumValues(w.W) {
 			g.valTimes[v] = append(g.valTimes[v], w.T)
 		}
+		g.toks = append(g.toks, tokenSplit.ReplaceAllString(strings.ToLower(w.W), ""))
 		if tok := tokenSplit.ReplaceAllString(strings.ToLower(w.W), ""); tok != "" {
 			g.symTimes[tok] = append(g.symTimes[tok], w.T)
 		}
@@ -89,7 +94,7 @@ func NewGate(a *Aliases, words []Word) *Gate {
 	return g
 }
 
-func scopeOf(times []int, start, end int) string {
+func (g *Gate) scopeOf(times []int, start, end int) string {
 	if len(times) == 0 {
 		return "invented"
 	}
@@ -105,7 +110,7 @@ func scopeOf(times []int, start, end int) string {
 			best = d
 		}
 	}
-	if best <= nearSec {
+	if best <= g.NearSec {
 		return "near"
 	}
 	return "far"
@@ -244,7 +249,7 @@ func (g *Gate) Check(it Item) Verdict {
 		if isYear {
 			t = "year"
 		}
-		issues = append(issues, Issue{Type: t, Detail: m, Scope: scopeOf(times, start, end)})
+		issues = append(issues, Issue{Type: t, Detail: m, Scope: g.scopeOf(times, start, end)})
 	}
 	hits := g.A.Hits(win)
 	var tks []string
@@ -275,14 +280,15 @@ func (g *Gate) Check(it Item) Verdict {
 			}
 			detail += " (passage names " + strings.Join(hs, ", ") + ")"
 		}
-		issues = append(issues, Issue{Type: "ticker", Detail: detail, Scope: scopeOf(times, start, end)})
+		issues = append(issues, Issue{Type: "ticker", Detail: detail, Scope: g.scopeOf(times, start, end)})
 	}
 	// the name as spoken must be in the passage, and must map to the ticker given for it
 	if name, _ := it.Fields["name"].(string); it.Block == "tickers_named" && strings.TrimSpace(name) != "" {
-		nn := NormName(name)
-		if nn != "" && !strings.Contains(" "+NormName(win)+" ", " "+nn+" ") && !strings.Contains(" "+NormName(win)+" ", " "+nn+"s ") &&
-			!fuzzyIn(nn, NormName(win)) && !compactIn(nn, NormName(win)) && !g.A.aliasSpoken(name, win) {
-			var times []int
+		nn, nw := normSpoken(name), normSpoken(win)
+		if nn != "" && !strings.Contains(" "+nw+" ", " "+nn+" ") && !strings.Contains(" "+nw+" ", " "+nn+"s ") &&
+			!fuzzyIn(nn, nw) && !compactIn(nn, nw) && !g.A.aliasSpoken(name, win) {
+			// invented only if absent from the whole transcript; present anywhere it is near or far
+			times := g.nameTimes(nn, name)
 			for _, tok := range strings.Fields(nn) {
 				if len(tok) >= 4 {
 					tok = tokenSplit.ReplaceAllString(tok, "")
@@ -297,7 +303,7 @@ func (g *Gate) Check(it Item) Verdict {
 					break
 				}
 			}
-			issues = append(issues, Issue{Type: "name", Detail: name, Scope: scopeOf(times, start, end)})
+			issues = append(issues, Issue{Type: "name", Detail: name, Scope: g.scopeOf(times, start, end)})
 		}
 		if len(fieldTk) > 0 {
 			want := g.A.Tickers(name)
@@ -398,7 +404,7 @@ func compactIn(name, text string) bool {
 // the model's lookup of a spoken name, not something to find in the passage).
 func nameSpoken(it Item, win string) bool {
 	name, _ := it.Fields["name"].(string)
-	nn, w := NormName(name), NormName(win)
+	nn, w := normSpoken(name), normSpoken(win)
 	if nn == "" {
 		return false
 	}
@@ -418,4 +424,44 @@ func (a *Aliases) aliasSpoken(name, win string) bool {
 		}
 	}
 	return false
+}
+
+// normSpoken normalises a name or passage and turns number words into digits ("total two" = "total 2").
+func normSpoken(s string) string { return NormName(wordsToDigits(s)) }
+
+// nameTimes returns the times at which the name is spoken anywhere in the transcript: as a phrase, run
+// together ("robinhood"), as a close ASR spelling of a single word, or by a spoken alias of its tickers.
+func (g *Gate) nameTimes(nn, name string) []int {
+	var out []int
+	phrases := [][]string{strings.Fields(nn)}
+	for _, t := range g.A.Tickers(name) {
+		for _, an := range g.A.Names(t) {
+			phrases = append(phrases, strings.Fields(normSpoken(an)))
+		}
+	}
+	for _, ph := range phrases {
+		if len(ph) == 0 {
+			continue
+		}
+		for i := range g.toks {
+			ok := true
+			for j, w := range ph {
+				if i+j >= len(g.toks) || g.toks[i+j] != tokenSplit.ReplaceAllString(w, "") {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				out = append(out, g.words[i].T)
+			}
+		}
+	}
+	if len(nn) >= 4 && !strings.Contains(nn, " ") {
+		for i, tk := range g.toks {
+			if tk == nn || (len(nn) >= 6 && len(tk) >= 6 && abs(len(tk)-len(nn)) <= 2 && editDistance(nn, tk, 2) <= 2) {
+				out = append(out, g.words[i].T)
+			}
+		}
+	}
+	return out
 }

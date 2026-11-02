@@ -216,3 +216,46 @@ func TestNameSpacingAndTickerLookup(t *testing.T) {
 		}
 	}
 }
+
+func TestV1952NameRules(t *testing.T) {
+	words := WordsFromCompact("[0s] first part here\n[15s] more words\n[600s] the eli liy report was strong and total two fell\n[615s] end")
+	g := NewGate(Default, words)
+	// a name present anywhere is far, never invented
+	v := g.Check(item("tickers_named", &Ref{0, 10}, map[string]any{"name": "Eli Liy", "stance": "bullish"}))
+	if v.Class != ClassFar || !v.SignalOK {
+		t.Errorf("eli liy: want far and signal ok, got %s %+v", v.Class, v.Issues)
+	}
+	// absent from the whole transcript: invented
+	v = g.Check(item("tickers_named", &Ref{0, 10}, map[string]any{"name": "Microsoft", "stance": "watching"}))
+	if v.Class != ClassInvented || v.SignalOK {
+		t.Errorf("microsoft: want invented, got %s", v.Class)
+	}
+	// number words in names: "total 2" is spoken as "total two"
+	v = g.Check(item("tickers_named", &Ref{600, 610}, map[string]any{"name": "total 2", "stance": "watching"}))
+	if v.Class != ClassGrounded {
+		t.Errorf("total 2: want grounded, got %s %+v", v.Class, v.Issues)
+	}
+	// the near window: 150 s away is wrong place at 180 s, far at 120 s
+	g.NearSec = 180
+	if v := g.Check(item("tickers_named", &Ref{450, 460}, map[string]any{"name": "Eli Liy", "stance": "bullish"})); v.Class != ClassWrongPlace {
+		t.Errorf("180 s window: got %s", v.Class)
+	}
+	g.NearSec = 120
+	if v := g.Check(item("tickers_named", &Ref{450, 460}, map[string]any{"name": "Eli Liy", "stance": "bullish"})); v.Class != ClassFar {
+		t.Errorf("120 s window: got %s", v.Class)
+	}
+}
+
+func TestV1952Kinds(t *testing.T) {
+	r := &Resolver{A: Default}
+	for name, want := range map[string]string{"total two": "not_listed", "TOTAL3": "unresolved", "DTCC": "not_listed", "Anthropic IPO": "not_listed",
+		"South Korean market": "proxy", "oil prices": "proxy", "WTI": "resolved", "HSI": "resolved", "SpaceX IPO": "resolved", "IBM": "resolved", "EWZ": "resolved"} {
+		got := r.Resolve(context.Background(), name, "")
+		if got.Status != want {
+			t.Errorf("%s: want %s, got %s (%+v)", name, want, got.Status, got)
+		}
+	}
+	if got := r.Resolve(context.Background(), "oil", ""); got.Ticker != "CL=F" || got.Source != "proxy" {
+		t.Errorf("oil = %+v", got)
+	}
+}

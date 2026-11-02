@@ -1,0 +1,18 @@
+# name<TAB>kind<TAB>ticker. Two kinds of spoken name that are not a company with a ticker of its own.
+# proxy      a market or commodity he discusses; the ticker is a display-only stand-in and never feeds a signal
+# not_listed not a listed company (a chart series, an event, a clearing house); leaves the unresolved count
+south korean market	proxy	EWY
+south korea index	proxy	EWY
+south korea	proxy	EWY
+korean market	proxy	EWY
+chinese markets	proxy	FXI
+chinese market	proxy	FXI
+china market	proxy	FXI
+oil	proxy	CL=F
+oil prices	proxy	CL=F
+total	not_listed
+total 2	not_listed
+total 3	not_listed
+bitcoin dominance	not_listed
+dtcc	not_listed
+anthropic ipo	not_listed
