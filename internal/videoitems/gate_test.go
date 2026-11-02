@@ -267,3 +267,13 @@ func TestTickerSpokenElsewhereIsFar(t *testing.T) {
 		t.Errorf("want far, got %s %+v", v.Class, v.Issues)
 	}
 }
+
+func TestStopTickersAndNameScan(t *testing.T) {
+	g := NewGate(Default, WordsFromCompact("[0s] intro\n[600s] SK Hynix blew away and GLP-1 prices fell"))
+	if v := g.Check(item("tickers_named", &Ref{0, 10}, map[string]any{"name": "SK Hynix", "stance": "bullish"})); v.Class == ClassInvented {
+		t.Errorf("SK Hynix: %s %+v", v.Class, v.Issues)
+	}
+	if v := g.Check(item("causal_claims", &Ref{600, 610}, map[string]any{"cause": "GLP-1 prices fall", "effect": "volume up"})); v.Class != ClassGrounded {
+		t.Errorf("GLP-1: %s %+v", v.Class, v.Issues)
+	}
+}

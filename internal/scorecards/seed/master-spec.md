@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.96.0 · 2026-11-02** — latest change: Chart-frame reads (§13).
+> **Current version: v1.96.1 · 2026-11-02** — latest change: Gate stop words (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.96.0 2026-11-02 -->
+<!-- reference_reviewed: v1.96.1 2026-11-02 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -393,13 +393,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.96.1 · 2026-11-02 · pass 107 · SC-53
+
+**Gate stop words.** Named-ticker name text is not scanned for tickers; stop list gains GLP, SK, NAND, DRAM. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.96.0.
+
 ### v1.96.0 · 2026-11-02 · pass 106 · SC-54
 
 **Chart-frame reads.** Haiku 5.5 reads the chart frames of public videos after each ingest (governor feature `video_frames`, sub-caps $0.05/video and $0.25/day; a hit cap shows "frames skipped"); reads are display-only "from chart, unverified" rows with thumbnails, never signals; a re-read adds rows; public-only check from package availability; Jordi frame cap 30 to 45. Behaviour: Video Digest tab, governor. Migrations: 0062. Reference updated: §5. Supersedes v1.95.3.
 
+
 ### v1.95.3 · 2026-11-02 · pass 105 · SC-53
 
 **Ticker spoken forms.** A ticker is invented only if no spoken form of the company (phrases included) occurs anywhere in the transcript; otherwise near or far. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.2.
+
 
 
 ### v1.95.2 · 2026-11-02 · pass 104 · SC-53
@@ -408,9 +414,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.1 · 2026-11-02 · pass 103 · SC-53
 
 **Gate name matching.** In tickers_named the gate no longer looks for ticker letters in the passage, matches spoken names across spacing, and accepts alias spoken forms (Citigroup, "cityroup" added for C). Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.0.
+
 
 
 
@@ -423,9 +431,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.94.2 · 2026-11-01 · pass 101 · SC-52
 
 **Current-generation rates and a short-video skip rule.** The LLM rate table gains Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.1 (verified against the pricing page); the video pipeline skips videos under `min_duration_sec` (default 180 s, 0 = off). Behaviour: cost accounting, video ingest. Migrations: none. Reference updated: §5. Supersedes v1.94.1.
+
 
 
 
@@ -442,9 +452,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.94.0 · 2026-10-27 · pass 99 · SC-52
 
 **Majority vote for the newest Jordi digest.** The digest behind the login card is extracted three times and the majority regime state kept; a split sets confidence to low and the card shows "2 OF 3 RUNS". Not applied to the backfill. Behaviour: sweep and card. Migrations: 0060. Reference updated: §3, §5. Supersedes v1.93.0.
+
 
 
 
@@ -465,21 +477,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.92.0 · 2026-10-27 · pass 97 · SC-52
-
-**Revised regime prompt (P0.1), entity fix, and the login regime card (P1).** States are now defined by the posture Jordi recommends for adding or holding equity risk, not by named catalysts (Jordi was Shifting 8 of 8; now Stable 6, Shifting 2, one dropped); caption HTML entities are unescaped. A Jordi-only card on login shows the narrative, proposed state and confidence, evidence passage, FT's macro suggestion beside it and a consequence preview, with Approve / Set differently / Dismiss; nothing is applied automatically. Behaviour: yes. Migrations: none. Reference updated: §5, §12. Supersedes v1.91.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.96.0 -->
+<!-- END FT-master-spec v1.96.1 -->
