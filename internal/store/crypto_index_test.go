@@ -86,3 +86,27 @@ func TestCryptoIndexSeed(t *testing.T) {
 		}
 	}
 }
+
+func TestCryptoIndexStockExchanges(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "ft.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	ms, _ := st.ListCryptoIndexMembers(context.Background(), "visser46")
+	want := map[string]string{"COIN": "NASDAQ", "HOOD": "NASDAQ", "CRCL": "NYSE", "FIGR": "NASDAQ"}
+	for _, m := range ms {
+		if w, ok := want[m.Symbol]; ok {
+			if m.Exchange == nil || *m.Exchange != w {
+				t.Errorf("%s exchange = %v, want %s", m.Symbol, m.Exchange, w)
+			}
+			delete(want, m.Symbol)
+		}
+	}
+	if len(want) != 0 {
+		t.Errorf("stocks missing: %v", want)
+	}
+}
