@@ -46,7 +46,20 @@ type Row struct {
 	McapToTVL   *float64 `json:"mcapToTvl,omitempty"` // nullable — only when TVL present
 	Category    string   `json:"category"`            // Chain | <DeFi category> | majors map | Other
 	TVLMatched  bool     `json:"tvlMatched"`          // true when TVL came from DefiLlama (enrich-and-flag)
+	// Jordi-46 Phase 1: index membership (display only; set from crypto_index_members by gecko id).
+	Visser46      bool   `json:"visser46"`
+	Vertical      string `json:"vertical,omitempty"`
+	OutsideTop250 bool   `json:"outsideTop250,omitempty"` // fetched by its own call because CoinGecko ranks it below 250
 }
+
+// IndexMember is the slice of a crypto_index_members row the screener needs.
+type IndexMember struct {
+	CoinGeckoID string
+	Vertical    string
+}
+
+// MembersFunc returns the current token members of the index (stocks have no gecko id and are not listed).
+type MembersFunc func(ctx context.Context) ([]IndexMember, error)
 
 // majorsCategory is a small hand-maintained map for high-cap coins that have
 // no DefiLlama TVL presence, so the category filter is still meaningful for
@@ -78,6 +91,10 @@ var majorsCategory = map[string]string{
 type Service struct {
 	cg    *providers.CoinGeckoClient
 	llama *providers.DefiLlamaClient
+
+	// Members, when set, tags rows that belong to the Visser-46 index and fetches members that fall
+	// outside the top 250 with ONE extra /coins/markets?ids= call (inside the same 10-minute snapshot).
+	Members MembersFunc
 
 	mu        sync.RWMutex
 	cache     []Row
@@ -127,6 +144,39 @@ func (s *Service) refresh(ctx context.Context) ([]Row, error) {
 	markets, err := s.cg.FetchMarkets(ctx, 250)
 	if err != nil {
 		return nil, err
+	}
+
+	// Index members outside the top 250: one extra keyed call, merged into this snapshot.
+	var members []IndexMember
+	memberVertical := map[string]string{}
+	outside := map[string]bool{}
+	if s.Members != nil {
+		if ms, err := s.Members(ctx); err != nil {
+			slog.Warn("cryptoscreener: index members unavailable", "err", err)
+		} else {
+			members = ms
+			inTop := map[string]bool{}
+			for _, m := range markets {
+				inTop[m.ID] = true
+			}
+			var missing []string
+			for _, m := range members {
+				memberVertical[m.CoinGeckoID] = m.Vertical
+				if !inTop[m.CoinGeckoID] {
+					missing = append(missing, m.CoinGeckoID)
+				}
+			}
+			if len(missing) > 0 {
+				if extra, err := s.cg.FetchMarketsByIDs(ctx, missing); err != nil {
+					slog.Warn("cryptoscreener: members outside the top 250 not fetched", "err", err)
+				} else {
+					for _, m := range extra {
+						outside[m.ID] = true
+					}
+					markets = append(markets, extra...)
+				}
+			}
+		}
 	}
 
 	// TVL is best-effort enrichment. If DefiLlama is down we still serve the
@@ -198,6 +248,9 @@ func (s *Service) refresh(ctx context.Context) ([]Row, error) {
 			}
 		}
 		row.Category = category
+		if v, ok := memberVertical[m.ID]; ok {
+			row.Visser46, row.Vertical, row.OutsideTop250 = true, v, outside[m.ID]
+		}
 
 		rows = append(rows, row)
 	}

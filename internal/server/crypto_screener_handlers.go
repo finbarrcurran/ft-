@@ -85,3 +85,35 @@ func (s *Server) handleCryptoScreener(w http.ResponseWriter, r *http.Request) {
 		"stale":      stale,
 	})
 }
+
+// handleCryptoIndex serves the reference list of an index's current members (Jordi-46 Phase 1):
+// GET /api/crypto-index/visser46. Read-only reference data (constituents, verticals, ids); it carries no
+// holdings, watchlist or broker data, so demo mode has nothing to mask. No prices: the screener has those.
+func (s *Server) handleCryptoIndex(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	if key != "visser46" {
+		writeError(w, http.StatusNotFound, "unknown index")
+		return
+	}
+	members, err := s.store.ListCryptoIndexMembers(r.Context(), key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	verticals := map[string]int{}
+	tokens, stocks, listVersion := 0, 0, ""
+	for _, m := range members {
+		verticals[m.Vertical]++
+		listVersion = m.ListVersion
+		if m.AssetKind == "stock" {
+			stocks++
+		} else {
+			tokens++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"indexKey": key, "listVersion": listVersion, "count": len(members), "tokens": tokens, "stocks": stocks,
+		"verticals": verticals, "members": members,
+		"note": "Reference list only: constituents and vertical labels of the Visser-Labs 46-name index. Not a recommendation, not a score.",
+	})
+}

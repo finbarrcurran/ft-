@@ -201,6 +201,29 @@ func (c *CoinGeckoClient) FetchMarkets(ctx context.Context, perPage int) ([]CGMa
 	return rows, nil
 }
 
+// FetchMarketsByIDs pulls /coins/markets for specific gecko ids (one call, up to 250 ids) with the same
+// 24h/7d/30d windows as FetchMarkets. Jordi-46 Phase 1 uses it for index members outside the top 250.
+func (c *CoinGeckoClient) FetchMarketsByIDs(ctx context.Context, ids []string) ([]CGMarket, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if len(ids) > 250 {
+		ids = ids[:250]
+	}
+	url := fmt.Sprintf(
+		"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=%s&order=market_cap_desc&per_page=250&page=1&sparkline=false&price_change_percentage=24h%%2C7d%%2C30d&locale=en",
+		strings.Join(ids, "%2C"))
+	body, _, err := doWithRetry(ctx, c.HTTP, url, c.APIKey)
+	if err != nil {
+		return nil, fmt.Errorf("coingecko /coins/markets (ids): %w", err)
+	}
+	var rows []CGMarket
+	if err := json.Unmarshal(body, &rows); err != nil {
+		return nil, fmt.Errorf("coingecko /coins/markets (ids) decode: %w", err)
+	}
+	return rows, nil
+}
+
 // BTCMarketChartDay is one daily close for the historical BTC time series.
 type BTCMarketChartDay struct {
 	Date  time.Time
