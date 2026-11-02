@@ -120,6 +120,10 @@ func DefaultChecks(db *sql.DB) []Check {
 		{Source: "drive_library", Label: "Drive library mirror", MaxAge: 2 * h, Probe: fileProbe("/var/lib/ft/data/bridge/library.ok")},
 		{Source: "drive_snapshot", Label: "Drive snapshot push", MaxAge: 2 * h, Probe: fileProbe("/var/lib/ft/data/bridge/snapshot.ok")},
 
+		// SC-54 chart-frame archive to Drive (FT-Frames). Off by default; alerts on an upload failure
+		// marker or a stale run only once the flag file /etc/ft/frames-archive.enabled exists.
+		{Source: "drive_frames", Label: "Drive frame archive", MaxAge: framesArchiveAllowed, Eval: framesArchiveEval(framesArchiveFlag, framesArchiveFailed, framesArchiveOK)},
+
 		// Nightly DB backup (cron 03:15).
 		{Source: "db_backup", Label: "Nightly DB backup", MaxAge: 30 * h, Probe: fileProbe("/var/backups/ft/ft-*.db")},
 	}
