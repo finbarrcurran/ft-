@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.97.0 · 2026-11-02** — latest change: Frame archive to Drive, built and off (§13).
+> **Current version: v1.98.0 · 2026-11-02** — latest change: CoinGecko call chatter fixed and counted (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.97.0 2026-11-02 -->
+<!-- reference_reviewed: v1.98.0 2026-11-02 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -295,7 +295,7 @@ Standalone Node 22 daemon at `/opt/ft-bot/`, system user `ft-bot`. Bearer-token 
 | ~~Twelve Data~~ | **retired 2026-10-12 (SC-48)** | | Its free plan is US-only and capped at 800 credits/day; FT spent ~3,400/day on it and every call failed (Yahoo supplied the data). No key use remains; the variable may stay in env unused |
 | Congress trades | Bargo Congress API (`bargo.ai/free-apis/congress/v1`) | — | Free key (`FT_BARGO_API_KEY`, Bearer header): 100 requests + 1,000 rows/day, 250 rows/page; free tier serves only the last ~3 months, so FT keeps its own history in `congress_trades_raw`. Terms: visible attribution (Signals tab footer) and no bulk redistribution |
 | Broker positions, SL/TP, invested USD | eToro Public API (`public-api.etoro.com`) | manual `.xlsx` statement upload | Key pair in env; 60 req/60 s shared limit; one call per 30-min sync; the sync transaction is `BEGIN IMMEDIATE` |
-| Crypto quote | CoinGecko `/simple/price` | serve-stale | Demo key `FT_COINGECKO_API_KEY`; free Demo plan 100 calls/min and 10,000/month (FT uses ~100–200/day) |
+| Crypto quote | CoinGecko `/simple/price` | serve-stale | Demo key `FT_COINGECKO_API_KEY`; free Demo plan 10,000 calls/month (the per-minute figure is unverified: CoinGecko's pricing page says 30/min for Demo). **Measured call volume (corrected v1.98.0):** before v1.98.0 FT made about 2,600 CoinGecko calls a day (every 15-minute refresh made 1 `/simple/price` plus 2 `/market_chart` per held coin × 13 coins = 27 calls × 96), almost all keyless and uncounted; `provider_daily` showed only the 96 `/simple/price` calls. Since v1.98.0 the refresh makes 1 keyless `/simple/price` per 15 minutes (96/day) plus 1 keyed `/coins/markets` for all held coins' 7d/30d changes at most once an hour (24/day), the 04:00 daily job makes 13 keyed `/market_chart` calls, and the indicator job's calls are counted too; every call is recorded in `provider_daily` as `coingecko` (keyless) or `coingecko_key` (Demo key) |
 | Crypto history | CoinGecko `/market_chart` | — | Sequential w/ 2.5s gap |
 | Crypto market screener | CoinGecko top 250 | — | SC-21 |
 | Macro + Pal indicators | FRED | manual ISM entry | `FRED_API_KEY`. **Freshness (SC-49b, v1.85.0):** `data_as_of` = the newest observation date used (FRED) or the newest point of DefiLlama's array (stablecoin supply; a real dated element, so a provider that stops publishing stops advancing it). One rule per series in `internal/cryptoindicators/freshness` (cards, Diagnostics and the monitor all use it; age >= amber is amber, >= red is red): `pal_us2y` 5 / 8 US trading days; `pal_dxy` 14 / 21 calendar days (daily series published weekly, 6-11 day lag); `pal_cfnai` 95 / 120 calendar days from the observation date (dated the 1st, released ~3-4 weeks after month end: the real FRED release dates 2025-2026 give a longest normal wait of ~87 days; a fixed number was used rather than "next release + 7 days"); `universal_stablecoin_supply` 3 / 5 calendar days. A fresh refresh time with an old data date is stale. Error pill still takes precedence; stale data is never hidden |
@@ -393,13 +393,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.98.0 · 2026-11-02 · pass 109 · Jordi-46
+
+**CoinGecko call chatter fixed and counted.** Measured about 2,600 calls a day (not the stated 100-200): the 15-minute refresh made 27 calls. 7d/30d changes now come from one keyed `/coins/markets` call at most hourly; every CoinGecko call is counted in `provider_daily` (`coingecko` keyless, `coingecko_key` keyed); the 04:00 history job now uses the key and retries 429s (5 of 13 coins became 13 of 13). §8 corrected. Behaviour: refresh, daily job, counters. Migrations: none. Reference updated: §8. Supersedes v1.97.0.
+
 ### v1.97.0 · 2026-11-02 · pass 108 · SC-54
 
 **Frame archive to Drive, built and off.** Public-video frames can be copied to Drive `FT-Frames/` (outside FT-Bridge) with MD5 verification, an upload-failure marker and a Telegram alert (monitor source `drive_frames`); off unless `/etc/ft/frames-archive.enabled` exists; nothing is deleted. Behaviour: ops, monitor. Migrations: none. Reference updated: §5. Supersedes v1.96.1.
 
+
 ### v1.96.1 · 2026-11-02 · pass 107 · SC-53
 
 **Gate stop words.** Named-ticker name text is not scanned for tickers; stop list gains GLP, SK, NAND, DRAM. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.96.0.
+
 
 
 ### v1.96.0 · 2026-11-02 · pass 106 · SC-54
@@ -408,9 +414,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.3 · 2026-11-02 · pass 105 · SC-53
 
 **Ticker spoken forms.** A ticker is invented only if no spoken form of the company (phrases included) occurs anywhere in the transcript; otherwise near or far. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.2.
+
 
 
 
@@ -423,9 +431,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.1 · 2026-11-02 · pass 103 · SC-53
 
 **Gate name matching.** In tickers_named the gate no longer looks for ticker letters in the passage, matches spoken names across spacing, and accepts alias spoken forms (Citigroup, "cityroup" added for C). Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.0.
+
 
 
 
@@ -442,9 +452,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.94.2 · 2026-11-01 · pass 101 · SC-52
 
 **Current-generation rates and a short-video skip rule.** The LLM rate table gains Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.1 (verified against the pricing page); the video pipeline skips videos under `min_duration_sec` (default 180 s, 0 = off). Behaviour: cost accounting, video ingest. Migrations: none. Reference updated: §5. Supersedes v1.94.1.
+
 
 
 
@@ -465,21 +477,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.94.0 · 2026-10-27 · pass 99 · SC-52
-
-**Majority vote for the newest Jordi digest.** The digest behind the login card is extracted three times and the majority regime state kept; a split sets confidence to low and the card shows "2 OF 3 RUNS". Not applied to the backfill. Behaviour: sweep and card. Migrations: 0060. Reference updated: §3, §5. Supersedes v1.93.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.97.0 -->
+<!-- END FT-master-spec v1.98.0 -->

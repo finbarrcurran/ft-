@@ -8,7 +8,10 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strings"
 	"time"
+
+	"ft/internal/health"
 )
 
 // doWithRetry runs an HTTP GET with retry on 429 (rate-limited).
@@ -40,6 +43,7 @@ func doWithRetry(ctx context.Context, client *http.Client, url, apiKey string) (
 		}
 		resp, err := client.Do(req)
 		if err != nil {
+			recordCoinGeckoCall(ctx, url, apiKey, err)
 			return nil, 0, err
 		}
 		body, readErr := io.ReadAll(resp.Body)
@@ -49,6 +53,11 @@ func doWithRetry(ctx context.Context, client *http.Client, url, apiKey string) (
 		}
 		lastBody = body
 		lastStatus = resp.StatusCode
+		if resp.StatusCode == 200 {
+			recordCoinGeckoCall(ctx, url, apiKey, nil)
+		} else {
+			recordCoinGeckoCall(ctx, url, apiKey, fmt.Errorf("http %d", resp.StatusCode))
+		}
 
 		if resp.StatusCode == 200 {
 			return body, 200, nil
@@ -227,4 +236,17 @@ func (c *CoinGeckoClient) FetchBTCDailyHistory(ctx context.Context) ([]BTCMarket
 		out = append(out, BTCMarketChartDay{Date: ts, Close: p[1]})
 	}
 	return out, nil
+}
+
+// recordCoinGeckoCall counts one attempt in provider_daily (keyed calls under coingecko_key, keyless under
+// coingecko) when the URL is CoinGecko's; other hosts that share doWithRetry are not counted here.
+func recordCoinGeckoCall(ctx context.Context, rawURL, apiKey string, err error) {
+	if !strings.Contains(rawURL, "coingecko.com") {
+		return
+	}
+	provider := "coingecko"
+	if apiKey != "" {
+		provider = "coingecko_key"
+	}
+	health.Record(ctx, provider, err)
 }
