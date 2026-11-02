@@ -6740,7 +6740,7 @@ if (!state.screenerFilters) {
 if (state.screenerAsset == null) state.screenerAsset = 'equities';
 const CRYPTO_SCREENER_DEFAULT_SORT = { col: 'marketCap', dir: 'desc' };
 if (!state.cryptoScreenerFilters) {
-  state.cryptoScreenerFilters = { category: '', tag: '', topN: 100 };
+  state.cryptoScreenerFilters = { category: '', tag: '', vertical: '', topN: 100 };
   state.cryptoScreenerSort = { ...CRYPTO_SCREENER_DEFAULT_SORT };
   state.cryptoScreenerRows = null;
   state.cryptoScreenerMeta = null;
@@ -6816,6 +6816,7 @@ async function renderEquitiesScreener() {
     const tagPills = [
       r.held ? '<span class="screener-tag held">HELD</span>' : '',
       r.onWatchlist ? '<span class="screener-tag wl">✓ WL</span>' : '',
+      r.visser46 ? `<span class="screener-tag" title="${escapeHTML(r.vertical || '')}${r.outsideTop250 ? ' · outside the CoinGecko top 250' : ''}">V46${r.outsideTop250 ? ' &gt;250' : ''}</span>` : '',
     ].join('');
     return `
       <tr data-ticker="${escapeHTML(r.ticker)}">
@@ -6997,7 +6998,9 @@ async function renderCryptoScreener() {
     if (f.tag === 'held' && !r.held) return false;
     if (f.tag === 'watchlist' && !r.onWatchlist) return false;
     if (f.tag === 'untagged' && (r.held || r.onWatchlist)) return false;
-    if (f.topN && r.rank > f.topN) return false;
+    if (f.tag === 'visser46' && !r.visser46) return false;
+    if (f.vertical && r.vertical !== f.vertical) return false;
+    if (f.topN && r.rank > f.topN && !(f.tag === 'visser46' && r.visser46)) return false; // members outside the top 250 still show
     return true;
   });
 
@@ -7015,8 +7018,11 @@ async function renderCryptoScreener() {
   const catOpts = ['<option value="">All categories</option>']
     .concat(meta.categories.map(c => `<option value="${escapeHTML(c)}" ${f.category === c ? 'selected' : ''}>${escapeHTML(c)}</option>`))
     .join('');
-  const tagOpts = [['', 'All coins'], ['held', 'Held'], ['watchlist', 'Watchlist'], ['untagged', 'Untagged']]
+  const tagOpts = [['', 'All coins'], ['held', 'Held'], ['watchlist', 'Watchlist'], ['untagged', 'Untagged'], ['visser46', 'Visser 46']]
     .map(([v, l]) => `<option value="${v}" ${f.tag === v ? 'selected' : ''}>${l}</option>`).join('');
+  const verticals = [...new Set(state.cryptoScreenerRows.filter(r => r.visser46).map(r => r.vertical))].sort();
+  const vertOpts = ['<option value="">All verticals</option>']
+    .concat(verticals.map(v => `<option value="${escapeHTML(v)}" ${f.vertical === v ? 'selected' : ''}>${escapeHTML(v)}</option>`)).join('');
   const topNOpts = [25, 50, 100, 250]
     .map(n => `<option value="${n}" ${f.topN === n ? 'selected' : ''}>Top ${n}</option>`).join('');
 
@@ -7033,6 +7039,7 @@ async function renderCryptoScreener() {
         <td class="num dim">${r.rank}</td>
         <td><strong>${escapeHTML(r.symbol)}</strong> <span class="dim">${escapeHTML(r.name)}</span> ${tagPills}</td>
         <td class="dim">${escapeHTML(r.category)}</td>
+        <td class="dim">${escapeHTML(r.vertical || '')}</td>
         <td class="num">${fmtCryptoPrice(r.priceUsd)}</td>
         <td class="num">${fmtUsdB(r.marketCap)}</td>
         ${pctCell(r.change24h)}
@@ -7046,7 +7053,7 @@ async function renderCryptoScreener() {
           ? '<span class="dim">on watchlist</span>'
           : '<button class="btn-ghost" data-cadd="' + escapeHTML(r.symbol) + '">+ watchlist</button>'}</td>
       </tr>`;
-  }).join('') || `<tr><td colspan="13" class="dim" style="text-align:center; padding:1rem">No matches.</td></tr>`;
+  }).join('') || `<tr><td colspan="14" class="dim" style="text-align:center; padding:1rem">No matches.</td></tr>`;
 
   const fetchedLabel = meta.fetchedAt
     ? new Date(meta.fetchedAt).toLocaleString('en-IE', { dateStyle: 'medium', timeStyle: 'short' })
@@ -7062,6 +7069,8 @@ async function renderCryptoScreener() {
         <select id="cs-cat">${catOpts}</select>
         <strong>Tag</strong>
         <select id="cs-tag">${tagOpts}</select>
+        <strong>Vertical</strong>
+        <select id="cs-vert">${vertOpts}</select>
         <strong>Universe</strong>
         <select id="cs-topn">${topNOpts}</select>
         <button class="btn-ghost" id="cs-reset">Reset</button>
@@ -7077,6 +7086,7 @@ async function renderCryptoScreener() {
           <th class="num" data-sort="rank">#${sortIcon('rank')}</th>
           <th data-sort="name">Coin${sortIcon('name')}</th>
           <th data-sort="category">Category${sortIcon('category')}</th>
+          <th data-sort="vertical">Vertical (V46)${sortIcon('vertical')}</th>
           <th class="num" data-sort="priceUsd">Price${sortIcon('priceUsd')}</th>
           <th class="num" data-sort="marketCap">Mkt Cap${sortIcon('marketCap')}</th>
           <th class="num" data-sort="change24h">24h${sortIcon('change24h')}</th>
@@ -7097,9 +7107,10 @@ async function renderCryptoScreener() {
 
   $('#cs-cat').addEventListener('change', (ev) => { state.cryptoScreenerFilters.category = ev.target.value; renderCryptoScreener(); });
   $('#cs-tag').addEventListener('change', (ev) => { state.cryptoScreenerFilters.tag = ev.target.value; renderCryptoScreener(); });
+  $('#cs-vert').addEventListener('change', (ev) => { state.cryptoScreenerFilters.vertical = ev.target.value; renderCryptoScreener(); });
   $('#cs-topn').addEventListener('change', (ev) => { state.cryptoScreenerFilters.topN = Number(ev.target.value); renderCryptoScreener(); });
   $('#cs-reset').addEventListener('click', () => {
-    state.cryptoScreenerFilters = { category: '', tag: '', topN: 100 };
+    state.cryptoScreenerFilters = { category: '', tag: '', vertical: '', topN: 100 };
     state.cryptoScreenerSort = { ...CRYPTO_SCREENER_DEFAULT_SORT };
     renderCryptoScreener();
   });

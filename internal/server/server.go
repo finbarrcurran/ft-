@@ -82,6 +82,19 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		mux:              http.NewServeMux(),
 	}
 	s.cryptoWrite = cryptotheses.NewThesisWriteService(st.DB, s.cryptoAdapters, s.cryptoCascade)
+	s.cryptoScreener.Members = func(ctx context.Context) ([]cryptoscreener.IndexMember, error) { // Jordi-46 Phase 1
+		ms, err := st.ListCryptoIndexMembers(ctx, "visser46")
+		if err != nil {
+			return nil, err
+		}
+		var out []cryptoscreener.IndexMember
+		for _, m := range ms {
+			if m.AssetKind == "token" && m.CoinGeckoID != nil {
+				out = append(out, cryptoscreener.IndexMember{CoinGeckoID: *m.CoinGeckoID, Vertical: m.Vertical})
+			}
+		}
+		return out, nil
+	}
 	s.videoDigest = videodigest.New(st.DB, llmSvc, os.Getenv("FT_VIDEO_DIGEST_ROOT")) // SC-43 P1
 	s.videoDigest.ReadChartFrames = true // SC-54: chart frames of public videos
 	s.videoDigest.ExtractV5Items = true // SC-53: v5 items after each ingest
@@ -185,6 +198,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/screener", s.requireUser(s.handleScreener))
 	// SC-21: crypto market screener — CoinGecko top-250 + DefiLlama TVL.
 	s.mux.HandleFunc("GET /api/crypto-screener", s.requireUser(s.handleCryptoScreener))
+	s.mux.HandleFunc("GET /api/crypto-index/{key}", s.requireUser(s.handleCryptoIndex)) // Jordi-46 Phase 1: reference list
 
 	// Spec 9c: per-holding levels (S/R candidates + suggested SL/TP/R-mult).
 	// Token-or-cookie so the bot's /levels command works.
