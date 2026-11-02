@@ -172,3 +172,20 @@ func (s *Server) handleTranscriptSearch(w http.ResponseWriter, r *http.Request) 
 	stats, _ := s.videoDigest.TranscriptStats(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"query": q.Get("q"), "hits": hits, "corpus": stats})
 }
+
+// GET /api/video-digest/{id}/items — the SC-53 v5 items of one digest with their gate class, issues,
+// resolved tickers, direction flags and the wide passage each one cites. Public video content, so
+// there is nothing to strip in demo mode.
+func (s *Server) handleVideoDigestItems(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "bad digest id")
+		return
+	}
+	view, err := s.videoDigest.Items(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}

@@ -5727,3 +5727,18 @@ a.score-badge { display: inline-block; }
 .rp-disagree { color: #ffb800; font-weight: 600; }
 .rp-stale { color: #ff5c5c; font-weight: 600; }
 .rp-set-row button { margin: 0 0.25rem; text-transform: capitalize; }
+
+/* SC-53 — v5 items under a digest */
+.vd-items { margin-top: 10px; border-top: 1px solid rgb(var(--color-border-strong)); padding-top: 8px; }
+.vd-items > summary { cursor: pointer; font-size: 13px; }
+.vd-items-head { font-size: 12px; margin: 8px 0; }
+.vd-item-list { list-style: none; padding-left: 0; }
+.vd-item { padding: 5px 0; border-bottom: 1px dotted rgb(var(--color-border-strong)); font-size: 13px; }
+.vd-item-flags { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.vd-flag { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgb(var(--color-border-strong)); }
+.vd-flag-wrong_place, .vd-flag-far { border-color: #b8860b; color: #b8860b; }
+.vd-flag-invented, .vd-flag-name_mapping { border-color: #c0392b; color: #c0392b; }
+.vd-flag-chart, .vd-flag-unres { border-color: #5b7ea6; color: #5b7ea6; }
+.vd-flag-dir { border-color: #8e44ad; color: #8e44ad; }
+.vd-flag-detail { font-size: 11px; }
+.vd-passage { margin-top: 3px; font-size: 12px; }

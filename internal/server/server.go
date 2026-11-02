@@ -83,6 +83,7 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 	}
 	s.cryptoWrite = cryptotheses.NewThesisWriteService(st.DB, s.cryptoAdapters, s.cryptoCascade)
 	s.videoDigest = videodigest.New(st.DB, llmSvc, os.Getenv("FT_VIDEO_DIGEST_ROOT")) // SC-43 P1
+	s.videoDigest.ExtractV5Items = true // SC-53: v5 items after each ingest
 	s.videoDigest.VoteRuns = 3                                                       // SC-52: newest Jordi digest = majority of 3 extractions
 	s.etoroSync = etorosync.New(st, os.Getenv("FT_ETORO_API_BASE"),
 		os.Getenv("FT_ETORO_API_KEY"), os.Getenv("FT_ETORO_USER_KEY")) // SC-42
@@ -333,6 +334,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/transcripts/search", s.requireUser(s.handleTranscriptSearch)) // SC-52 P2
 	s.mux.HandleFunc("GET /api/video-digest", s.requireUser(s.handleVideoDigestList))                // SC-43 P1
 	s.mux.HandleFunc("POST /api/video-digest/ingest", s.requireUser(s.handleVideoDigestIngest))      // SC-43 P1
+	s.mux.HandleFunc("GET /api/video-digest/{id}/items", s.requireUser(s.handleVideoDigestItems))    // SC-53 v5 items
 	s.mux.HandleFunc("GET /api/scorecards/{code}", s.requireUserOrToken(s.handleScorecardGet))
 	s.mux.HandleFunc("PUT /api/scorecards/{code}", s.requireUser(s.handleScorecardUpdate))
 	s.mux.HandleFunc("POST /api/scorecards/preview", s.requireUser(s.handleScorecardPreview))

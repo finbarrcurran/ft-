@@ -1,0 +1,160 @@
+# ticker<TAB>name<TAB>source. One line per name; a new name is a one-line addition. source: db = derived from FT tables (theses, watchlist, holdings, eToro instruments); manual = added by cc 2026-11-01 (review); manual-late = added after the first grounding pass; manual-2026-11-01b = added after ai review (Zcash, Ford, Lumentum incl. the ASR spelling "lummentum", Lumen, SpaceX = SPCX). Struck 2026-11-02 (Fin): ark, arm, block, cipher, ether, gold, marathon, riot, silver no longer ground a ticker; kept: meta, intel, constellation, dell. SPCX (SpaceX) verified on Finnhub and Yahoo 2026-11-02.
+373220.KS	lg energy solution	db
+3750.HK	contemporary amperex limited	db
+4063.T	shin etsu chemical	db
+9888.HK	baidu	db
+AAPL	apple	manual
+ABBV	abbvie	db
+AEM	agnico eagle mines	db
+AEM	agnico eagle mines limited	db
+AIP	arteris	db
+ALB	albemarle	db
+AMD	advanced micro devices	manual
+AMD	amd	manual
+AMZN	amazon	manual
+ANET	arista	manual
+ARKK	arkk	manual
+ASML	asml	db
+ASML	asml n v	db
+AU	anglogold ashanti	db
+AVGO	broadcom	db
+BAC	bank of america	manual
+BAYN.DE	bayer	db
+BE	bloom energy	db
+BESI	be semiconductor industries n v	db
+BLK	black rock	manual-late
+BLK	blackrock	manual-late
+BTC	bitcoin	manual
+BX	blackstone	manual-late
+BYD	byd limited	db
+CAT	caterpillar	db
+CCJ	cameco	db
+CEG	constellation	manual
+CEG	constellation energy	db
+CLS	celestica	db
+COHR	coherent	db
+COIN	coinbase	manual
+CRWV	core weave	manual
+CRWV	coreweave	db
+DELL	dell	manual
+DJT	trump media &	db
+DJTWW	trump media & warrants	db
+DOGE	dogecoin	db
+DXY	dollar index	manual
+DXY	dxy	manual
+ENTG	entegris	db
+ETH	ethereum	manual
+ETN	eaton	db
+FCX	freeport mcmoran	db
+FIG	figma	db
+FISV	fiserv	db
+FIX	comfort systems usa	db
+FLNC	fluence energy	db
+GEV	ge vernova	manual
+GEV	vernova	manual
+GLD	spdr gold	db
+GLD	spdr gold shares	db
+GOOG	alphabet	manual
+GOOG	google	manual
+GOOGL	alphabet	manual
+GOOGL	google	manual
+GS	goldman	manual
+GS	goldman sachs	manual-late
+HOOD	robinhood	manual
+HYG	hyg	manual
+HYPE	hyperliquid	db
+IBIT	ibit	manual
+INTC	intel	manual
+IREN	iren	manual
+IWM	iwm	manual
+IWM	russell	manual
+JNJ	johnson & johnson	db
+JPM	jp morgan	manual
+JPM	jpmorgan	manual
+LINK	chainlink	manual
+LLY	eli lilly	manual
+LLY	eli lilly &	db
+LLY	eli lilly and	db
+LLY	lilly	manual
+LSCC	lattice semiconductor	db
+META	facebook	manual
+META	meta	manual
+MOD	modine manufacturing	db
+MRK	merck &	db
+MRNA	moderna	manual
+MRVL	marvell	manual-late
+MS	morgan stanley	manual
+MSFT	microsoft	db
+MSTR	microstrategy	manual
+MSTR	strategy	db
+MTZ	mastec	db
+MU	micron	db
+NBIS	nebius	manual
+NEM	newmount	db
+NESN.ZU	nestle	db
+NET	cloudflare	manual
+NFLX	netflix	manual
+NOW	servicenow	db
+NVDA	nvidia	db
+NVO	novo nordisk a s	db
+OKLO	oklo	manual
+ORCL	oracle	db
+PAAS	pan american silver	db
+PLTR	palantir	manual
+PWR	quanta services	db
+QQQ	qqq	manual
+RGTI	rigetti computing	db
+RHM.DE	rheinmetall	db
+RI.PA	pernod ricard	db
+RKLB	rocket lab	db
+RR.L	rolls royce	db
+RTX	raytheon	db
+SHOP	shopify	manual
+SLV	ishares silver trust	db
+SMCI	super micro	manual
+SMCI	supermicro	manual
+SMH	semiconductor etf	manual
+SMH	semis	manual
+SMH	smh	manual
+SNOW	snowflake	manual
+SNPS	synopsys	db
+SOL	solana	manual
+SPX	s&p	manual
+SPX	s&p 500	manual
+SPX	spx	manual
+SPX	the s&p	manual
+SPY	spy	manual
+STEM	stem	db
+STX	seagate	manual-late
+STX.US	seagate	db
+SU.PA	schneider electric	db
+TDG	transdigm incorporated	db
+TLT	tlt	manual
+TSLA	tesla	db
+TSM	taiwan semi	manual
+TSM	taiwan semiconductor	db
+TSM	taiwan semiconductor manufacturing	db
+TSM	tsmc	manual
+TTE.PA	totalenergies	db
+TXN	texas instruments	manual-late
+UBER	uber	manual
+UNH	unitedhealth	db
+UPS	united parcel service	db
+VRT	vertiv	manual
+VST	vistra	db
+WBA	walgreens boots alliance	db
+WDC	western digital	manual-late
+WPM	wheaton precious metals	db
+XLE	xle	manual
+XLF	xlf	manual
+XLK	xlk	manual
+XOM	exxon mobil	db
+XRP	ripple	manual
+XRP	xrp	manual
+ZEC	zcash	manual-2026-11-01b
+F	ford	manual-2026-11-01b
+LITE	lumentum	manual-2026-11-01b
+LITE	lummentum	manual-2026-11-01b
+LUMN	lumen	manual-2026-11-01b
+SPCX	spacex	manual-2026-11-01b
+SPCX	space exploration technologies	manual-2026-11-01b

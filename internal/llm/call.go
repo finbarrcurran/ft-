@@ -52,6 +52,10 @@ type CallRequest struct {
 	// MaxOutputTokens — capped at user_preferences cap. Defaults to 1024.
 	MaxOutputTokens int
 
+	// ThinkingOff sends {"thinking": {"type": "disabled"}} (SC-53: the v5 extraction on Haiku 5.5
+	// runs with thinking off, the setting the bake-off measured). Models that reject it would 400.
+	ThinkingOff bool
+
 	// Tools must be empty in v1 (no agentic loops). Future: tool-use spec
 	// will plumb this through with a separate per-call cap.
 	Tools []Tool
@@ -174,7 +178,7 @@ func (s *Service) Call(ctx context.Context, req CallRequest) (CallResponse, erro
 	if maxOut <= 0 {
 		maxOut = 1024
 	}
-	maxOutCap := s.intPref(ctx, "llm_max_output_tokens_per_call", 2000)
+	maxOutCap := effectiveOutputCap(req.FeatureID, s.intPref(ctx, "llm_max_output_tokens_per_call", 2000))
 	if maxOut > maxOutCap {
 		return out, ErrOutputCapTooLarge
 	}
@@ -266,6 +270,18 @@ func (s *Service) Call(ctx context.Context, req CallRequest) (CallResponse, erro
 
 // ----- internal helpers --------------------------------------------------
 
+// featureOutputCaps are per-feature output ceilings that apply when the global
+// llm_max_output_tokens_per_call is lower (SC-53, Fin 2026-11-01: 8,000 for the v5 item extraction,
+// whose output reaches about 5,000 tokens). The global cap still applies to every other feature.
+var featureOutputCaps = map[string]int{"video_items": 8000, "video_direction": 4000}
+
+func effectiveOutputCap(featureID string, global int) int {
+	if c, ok := featureOutputCaps[featureID]; ok && c > global {
+		return c
+	}
+	return global
+}
+
 func (s *Service) featureEnabled(ctx context.Context, featureID string) bool {
 	// Map well-known FeatureIDs to their kill-switch key. Unknown IDs default
 	// to enabled (don't block what we don't know about — call will still be
@@ -281,6 +297,10 @@ func (s *Service) featureEnabled(ctx context.Context, featureID string) bool {
 		return s.boolPref(ctx, "llm_feature_jarvis_query", true)
 	case "video_digest": // SC-43 P1
 		return s.boolPref(ctx, "llm_feature_video_digest", true)
+	case "video_items": // SC-53 v5 item extraction
+		return s.boolPref(ctx, "llm_feature_video_items", true)
+	case "video_direction": // SC-53 direction flag
+		return s.boolPref(ctx, "llm_feature_video_direction", true)
 	}
 	return true
 }

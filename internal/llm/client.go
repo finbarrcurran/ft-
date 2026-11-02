@@ -141,5 +141,8 @@ func buildAnthropicBody(model string, req CallRequest, maxOut int, cachingEnable
 	if len(systemBlocks) > 0 {
 		body["system"] = systemBlocks
 	}
+	if req.ThinkingOff {
+		body["thinking"] = map[string]string{"type": "disabled"}
+	}
 	return json.Marshal(body)
 }

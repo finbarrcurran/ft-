@@ -2157,6 +2157,93 @@ function vdSnapshot(sn) {
   return `<div class="vd-section"><div class="vd-h">Weekly snapshot${conf}</div><div class="vd-snap">${rows.join('')}</div></div>`;
 }
 
+// SC-53 — the v5 items of a digest (every claim, prediction, level and indicator he states), each with
+// the grounding gate's flag. Flags are information for Fin, not filters: only "invented" and "name
+// mapping" items are kept out of any signal. Chart-only numbers are "from chart, unverified".
+const VD_CLASS_LABEL = {
+  grounded: '',
+  wrong_place: 'cited at the wrong place',
+  far: 'in the transcript, but far from the cited place',
+  invented: 'not in the transcript — kept out of signals',
+  name_mapping: 'name does not match the ticker — kept out of signals',
+};
+const VD_BLOCK_LABEL = {
+  causal_claims: 'Causal claims', analogues: 'Analogues', seasonality: 'Seasonality', key_levels: 'Key levels',
+  indicators_cited: 'Indicators cited', tickers_named: 'Tickers named', predictions: 'Predictions', self_corrections: 'Self-corrections',
+};
+
+function vdItemsToggle(d) {
+  const it = d.items;
+  if (!it || !it.items) return '';
+  const c = it.counts || {};
+  const bad = (c.wrong_place || 0) + (c.far || 0) + (c.invented || 0) + (c.name_mapping || 0);
+  return `<details class="vd-items" data-vd-items="${d.id}">
+    <summary>Items (v5): ${it.items} <span class="dim">· ${c.grounded || 0} grounded${bad ? ` · ${bad} flagged` : ''}</span></summary>
+    <div class="vd-items-body dim">loading…</div></details>`;
+}
+
+function vdItemText(it) {
+  const f = it.fields || {};
+  const j = (...xs) => xs.filter((x) => x != null && x !== '').join(' · ');
+  switch (it.block) {
+    case 'causal_claims': return `${f.cause || ''} → ${f.effect || ''}` + (j(f.direction, f.horizon, f.confidence_wording) ? ` (${j(f.direction, f.horizon, f.confidence_wording)})` : '');
+    case 'analogues': return `${f.then || ''} → ${f.now || ''}: ${f.point || ''}`;
+    case 'seasonality': return j(f.pattern, f.asset);
+    case 'key_levels': return `${f.asset || ''} ${f.level || ''} (${f.role || ''})` + (f.invalidation ? ` · invalidated by ${f.invalidation}` : '');
+    case 'indicators_cited': return `${f.name || ''}: ${f.reading || '—'}`;
+    case 'tickers_named': return `${f.name || ''}${it.resolution && it.resolution.ticker ? ` (${it.resolution.ticker})` : (f.ticker ? ` (${f.ticker}?)` : '')} · ${f.stance || ''}`;
+    case 'predictions': return `${f.claim || ''}` + (j(f.direction, f.horizon, f.condition ? 'if ' + f.condition : '') ? ` (${j(f.direction, f.horizon, f.condition ? 'if ' + f.condition : '')})` : '');
+    default: return f.what || '';
+  }
+}
+
+function vdItemRow(d, it) {
+  const flags = [];
+  if (VD_CLASS_LABEL[it.class]) flags.push(`<span class="vd-flag vd-flag-${it.class}">${VD_CLASS_LABEL[it.class]}</span>`);
+  if ((it.issues || []).length) flags.push(`<span class="dim vd-flag-detail">${it.issues.map((x) => escapeHTML(x.type + ': ' + x.detail + (x.scope ? ' (' + x.scope + ')' : ''))).join('; ')}</span>`);
+  if ((it.chartUnverified || []).length) flags.push(`<span class="vd-flag vd-flag-chart">from chart, unverified: ${escapeHTML(it.chartUnverified.join(', '))}</span>`);
+  const res = it.resolution;
+  if (res && res.status === 'unresolved') flags.push(`<span class="vd-flag vd-flag-unres">ticker unresolved${res.modelTicker ? ' (model said ' + escapeHTML(res.modelTicker) + ', unverified)' : ''}</span>`);
+  if (res && res.conflict) flags.push(`<span class="vd-flag vd-flag-wrong_place">lookup says ${escapeHTML(res.ticker)}, model said ${escapeHTML(res.modelTicker)}</span>`);
+  if (it.direction && it.direction.verdict === 'contradicts') flags.push(`<span class="vd-flag vd-flag-dir">direction flag: the speaker's net view — ${escapeHTML(it.direction.speakerView || '')}</span>`);
+  const at = it.refStart != null ? vdTsLink(d, it.refStart) : '';
+  return `<li class="vd-item vd-item-${it.class}"><span class="vd-item-text">${escapeHTML(vdItemText(it))}</span> ${at}
+    ${flags.length ? `<div class="vd-item-flags">${flags.join(' ')}</div>` : ''}
+    ${it.passage ? `<details class="vd-passage"><summary class="dim">cited passage</summary><div class="dim">${escapeHTML(it.passage)}</div></details>` : ''}</li>`;
+}
+
+function vdItemsHTML(d, v) {
+  if (!v || !v.run) return '<span class="dim">No v5 items for this digest.</span>';
+  const byBlock = {};
+  for (const it of v.items) (byBlock[it.block] = byBlock[it.block] || []).push(it);
+  const c = v.run.counts || {};
+  const head = `<div class="dim vd-items-head">${v.run.items} items · ${Object.keys(c).map((k) => `${c[k]} ${k.replace('_', ' ')}`).join(' · ')} · ${v.run.model} · $${(v.run.costUsd + v.run.directionCostUsd).toFixed(4)}${v.run.chunks > 1 ? ' · read in ' + v.run.chunks + ' chunks' : ''}</div>`;
+  const blocks = Object.keys(VD_BLOCK_LABEL).filter((b) => byBlock[b]).map((b) =>
+    `<div class="vd-section"><div class="vd-h">${VD_BLOCK_LABEL[b]} <span class="dim">· ${byBlock[b].length}</span></div>
+       <ul class="vd-list vd-item-list">${byBlock[b].map((it) => vdItemRow(d, it)).join('')}</ul></div>`).join('');
+  return head + blocks;
+}
+
+function vdWireItems(root, ds) {
+  root.querySelectorAll('details.vd-items').forEach((el) => {
+    el.addEventListener('toggle', async () => {
+      if (!el.open || el.dataset.loaded) return;
+      el.dataset.loaded = '1';
+      const id = Number(el.dataset.vdItems);
+      const d = ds.find((x) => x.id === id);
+      const body = el.querySelector('.vd-items-body');
+      try {
+        const v = await api(`/api/video-digest/${id}/items`);
+        body.classList.remove('dim');
+        body.innerHTML = vdItemsHTML(d, v);
+      } catch (err) {
+        body.textContent = 'Could not load items: ' + err.message;
+        delete el.dataset.loaded;
+      }
+    });
+  });
+}
+
 function vdCard(d) {
   const mins = d.durationSec ? `${Math.round(d.durationSec / 60)} min` : '';
   const flag = d.source === 'cowen' && d.isFlagship ? '<span class="vd-badge">flagship</span>' : '';
@@ -2193,6 +2280,7 @@ function vdCard(d) {
     ${d.source === 'cowen' ? vdSnapshot(d.snapshot) : ''}
     ${mentions}
     ${quotes}
+    ${vdItemsToggle(d)}
   </article>`;
 }
 
@@ -2219,6 +2307,7 @@ async function renderVideoDigest() {
     _vdSource = b.dataset.vdsrc;
     renderVideoDigest();
   }));
+  vdWireItems(content, ds);
   const btn = $('#vd-ingest');
   if (btn) btn.addEventListener('click', async () => {
     btn.disabled = true;
