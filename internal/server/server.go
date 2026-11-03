@@ -161,9 +161,9 @@ func (s *Server) routes() {
 	// Import / export — requires session cookie.
 	s.mux.HandleFunc("POST /api/import/preview", s.requireUser(s.handleImportPreview))
 	s.mux.HandleFunc("POST /api/import/apply", s.requireUser(s.handleImportApply))
-	s.mux.HandleFunc("GET /api/export.xlsx", s.requireUser(s.handleExport))
+	s.mux.HandleFunc("GET /api/export.xlsx", s.requireUser(s.denyInDemo(s.handleExport)))
 	// v1.5: per-tab CSV download (stocks | crypto | watchlist).
-	s.mux.HandleFunc("GET /api/export.csv", s.requireUser(s.handleExportCSV))
+	s.mux.HandleFunc("GET /api/export.csv", s.requireUser(s.denyInDemo(s.handleExportCSV)))
 
 	// Heatmap — requires session cookie. Returns an SVG document.
 	s.mux.HandleFunc("GET /api/heatmap.svg", s.requireUser(s.handleHeatmap))
@@ -259,7 +259,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/notes/{id}", s.requireUserOrToken(s.handleDeleteNote))
 	s.mux.HandleFunc("GET /api/notes/stale", s.requireUserOrToken(s.handleStaleNotes))
 	s.mux.HandleFunc("GET /api/notes/contradictions", s.requireUserOrToken(s.handleNoteContradictions))
-	s.mux.HandleFunc("GET /api/notes/resolve", s.requireUserOrToken(s.handleResolveNoteTarget))
+	s.mux.HandleFunc("GET /api/notes/resolve", s.requireUserOrToken(s.emptyInDemo(s.handleResolveNoteTarget, map[string]any{"targets": []any{}, "demo": true})))
 
 	// Spec 7: diagnostics + provider health.
 	s.mux.HandleFunc("GET /api/diagnostics", s.requireUserOrToken(s.handleDiagnostics))
@@ -391,7 +391,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/preferences/{key}", s.requireUserOrToken(s.handleSetPreference))
 
 	// Spec 4: Watchlist + Framework Scoring — all require cookie auth.
-	s.mux.HandleFunc("GET /api/watchlist", s.requireUser(s.handleListWatchlist))
+	s.mux.HandleFunc("GET /api/watchlist", s.requireUser(s.emptyInDemo(s.handleListWatchlist, map[string]any{"watchlist": []any{}, "demo": true})))
 	s.mux.HandleFunc("POST /api/watchlist", s.requireUser(s.handleCreateWatchlist))
 	s.mux.HandleFunc("PUT /api/watchlist/{id}", s.requireUser(s.handleUpdateWatchlist))
 	s.mux.HandleFunc("DELETE /api/watchlist/{id}", s.requireUser(s.handleSoftDeleteWatchlist))

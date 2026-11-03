@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.99.3 · 2026-11-03** — latest change: Stock screener demo-mode flags (§13).
+> **Current version: v1.99.4 · 2026-11-03** — latest change: Demo mode and exports, watchlist, note targets (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.99.3 2026-11-03 -->
+<!-- reference_reviewed: v1.99.4 2026-11-03 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -395,13 +395,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.99.4 · 2026-11-03 · pass 114 · Demo mode
+
+**Demo mode and exports, watchlist, note targets.** In demo mode the xlsx and CSV exports answer 403, `/api/watchlist` and `/api/notes/resolve` answer an empty list; route-level checks, internal callers unaffected; export buttons hidden. Demo off unchanged. Behaviour: four endpoints, UI. Migrations: none. Reference updated: §5. Supersedes v1.99.3.
+
 ### v1.99.3 · 2026-11-03 · pass 113 · Demo mode
 
 **Stock screener demo-mode flags.** `/api/screener` no longer reads holdings or the watchlist when demo mode is on (all rows held:false, onWatchlist:false); demo off is unchanged. Behaviour: one endpoint. Migrations: none. Reference updated: §5. Supersedes v1.99.2.
 
+
 ### v1.99.2 · 2026-11-03 · pass 112 · Demo mode
 
 **Crypto screener demo-mode flags.** `/api/crypto-screener` no longer reads holdings or the watchlist when demo mode is on: all rows carry held:false and onWatchlist:false; demo off is unchanged. Other endpoints with the same pattern are reported, not fixed. Behaviour: one endpoint. Migrations: none. Reference updated: §5. Supersedes v1.99.1.
+
 
 
 ### v1.99.1 · 2026-11-02 · pass 111 · Jordi-46
@@ -410,9 +416,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.99.0 · 2026-11-02 · pass 110 · Jordi-46
 
 **Visser 46 reference table and screener tag.** `crypto_index_members` (migration 0063) holds the 46 index constituents (42 tokens with verified CoinGecko ids, 4 stocks, 10 verticals); the crypto screener gets a Visser 46 filter and vertical column, fetching members outside the top 250 with one extra keyed call; read-only `GET /api/crypto-index/visser46`. Reference only: no alerts, watchlist, holdings or thesis effect. Behaviour: Screener tab. Migrations: 0063. Reference updated: §3, §5. Supersedes v1.98.0.
+
 
 
 
@@ -425,9 +433,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.97.0 · 2026-11-02 · pass 108 · SC-54
 
 **Frame archive to Drive, built and off.** Public-video frames can be copied to Drive `FT-Frames/` (outside FT-Bridge) with MD5 verification, an upload-failure marker and a Telegram alert (monitor source `drive_frames`); off unless `/etc/ft/frames-archive.enabled` exists; nothing is deleted. Behaviour: ops, monitor. Migrations: none. Reference updated: §5. Supersedes v1.96.1.
+
 
 
 
@@ -444,9 +454,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.96.0 · 2026-11-02 · pass 106 · SC-54
 
 **Chart-frame reads.** Haiku 5.5 reads the chart frames of public videos after each ingest (governor feature `video_frames`, sub-caps $0.05/video and $0.25/day; a hit cap shows "frames skipped"); reads are display-only "from chart, unverified" rows with thumbnails, never signals; a re-read adds rows; public-only check from package availability; Jordi frame cap 30 to 45. Behaviour: Video Digest tab, governor. Migrations: 0062. Reference updated: §5. Supersedes v1.95.3.
+
 
 
 
@@ -467,21 +479,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.95.2 · 2026-11-02 · pass 104 · SC-53
-
-**Gate and resolver follow-ups.** Invented only if the name is absent from the whole transcript; number-word names match; wrong-place window 180 s for Cowen; new resolution kinds proxy (display only) and not_listed; alias additions. Governor gains image blocks and video_frames sub-caps (unused until SC-54). Behaviour: grounding gate, resolver, Video Digest tab. Migrations: none. Reference updated: §5. Supersedes v1.95.1.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.99.3 -->
+<!-- END FT-master-spec v1.99.4 -->
