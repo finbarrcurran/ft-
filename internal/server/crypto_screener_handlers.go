@@ -42,34 +42,29 @@ func (s *Server) handleCryptoScreener(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Per-user overlay sets (crypto holdings + crypto watchlist), matched by
-	// upper-cased symbol.
+	// upper-cased symbol. Demo mode (SC-22 doctrine: portfolio data is never served in demo mode,
+	// enforced server-side) skips them entirely, so no row carries a held or watchlist flag.
+	demo := s.demoModeOn(r.Context())
 	held := map[string]bool{}
-	if holdings, err := s.store.ListCryptoHoldings(r.Context(), userID); err == nil {
-		for _, h := range holdings {
-			if sym := strings.ToUpper(strings.TrimSpace(h.Symbol)); sym != "" {
-				held[sym] = true
+	onWatch := map[string]bool{}
+	if !demo {
+		if holdings, err := s.store.ListCryptoHoldings(r.Context(), userID); err == nil {
+			for _, h := range holdings {
+				if sym := strings.ToUpper(strings.TrimSpace(h.Symbol)); sym != "" {
+					held[sym] = true
+				}
 			}
 		}
-	}
-	onWatch := map[string]bool{}
-	if wl, err := s.store.ListWatchlist(r.Context(), userID); err == nil {
-		for _, e := range wl {
-			if e.Kind == "crypto" {
-				onWatch[strings.ToUpper(strings.TrimSpace(e.Ticker))] = true
+		if wl, err := s.store.ListWatchlist(r.Context(), userID); err == nil {
+			for _, e := range wl {
+				if e.Kind == "crypto" {
+					onWatch[strings.ToUpper(strings.TrimSpace(e.Ticker))] = true
+				}
 			}
 		}
 	}
 
-	out := make([]cryptoScreenerRow, 0, len(rows))
-	catSet := map[string]bool{}
-	for _, row := range rows {
-		catSet[row.Category] = true
-		out = append(out, cryptoScreenerRow{
-			Row:         row,
-			Held:        held[row.Symbol],
-			OnWatchlist: onWatch[row.Symbol],
-		})
-	}
+	out, catSet := overlayCryptoRows(rows, held, onWatch)
 
 	categories := make([]string, 0, len(catSet))
 	for c := range catSet {
@@ -116,4 +111,16 @@ func (s *Server) handleCryptoIndex(w http.ResponseWriter, r *http.Request) {
 		"verticals": verticals, "members": members,
 		"note": "Reference list only: constituents and vertical labels of the Visser-Labs 46-name index. Not a recommendation, not a score.",
 	})
+}
+
+// overlayCryptoRows adds the per-user held / watchlist flags to the screener rows and collects the
+// categories. Empty sets (demo mode) leave every flag false.
+func overlayCryptoRows(rows []cryptoscreener.Row, held, onWatch map[string]bool) ([]cryptoScreenerRow, map[string]bool) {
+	out := make([]cryptoScreenerRow, 0, len(rows))
+	catSet := map[string]bool{}
+	for _, row := range rows {
+		catSet[row.Category] = true
+		out = append(out, cryptoScreenerRow{Row: row, Held: held[row.Symbol], OnWatchlist: onWatch[row.Symbol]})
+	}
+	return out, catSet
 }
