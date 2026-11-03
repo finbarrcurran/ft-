@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.99.2 · 2026-11-03** — latest change: Crypto screener demo-mode flags (§13).
+> **Current version: v1.99.3 · 2026-11-03** — latest change: Stock screener demo-mode flags (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.99.2 2026-11-03 -->
+<!-- reference_reviewed: v1.99.3 2026-11-03 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -395,13 +395,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.99.3 · 2026-11-03 · pass 113 · Demo mode
+
+**Stock screener demo-mode flags.** `/api/screener` no longer reads holdings or the watchlist when demo mode is on (all rows held:false, onWatchlist:false); demo off is unchanged. Behaviour: one endpoint. Migrations: none. Reference updated: §5. Supersedes v1.99.2.
+
 ### v1.99.2 · 2026-11-03 · pass 112 · Demo mode
 
 **Crypto screener demo-mode flags.** `/api/crypto-screener` no longer reads holdings or the watchlist when demo mode is on: all rows carry held:false and onWatchlist:false; demo off is unchanged. Other endpoints with the same pattern are reported, not fixed. Behaviour: one endpoint. Migrations: none. Reference updated: §5. Supersedes v1.99.1.
 
+
 ### v1.99.1 · 2026-11-02 · pass 111 · Jordi-46
 
 **Index stock exchanges and a screener pill fix.** Migration 0064 records COIN and HOOD (Nasdaq) and CRCL (NYSE), checked against Finnhub and Yahoo; the V46 pill moves into the crypto screener; §8 states the Demo plan's 100 calls/min per the pricing page. Behaviour: Screener tab, data rows. Migrations: 0064. Reference updated: §5, §8. Supersedes v1.99.0.
+
 
 
 ### v1.99.0 · 2026-11-02 · pass 110 · Jordi-46
@@ -410,9 +416,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.98.0 · 2026-11-02 · pass 109 · Jordi-46
 
 **CoinGecko call chatter fixed and counted.** Measured about 2,600 calls a day (not the stated 100-200): the 15-minute refresh made 27 calls. 7d/30d changes now come from one keyed `/coins/markets` call at most hourly; every CoinGecko call is counted in `provider_daily` (`coingecko` keyless, `coingecko_key` keyed); the 04:00 history job now uses the key and retries 429s (5 of 13 coins became 13 of 13). §8 corrected. Behaviour: refresh, daily job, counters. Migrations: none. Reference updated: §8. Supersedes v1.97.0.
+
 
 
 
@@ -425,9 +433,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.96.1 · 2026-11-02 · pass 107 · SC-53
 
 **Gate stop words.** Named-ticker name text is not scanned for tickers; stop list gains GLP, SK, NAND, DRAM. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.96.0.
+
 
 
 
@@ -444,9 +454,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.95.3 · 2026-11-02 · pass 105 · SC-53
 
 **Ticker spoken forms.** A ticker is invented only if no spoken form of the company (phrases included) occurs anywhere in the transcript; otherwise near or far. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.2.
+
 
 
 
@@ -467,21 +479,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.95.1 · 2026-11-02 · pass 103 · SC-53
-
-**Gate name matching.** In tickers_named the gate no longer looks for ticker letters in the passage, matches spoken names across spacing, and accepts alias spoken forms (Citigroup, "cityroup" added for C). Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.99.2 -->
+<!-- END FT-master-spec v1.99.3 -->

@@ -42,20 +42,24 @@ func (s *Server) handleScreener(w http.ResponseWriter, r *http.Request) {
 	changeMax := parseFloatDefault(q.Get("change_max"), 1000)
 	heldMode := strings.ToLower(strings.TrimSpace(q.Get("held")))
 
-	// Resolve user's holdings + watchlist ticker sets.
+	// Resolve user's holdings + watchlist ticker sets. Demo mode (SC-22 doctrine: portfolio data is
+	// never served in demo mode, enforced server-side) skips both reads: no row is flagged held or
+	// on the watchlist, and the held=only/hide filter then sees an empty book.
 	held := map[string]bool{}
-	if holdings, err := s.store.ListStockHoldings(r.Context(), userID); err == nil {
-		for _, h := range holdings {
-			if h.Ticker != nil && *h.Ticker != "" {
-				held[strings.ToUpper(*h.Ticker)] = true
+	onWatch := map[string]bool{}
+	if !s.demoModeOn(r.Context()) {
+		if holdings, err := s.store.ListStockHoldings(r.Context(), userID); err == nil {
+			for _, h := range holdings {
+				if h.Ticker != nil && *h.Ticker != "" {
+					held[strings.ToUpper(*h.Ticker)] = true
+				}
 			}
 		}
-	}
-	onWatch := map[string]bool{}
-	if wl, err := s.store.ListWatchlist(r.Context(), userID); err == nil {
-		for _, e := range wl {
-			if e.Kind == "stock" {
-				onWatch[strings.ToUpper(e.Ticker)] = true
+		if wl, err := s.store.ListWatchlist(r.Context(), userID); err == nil {
+			for _, e := range wl {
+				if e.Kind == "stock" {
+					onWatch[strings.ToUpper(e.Ticker)] = true
+				}
 			}
 		}
 	}
