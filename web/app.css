@@ -5743,3 +5743,7 @@ a.score-badge { display: inline-block; }
 .vd-flag-detail { font-size: 11px; }
 .vd-passage { margin-top: 3px; font-size: 12px; }
 .vd-thumb { width: 96px; height: auto; border-radius: 4px; display: block; }
+
+/* Demo mode: the file exports serve real holdings, so the server refuses them (403) and the buttons are hidden. */
+body.demo-active #export,
+body.demo-active a[href^="/api/export.csv"] { display: none !important; }

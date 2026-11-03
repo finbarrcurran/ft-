@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"net/http"
 
 	"ft/internal/demomask"
 	"ft/internal/domain"
@@ -63,4 +64,30 @@ func (s *Server) loadCryptoHoldings(ctx context.Context, userID int64) ([]*domai
 	}
 	_, cryptos, err := s.loadHoldings(ctx, userID)
 	return cryptos, err
+}
+
+// denyInDemo wraps a handler that serves unmasked portfolio data (file exports): with demo mode on it
+// answers 403 "not available in demo mode" (the same answer the eToro handlers give) and never runs.
+// The check is on the route, not in the handler, so internal callers of the handler are unaffected.
+func (s *Server) denyInDemo(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.demoModeOn(r.Context()) {
+			writeError(w, http.StatusForbidden, "not available in demo mode")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// emptyInDemo wraps a handler that serves the user's own lists (watchlist, note targets): with demo
+// mode on it answers 200 with the given empty body, so the UI renders an empty list and no real
+// entry, note, target band or thesis link leaves the server.
+func (s *Server) emptyInDemo(next http.HandlerFunc, empty any) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.demoModeOn(r.Context()) {
+			writeJSON(w, http.StatusOK, empty)
+			return
+		}
+		next(w, r)
+	}
 }

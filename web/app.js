@@ -1600,6 +1600,7 @@ async function submitCowenCapture() {
 // ---------- export -------------------------------------------------------
 
 function onExport() {
+  if (state.demo) return; // demo mode: the server refuses exports (403), the button is hidden
   // Simple: navigate to the endpoint; the browser handles the download.
   window.location.href = '/api/export.xlsx';
 }
