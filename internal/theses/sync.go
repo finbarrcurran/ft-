@@ -8,12 +8,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"ft/internal/monitor"
 	"ft/internal/scorecards"
 	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -27,6 +29,10 @@ type Engine struct {
 	RepoOwner   string // "finbarrcurran"
 	RepoName    string // "cross_sector_research"
 	GitHubToken string // PAT used for git pull/push (HTTPS basic-auth with x-access-token user)
+
+	// Alerts evaluates the Thesis Library checks (reconciliation, SC-55) right after a sync or a nightly
+	// run. Built by New with the Telegram notifier; tests replace Notify.
+	Alerts *monitor.Monitor
 }
 
 // New constructs an Engine. RepoDir is created (and the repo cloned) lazily
@@ -36,6 +42,7 @@ func New(db *sql.DB, repoDir, owner, name, token string) *Engine {
 		DB: db, RepoDir: repoDir,
 		RepoOwner: owner, RepoName: name,
 		GitHubToken: token,
+		Alerts:      &monitor.Monitor{DB: db, Checks: monitor.ThesisChecks(db), Notify: &monitor.Telegram{}},
 	}
 }
 
@@ -90,6 +97,7 @@ type syncFile struct {
 	RelPath  string
 	FileSHA  string
 	Declared string // status the header declares (locked | draft | superseded)
+	body     string
 }
 
 // syncFailure is one *_locked.md file that could not be ingested.
@@ -100,9 +108,10 @@ type syncFailure struct {
 
 // syncPass is everything one Sync saw; later hooks (reconciliation, failure records) read it.
 type syncPass struct {
-	Files    map[string]*syncFile // valid files by key
-	Failures []syncFailure        // invalid or conflicting files
-	Archived []archivedRow        // rows archived in this pass
+	Files      map[string]*syncFile // valid files by key
+	Failures   []syncFailure        // invalid or conflicting files
+	Archived   []archivedRow        // rows archived in this pass
+	SafetyStop []archivedRow        // rows the pass WOULD have archived; non-empty = it archived nothing (SC-55 P2)
 }
 
 type archivedRow struct {
@@ -123,8 +132,67 @@ type archivedRow struct {
 //
 // Safe to call concurrently with reads — uses a transaction per upsert.
 func (e *Engine) Sync(ctx context.Context) error {
-	_, err := e.syncPass(ctx)
+	pass, err := e.syncPass(ctx)
+	e.afterSync(ctx, pass, err)
 	return err
+}
+
+// Archive safety stop (SC-55 P2): one pass that would archive more than this many rows, or more than this
+// share of all rows, archives nothing and raises an alert instead. Variables so tests can tighten them.
+var (
+	maxArchivePerRun   = 2
+	maxArchiveFraction = 0.05
+	// The percentage rule only applies from this many rows: in a tiny table a single row is always
+	// more than 5%. With 63 rows the absolute limit (2) is the binding one until the table passes 40.
+	minRowsForFraction = 20
+)
+
+// scanRepo reads every theses/**/*_locked.md in the local clone (no database access): the valid files by
+// key and the files that failed to parse or duplicate another file's (ticker, version). The first path in
+// walk order wins a duplicate key.
+func (e *Engine) scanRepo() (map[string]*syncFile, []syncFailure, error) {
+	thesesRoot := filepath.Join(e.RepoDir, "theses")
+	if st, err := os.Stat(thesesRoot); err != nil || !st.IsDir() {
+		return nil, nil, ErrThesesDirMissing
+	}
+	files := map[string]*syncFile{}
+	var failures []syncFailure
+	err := filepath.WalkDir(thesesRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if !strings.HasSuffix(path, "_locked.md") {
+			return nil
+		}
+		rel, _ := filepath.Rel(e.RepoDir, path)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			slog.Error("theses: read failed", "path", rel, "err", err)
+			failures = append(failures, syncFailure{RelPath: rel, Error: "read: " + err.Error()})
+			return nil
+		}
+		h := ParseHeader(string(raw))
+		if err := h.Validate(); err != nil {
+			slog.Warn("theses: skip malformed", "path", rel, "err", err)
+			failures = append(failures, syncFailure{RelPath: rel, Error: err.Error()})
+			return nil
+		}
+		key := fmt.Sprintf("%s_v%d", h.Ticker, h.Version)
+		if first, dup := files[key]; dup {
+			msg := fmt.Sprintf("duplicate %s: %s already provides this ticker and version", key, first.RelPath)
+			slog.Warn("theses: duplicate key", "path", rel, "first", first.RelPath)
+			failures = append(failures, syncFailure{RelPath: rel, Error: msg})
+			return nil
+		}
+		sum := sha1.Sum(raw)
+		files[key] = &syncFile{Key: key, Header: h, RelPath: rel, FileSHA: hex.EncodeToString(sum[:]),
+			Declared: h.Status, body: string(raw)}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("walk theses dir: %w", err)
+	}
+	return files, failures, nil
 }
 
 func (e *Engine) syncPass(ctx context.Context) (*syncPass, error) {
@@ -137,62 +205,29 @@ func (e *Engine) syncPass(ctx context.Context) (*syncPass, error) {
 	if err := e.gitFetchReset(ctx); err != nil {
 		return nil, err
 	}
-
-	thesesRoot := filepath.Join(e.RepoDir, "theses")
-	if st, err := os.Stat(thesesRoot); err != nil || !st.IsDir() {
-		return nil, ErrThesesDirMissing
-	}
-
-	pass := &syncPass{Files: map[string]*syncFile{}}
-	paths := map[string]string{} // key -> rel path of the first file that claimed it
-
-	err := filepath.WalkDir(thesesRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		if !strings.HasSuffix(path, "_locked.md") {
-			return nil
-		}
-		rel, _ := filepath.Rel(e.RepoDir, path)
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			slog.Error("theses: read failed", "path", rel, "err", err)
-			pass.Failures = append(pass.Failures, syncFailure{RelPath: rel, Error: "read: " + err.Error()})
-			return nil
-		}
-		h := ParseHeader(string(raw))
-		if err := h.Validate(); err != nil {
-			slog.Warn("theses: skip malformed", "path", rel, "err", err)
-			pass.Failures = append(pass.Failures, syncFailure{RelPath: rel, Error: err.Error()})
-			return nil
-		}
-		key := fmt.Sprintf("%s_v%d", h.Ticker, h.Version)
-		if first, dup := paths[key]; dup {
-			msg := fmt.Sprintf("duplicate %s: %s already provides this ticker and version", key, first)
-			slog.Warn("theses: duplicate key", "path", rel, "first", first)
-			pass.Failures = append(pass.Failures, syncFailure{RelPath: rel, Error: msg})
-			return nil
-		}
-		paths[key] = rel
-
-		sum := sha1.Sum(raw)
-		f := &syncFile{Key: key, Header: h, RelPath: rel, FileSHA: hex.EncodeToString(sum[:]), Declared: h.Status}
-		pass.Files[key] = f
-
-		if err := e.upsert(ctx, h, string(raw), rel, f.FileSHA); err != nil {
-			slog.Error("theses: upsert", "path", rel, "err", err)
-		}
-		return nil
-	})
+	files, failures, err := e.scanRepo()
 	if err != nil {
-		return nil, fmt.Errorf("walk theses dir: %w", err)
+		return nil, err
+	}
+	pass := &syncPass{Files: files, Failures: failures}
+
+	keys := make([]string, 0, len(files))
+	for k := range files {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		f := files[k]
+		if err := e.upsert(ctx, f.Header, f.body, f.RelPath, f.FileSHA); err != nil {
+			slog.Error("theses: upsert", "path", f.RelPath, "err", err)
+		}
 	}
 
 	// Archive rows whose source file is gone or no longer parses. Never deletes.
 	if err := e.archiveMissing(ctx, pass); err != nil {
 		slog.Error("theses: archive", "err", err)
 	}
-	// Supersede is recomputed from scratch every sync, so removing v2 brings v1 back.
+	// Supersede is recomputed every sync, so removing v2 brings v1 back.
 	if err := e.recomputeStatus(ctx, pass); err != nil {
 		slog.Error("theses: recompute status", "err", err)
 	}
@@ -358,6 +393,16 @@ func (e *Engine) archiveMissing(ctx context.Context, pass *syncPass) error {
 		todo = append(todo, a)
 	}
 	rows.Close()
+	if len(todo) > 0 {
+		var total int
+		_ = e.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM theses_index`).Scan(&total)
+		if len(todo) > maxArchivePerRun || (total >= minRowsForFraction && float64(len(todo)) > maxArchiveFraction*float64(total)) {
+			slog.Error("theses: SAFETY STOP — archive batch too large, nothing archived",
+				"would_archive", len(todo), "rows", total)
+			pass.SafetyStop = todo
+			return nil
+		}
+	}
 	now := time.Now().Unix()
 	for _, a := range todo {
 		if _, err := e.DB.ExecContext(ctx,

@@ -656,6 +656,15 @@ func runServe() {
 				slog.Warn("theses: initial sync failed", "err", err)
 			}
 			initCancel()
+			// SC-55 P2 — nightly repo-vs-database reconciliation (02:40 UTC, before the 03:15 DB backup
+			// and the 04:00 daily job). Also checks the clone is not behind origin/main.
+			scheduleAt(bgCtx, 2, 40, func() {
+				ctx, cancel := context.WithTimeout(bgCtx, 2*time.Minute)
+				defer cancel()
+				if err := eng.ReconcileNow(ctx); err != nil {
+					slog.Warn("theses: nightly reconcile failed", "err", err)
+				}
+			})
 			t := time.NewTicker(cfg.ThesisSyncEvery)
 			defer t.Stop()
 			for {

@@ -128,6 +128,7 @@ func DefaultChecks(db *sql.DB) []Check {
 		{Source: "db_backup", Label: "Nightly DB backup", MaxAge: 30 * h, Probe: fileProbe("/var/backups/ft/ft-*.db")},
 	}
 	checks = append(checks, indicatorChecksFor(db)...)
+	checks = append(checks, ThesisChecks(db)...)
 	return append(checks, marketFeedChecks(db)...)
 }
 

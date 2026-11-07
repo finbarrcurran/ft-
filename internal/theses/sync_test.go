@@ -17,7 +17,16 @@ import (
 	"ft/internal/store"
 )
 
+// fakeNotifier records alert texts instead of sending Telegram messages.
+type fakeNotifier struct{ msgs *[]string }
+
+func (f fakeNotifier) Send(_ context.Context, text string) error {
+	*f.msgs = append(*f.msgs, text)
+	return nil
+}
+
 type testEnv struct {
+	alerts []string
 	t      *testing.T
 	eng    *Engine
 	db     *sql.DB
@@ -66,8 +75,10 @@ func newEnv(t *testing.T) *testEnv {
 	if _, err := st.DB.Exec(`INSERT INTO users (id, email, password_hash, created_at) VALUES (1, 'fin@example.test', 'x', 0)`); err != nil {
 		t.Fatal(err)
 	}
-	return &testEnv{t: t, db: st.DB, origin: origin, work: work,
+	env := &testEnv{t: t, db: st.DB, origin: origin, work: work,
 		eng: New(st.DB, clone, "owner", "repo", "token")}
+	env.eng.Alerts.Notify = fakeNotifier{msgs: &env.alerts}
+	return env
 }
 
 // thesisMD builds a minimal valid locked thesis.

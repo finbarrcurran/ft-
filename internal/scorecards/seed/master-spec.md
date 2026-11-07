@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.100.0 · 2026-11-07** — latest change: Locked theses are never deleted (§13).
+> **Current version: v1.101.0 · 2026-11-07** — latest change: Thesis reconciliation, safety stop and alert (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.100.0 2026-11-07 -->
+<!-- reference_reviewed: v1.101.0 2026-11-07 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -116,6 +116,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0059 | `regime_history_seed_flag` | SC-52 P6 — `regime_history.seed_excluded` (rows kept, but skipped when the weekly snapshot seeds its history); the four 2026-05-16 smoke-test / reset rows are flagged by the migration; the June 2026 Jordi flips wait for Fin's confirmation (`ft regime-history flag --ids …`) |
 | 0064 | `crypto_index_exchanges` | Jordi-46 follow-up — records the exchange of COIN and HOOD (Nasdaq) and CRCL (NYSE) in `crypto_index_members`, checked against Finnhub and Yahoo responses |
 | 0065 | `theses_archive` | SC-55 P1 — `theses_index` gains `archived_at` and `archive_reason`; new status `archived`; table `thesis_delete_unlock` and trigger `theses_index_no_delete` (nothing can `DELETE` from `theses_index` unless an admin has inserted an unlock row) |
+| 0066 | `thesis_reconcile` | SC-55 P2 — `thesis_reconcile_runs`: one row per repo-vs-database reconciliation (after every sync and nightly; latest 90 kept; `detail` is a JSON list of issues) |
 | 0063 | `crypto_index_members` | Jordi-46 Phase 1 — the 46 constituents of the Visser-Labs tokenized index (list_version 2026-09-21; 42 tokens with CoinGecko ids, 4 stocks COIN/HOOD/CRCL/FIGR; 10 verticals; soft `removed_at`); reference only, read by the screener and the list endpoint and by nothing else (no alert, gap-report, entry-zone, watchlist, holdings or thesis code) |
 | 0062 | `video_frame_reads` | SC-54 — `video_frame_reads` (what the vision model read off each chart frame: series, visible values, confidence, model, date; re-reads add rows) and `video_frame_runs` (one row per pass: status, reason, frames, calls, reads, cost) |
 | 0061 | `video_items` | SC-53 — `video_item_runs` (one per digest: model, chunks, tokens, cost, gate counts, status) and `video_items` (block, fields, cited span, gate class + issues, chart-unverified numbers, ticker resolution, direction verdict/speaker view/reason) |
@@ -138,6 +139,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | eToro sync + holdings reconcile | every 30 min, around the clock; first run ~1 min after boot | SC-42: one portfolio call to eToro's Public API → lot history + effective SL/TP. SC-44: then diffs against FT holdings — matched values update silently, adds/removes queue for approval |
 | Earnings-only refresh | hourly | Updates `earnings_date` / `ex_dividend_date` so thesis revision warnings fire within ~1 h |
 | Thesis Library sync | `FT_THESIS_SYNC_EVERY` (default 5m) | `git fetch` + `reset --hard origin/main`, then re-index of `cross_sector_research`; no-op without `FT_GITHUB_TOKEN`. **Never deletes** (SC-55): a row whose file is gone or no longer parses is archived; supersede is recomputed every pass; a missing `theses/` directory aborts the pass with no change |
+| Thesis reconciliation | 02:40 UTC (after every sync too) | SC-55 P2: compares the repo's locked files with `theses_index` (counts, presence, SHA, path, one live row per ticker) and, nightly, checks the clone is not behind `origin/main`; writes `thesis_reconcile_runs`; the `thesis_reconcile` monitor check alerts |
 | Session GC | hourly | Purges expired sessions |
 | Crypto Indicators | 00:30, plus ~30 s after boot | Refresh all indicators + composite snapshot |
 | Macro Regime | 01:00, plus ~75 s after boot | FRED refresh + regime snapshot |
@@ -162,7 +164,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | `ft-bridge-snapshot.timer` | every 10 min | SC-46: pushes `/var/lib/ft/data/bridge/snapshot/ft-snapshot.md` to `FT-Bridge/reports/ft-snapshot.md` (same Drive file, replaced in place through `ft_bridge_push.sh`) only when it changed and only if it ends with its `<!-- END ft-snapshot vN -->` marker; touches `snapshot.ok` (monitor `drive_snapshot`, 2 h) |
 | `ft-bridge-library.timer` | every 10 min | SC-47: mirrors the research library to Google Drive `FT-Bridge/library/` (one-way, Claude reads only): `specs/` (repo `ft_specs/`), `handovers/`, `theses/<adapter>/` (per-ticker locked stock theses, added v1.79.1), `scoring/` (stock + crypto logs, methodology registry, and the GENERATED `scoring_log_live` / `crypto_scoring_log_live` tallies built from `theses_index` / `crypto_theses`), `crypto/` (log, `adapters/`, `theses/`) and `FT-library-INDEX` (per-file last-updated + source commit + repo HEAD). Uploads only documents whose content changed (so a thesis lock/upload or a DB change shows within 10 min); `flock` prevents overlap. Source `ops/bridge/ft-bridge-library`; both bridge exporters touch `/var/lib/ft/data/bridge/{spec,library}.ok` on success, which the connectivity monitor watches (stale > 2 h → Telegram) |
 | `video-digest.timer` | Sun 20:00 + Mon 08:00 Europe/Dublin | SC-43 P0: fetches new Jordi/Cowen videos into `/var/lib/video_digest` |
-| `ft-backup.timer`, `ft-restore-verify.timer` | systemd timers | SC-37 backup / DR and restore verification |
+| `ft-backup.timer`, `ft-restore-verify.timer` | systemd timers | SC-37 backup / DR and restore verification. SC-55: the restore check compares the restored `theses_index` counts (locked, superseded, archived) with the live DB, tolerance max(3, 5% of live rows) each, instead of a fixed floor |
 | DB backup (cron, user `ft`) | 03:15 daily | `/opt/ft/bin/backup-db.sh` |
 | Jarvis config backup (cron) | Sun 03:30 | `/opt/ft/bin/backup-jarvis-config.sh` |
 | Whole-box backup (cron) | 03:30 daily | `jarvis_backup.sh` — restic to Backblaze B2 |
@@ -227,6 +229,7 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 
 **Stock Thesis Library (Spec 15, SC-38):** `GET /api/theses{,/gaps,/{id},/{id}/revision-prompt}`, `POST /api/theses/{upload,scoring-log,sync}`, `GET /api/calibration/theses`. GitHub repo `finbarrcurran/cross_sector_research` is the source of truth; FT keeps a clone at `/var/lib/ft/research/`.
   **Thesis lifecycle (SC-55 P1, v1.100.0):** status is `locked`, `draft`, `superseded` or `archived`. Per ticker, every non-archived version below the highest is `superseded`, recomputed on every sync; the highest is live, keeps its status, and if it had been superseded it returns to the status its header declares — so removing v2 returns v1 to live. A row whose file is missing is archived with reason `file_missing`, one whose header no longer parses with `header_invalid`; both keep their markdown and SHA and are restored (archive fields cleared) when a valid file for the same (ticker, version) returns. Nothing in code or migrations deletes from `theses_index`, and a `BEFORE DELETE` trigger enforces it (admin path in migration 0065). A missing `theses/` directory after a good fetch is an error and changes nothing. Readers: the Theses tab, `get_theses` and the holdings score overlay show only `locked`/`draft` rows (not superseded or archived); calibration uses `locked`; the registry and the Drive bridge list every status. The gap report (`/api/theses/gaps`, `get_gap_report`) counts a ticker as covered only when it has a `locked` row; gaps carry an optional `reason` (`archived`, `no_live_thesis`; absent for a ticker with no row at all).
+  **Reconciliation and the safety stop (SC-55 P2, v1.101.0):** after every sync the engine compares the repo's valid locked files with `theses_index` and stores one `thesis_reconcile_runs` row (ok / mismatch / aborted); a nightly run at 02:40 UTC does the same on the clone as it stands and also flags a clone behind `origin/main`. Issue types: `file_not_indexed`, `row_without_file`, `archived`, `file_invalid`, `sha_mismatch`, `path_mismatch`, `status_sanity` (not exactly one live row for a ticker), `safety_stop`, `dir_missing`, `clone_stale`. The **safety stop**: a pass that would archive more than 2 rows (or, from 20 rows up, more than 5% of all rows) archives nothing and records an `aborted` run; everything else in the pass proceeds. The monitor check `thesis_reconcile` (domain "thesis library", also in Diagnostics) turns a non-ok latest run into one Telegram message, a reminder every 24 h while it persists, and a recovery message; a clean run sends nothing. The engine ticks that check right after each sync and each nightly run, so an alert follows a bad commit within one sync cycle (5 minutes).
 
 **Crypto Indicators (9e):** `GET /api/crypto-indicators{,/composite/latest,/composite/history,/btc-history,/etf-flow/history,/ism}`, `POST /api/crypto-indicators/{refresh,backfill,ism}`
 
@@ -397,13 +400,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.101.0 · 2026-11-07 · pass 116 · SC-55 P2
+
+**Thesis reconciliation, safety stop and alert.** After every sync and nightly (02:40 UTC) FT compares the repo's locked files with `theses_index` and stores the result; a sync that would archive more than 2 rows (or 5% from 20 rows up) archives nothing and alerts. A non-clean run sends one Telegram message through the connectivity monitor (reminder daily, recovery message, silent when green). Restore-verify now compares restored thesis counts with live. Behaviour: sync, monitor, restore script. Migration: 0066. Reference updated: §3, §4, §5. Supersedes v1.100.0.
+
 ### v1.100.0 · 2026-11-07 · pass 115 · SC-55 P1
 
 **Locked theses are never deleted.** The thesis sync archives instead of deleting (file gone → `file_missing`, header unreadable → `header_invalid`) and restores when the file returns; supersede is recomputed each pass so removing v2 brings v1 back; a missing `theses/` directory aborts with no change; a DB trigger blocks `DELETE FROM theses_index`. Gap report counts only `locked` rows and adds an optional `reason`. Behaviour: sync, gaps (today's output unchanged). Migration: 0065. Reference updated: §3, §4, §5. Supersedes v1.99.4.
 
+
 ### v1.99.4 · 2026-11-03 · pass 114 · Demo mode
 
 **Demo mode and exports, watchlist, note targets.** In demo mode the xlsx and CSV exports answer 403, `/api/watchlist` and `/api/notes/resolve` answer an empty list; route-level checks, internal callers unaffected; export buttons hidden. Demo off unchanged. Behaviour: four endpoints, UI. Migrations: none. Reference updated: §5. Supersedes v1.99.3.
+
 
 
 ### v1.99.3 · 2026-11-03 · pass 113 · Demo mode
@@ -412,9 +421,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.99.2 · 2026-11-03 · pass 112 · Demo mode
 
 **Crypto screener demo-mode flags.** `/api/crypto-screener` no longer reads holdings or the watchlist when demo mode is on: all rows carry held:false and onWatchlist:false; demo off is unchanged. Other endpoints with the same pattern are reported, not fixed. Behaviour: one endpoint. Migrations: none. Reference updated: §5. Supersedes v1.99.1.
+
 
 
 
@@ -427,9 +438,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.99.0 · 2026-11-02 · pass 110 · Jordi-46
 
 **Visser 46 reference table and screener tag.** `crypto_index_members` (migration 0063) holds the 46 index constituents (42 tokens with verified CoinGecko ids, 4 stocks, 10 verticals); the crypto screener gets a Visser 46 filter and vertical column, fetching members outside the top 250 with one extra keyed call; read-only `GET /api/crypto-index/visser46`. Reference only: no alerts, watchlist, holdings or thesis effect. Behaviour: Screener tab. Migrations: 0063. Reference updated: §3, §5. Supersedes v1.98.0.
+
 
 
 
@@ -446,9 +459,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.97.0 · 2026-11-02 · pass 108 · SC-54
 
 **Frame archive to Drive, built and off.** Public-video frames can be copied to Drive `FT-Frames/` (outside FT-Bridge) with MD5 verification, an upload-failure marker and a Telegram alert (monitor source `drive_frames`); off unless `/etc/ft/frames-archive.enabled` exists; nothing is deleted. Behaviour: ops, monitor. Migrations: none. Reference updated: §5. Supersedes v1.96.1.
+
 
 
 
@@ -469,21 +484,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.96.0 · 2026-11-02 · pass 106 · SC-54
-
-**Chart-frame reads.** Haiku 5.5 reads the chart frames of public videos after each ingest (governor feature `video_frames`, sub-caps $0.05/video and $0.25/day; a hit cap shows "frames skipped"); reads are display-only "from chart, unverified" rows with thumbnails, never signals; a re-read adds rows; public-only check from package availability; Jordi frame cap 30 to 45. Behaviour: Video Digest tab, governor. Migrations: 0062. Reference updated: §5. Supersedes v1.95.3.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.100.0 -->
+<!-- END FT-master-spec v1.101.0 -->
