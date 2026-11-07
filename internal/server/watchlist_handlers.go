@@ -84,6 +84,9 @@ type watchlistRow struct {
 	// by ticker suffix via marketdata.ExchangeForTicker. nil for crypto and
 	// unknown exchanges.
 	Market *marketdata.MarketStatus `json:"market,omitempty"`
+
+	// SC-56 — report-date state and provenance (nil for crypto and for tickers not yet fetched).
+	Calendar *domain.CalendarInfo `json:"calendar,omitempty"`
 }
 
 // GET /api/watchlist
@@ -116,6 +119,7 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 	cryptoThesisBySymbol, _ := s.store.CryptoThesisScoresBySymbol(r.Context(), cryptoSymbols)
 	eff := s.currentEffectiveRegime(r.Context())
 	alertsActive := regime.GatesWatchlistEntryZone(eff)
+	calByTicker := s.store.CalendarInfoMap(r.Context()) // SC-56
 
 	now := time.Now().UTC()
 	out := make([]watchlistRow, 0, len(entries))
@@ -147,6 +151,7 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 			AlertActive:     inRange && alertsActive,
 			AlertSuppressed: inRange && !alertsActive,
 			Market:          marketPtr,
+			Calendar:        calByTicker[e.Ticker],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"watchlist": out})

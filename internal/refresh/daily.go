@@ -155,17 +155,8 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 				}
 			}
 
-			// 2) Calendar dates (earnings, ex-div). Patchy outside US; ignore
-			// errors per spec (frontend renders "—").
-			if cal, err := market.FetchYahooCalendarDates(ctx, ticker); err == nil && cal != nil {
-				if cal.EarningsDate != "" || cal.ExDivDate != "" {
-					if err := s.Store.SetCalendarDates(ctx, userID, ticker, cal.EarningsDate, cal.ExDivDate); err == nil {
-						stockMu.Lock()
-						r.CalendarOK++
-						stockMu.Unlock()
-					}
-				}
-			}
+			// 2) Calendar dates: since SC-56 the hourly calendar job (calendar.go) covers every holding,
+			// watchlist row and live thesis, so there is no per-holding fetch here.
 
 			// 3) Beta auto-resolve if missing — drives suggested SL/TP.
 			if h.Beta == nil {
@@ -266,6 +257,7 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 		r.Errors = append(r.Errors, fmt.Sprintf("perf snapshots: %s", err))
 	}
 
+	r.CalendarOK = s.Store.CalendarFetchedSince(ctx, 24*time.Hour) // SC-56: the hourly calendar job does the fetching
 	r.FinishedAt = time.Now().UTC()
 	// Spec 7 — stamp completion time for the diagnostics panel.
 	_ = s.Store.SetMeta(ctx, "last_daily_job_at", strconv.FormatInt(r.FinishedAt.Unix(), 10))

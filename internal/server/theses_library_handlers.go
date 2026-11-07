@@ -211,7 +211,12 @@ func (s *Server) handleThesisRevisionPrompt(w http.ResponseWriter, r *http.Reque
 	if t.LockedDate != nil {
 		prompt.WriteString("- **Locked date:** " + *t.LockedDate + "\n")
 	}
-	if t.NextEarningsDate != nil {
+	if t.LastReportedDate != nil {
+		prompt.WriteString("- **Earnings (the trigger):** reported " + *t.LastReportedDate + "\n")
+		if t.NextEarningsDate != nil {
+			prompt.WriteString("- **Next report:** " + *t.NextEarningsDate + "\n")
+		}
+	} else if t.NextEarningsDate != nil {
 		prompt.WriteString("- **Earnings (the trigger):** " + *t.NextEarningsDate + "\n")
 	}
 	prompt.WriteString("\n## Task\n\n")

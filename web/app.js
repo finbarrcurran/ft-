@@ -490,14 +490,49 @@ function daysUntilISO(iso) {
   const todayUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
   return Math.round((target - todayUTC) / (1000 * 60 * 60 * 24));
 }
-function earningsCell(iso) {
+// SC-56 — report-date state and provenance. cal = {status, date, isEstimate, source, fetchedAt,
+// lastReportedDate, note} from /api/holdings/stocks, /api/watchlist or the /api/theses row fields.
+function calendarTip(cal) {
+  if (!cal || !cal.status) return '';
+  const parts = [cal.status.replace(/_/g, ' ').toLowerCase()];
+  if (cal.date) parts.push((cal.isEstimate ? 'estimated ' : 'confirmed ') + cal.date);
+  if (cal.lastReportedDate) parts.push('last reported ' + cal.lastReportedDate);
+  if (cal.source) parts.push('source ' + cal.source.replace('yahoo_', 'Yahoo ').replace(/_/g, ' '));
+  if (cal.fetchedAt) parts.push('fetched ' + new Date(cal.fetchedAt * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC');
+  if (cal.note) parts.push(cal.note);
+  return parts.join(' · ');
+}
+
+// The text shown for a ticker's report date, the same on every surface. Never shows a past date as "next".
+function calendarLabel(cal, nextIso) {
+  const next = (cal && cal.date) || nextIso || null;
+  const st = cal && cal.status;
+  if (st === 'NOT_APPLICABLE') return { cls: 'dim', text: 'n/a' };
+  if (st === 'FETCH_ERROR') return { cls: 'loss', text: next ? next + ' ⚠' : '⚠ fetch error' };
+  if (st === 'REPORTED' && !next) return { cls: 'dim', text: cal.lastReportedDate ? 'reported ' + cal.lastReportedDate : 'reported' };
+  if (st === 'NOT_ANNOUNCED' && !next) return { cls: 'dim', text: 'not announced' };
+  if (next) return { cls: cal && cal.isEstimate ? 'dim' : '', text: next + (cal && cal.isEstimate ? ' est' : '') };
+  return { cls: 'dim', text: '—' };
+}
+
+function earningsCell(iso, cal) {
+  const tip = calendarTip(cal);
+  const st = cal && cal.status;
   const d = daysUntilISO(iso);
-  if (d == null) return '<span class="dim">—</span>';
-  if (d < 0) return `<span class="dim" title="${escapeHTML(iso)}">past</span>`;
+  if (st === 'NOT_APPLICABLE') return `<span class="dim" title="${escapeHTML(tip)}">n/a</span>`;
+  if (st === 'FETCH_ERROR' && d == null) return `<span class="loss" title="${escapeHTML(tip)}">⚠</span>`;
+  if (d == null) {
+    if (st === 'REPORTED') return `<span class="dim" title="${escapeHTML(tip)}">reported</span>`;
+    if (st === 'NOT_ANNOUNCED') return `<span class="dim" title="${escapeHTML(tip)}">not announced</span>`;
+    return '<span class="dim">—</span>';
+  }
+  // A date in the past is "reported", never an upcoming one.
+  if (d < 0) return `<span class="dim" title="${escapeHTML(tip || iso)}">reported</span>`;
   let cls = 'dim';
   if (d <= 7) cls = 'earn-soon';
   else if (d <= 30) cls = 'earn-mid';
-  return `<span class="${cls}" title="${escapeHTML(iso)}">in ${d}d</span>`;
+  const est = cal && cal.isEstimate ? '~' : '';
+  return `<span class="${cls}" title="${escapeHTML(tip || iso)}">${est}in ${d}d</span>`;
 }
 // scoreCell — Spec 4 D7. Renders the latest-score badge for a holdings row.
 //   never scored → "—"
@@ -4540,7 +4575,7 @@ async function renderStocks() {
         <td class="num">${distToSlCell(m.distanceToSlPct)}</td>
         <td class="num">${distToTpCell(m.distanceToTpPct)}</td>
         ${vol12mCell}
-        <td>${earningsCell(r.earningsDate)}</td>
+        <td>${earningsCell(r.earningsDate, r.calendar)}</td>
         <td>${exDivCell(r.exDividendDate)}</td>
         <td class="sparkline-cell">${sparkSvg}</td>
         <td>${scoreCell(r.score, true, 'stock', r.id)}</td>
@@ -7247,6 +7282,7 @@ async function renderWatchlist() {
         <td><span class="${dist.cls}"${dist.title ? ` title="${escapeHTML(dist.title)}"` : ''}>${dist.label}</span></td>
         <td>${scoreCellHTML}</td>
         <td>${tagCell}</td>
+        <td title="${escapeHTML(calendarTip(e.calendar))}">${e.kind === 'stock' ? (() => { const l = calendarLabel(e.calendar, null); return `<span class="${l.cls}">${escapeHTML(l.text)}</span>`; })() : '<span class="dim">—</span>'}</td>
         <td class="market-cell">${marketCell(e.market)}</td>
         <td><span class="dim">${added}</span></td>
         <td>${note}</td>
@@ -7272,7 +7308,7 @@ async function renderWatchlist() {
       const caret = collapsed ? '▸' : '▾';
       const header = `
         <tr class="wl-group-header${collapsed ? ' collapsed' : ''}" data-wl-group="${escapeHTML(g.key)}" tabindex="0" role="button" aria-expanded="${collapsed ? 'false' : 'true'}" title="Click to ${collapsed ? 'expand' : 'collapse'}">
-          <td colspan="13">
+          <td colspan="14">
             <span class="wl-group-caret">${caret}</span>
             <span class="wl-group-name">${escapeHTML(g.name)}</span>
             <span class="wl-group-count">${g.entries.length}</span>
@@ -7318,6 +7354,7 @@ async function renderWatchlist() {
             ${sortHeader('distance',    'Distance')}
             ${sortHeader('score',       'Score')}
             <th>Tag</th>
+            <th title="Next report (earnings) date. Hover for state, source and when it was fetched.">Report</th>
             <th title="Exchange hours for this ticker">Market</th>
             ${sortHeader('addedAt',     'Added')}
             <th>Note</th>
@@ -12435,21 +12472,24 @@ function thesisHealthBanner(h) {
   </div>`;
 }
 
-function urgencyBadge(u, dateStr) {
-  // u ∈ {none, amber, red, revision_needed}
-  if (!u || u === 'none') {
-    return dateStr ? `<span class="dim">${escapeHTML(dateStr)}</span>` : '<span class="dim">—</span>';
-  }
+function urgencyBadge(u, dateStr, t) {
+  // u ∈ {none, amber, red, revision_needed}. t (optional) is the /api/theses row, for SC-56 provenance.
+  const cal = t ? { status: t.earningsStatus, date: t.nextEarningsDate, isEstimate: t.earningsIsEstimate, source: t.earningsSource,
+    fetchedAt: t.earningsFetchedAt, lastReportedDate: t.lastReportedDate, note: t.earningsNote } : null;
+  const tip = escapeHTML(calendarTip(cal));
+  const lbl = calendarLabel(cal, dateStr);
+  const reported = cal && cal.lastReportedDate ? `<div class="dim" style="font-size:0.8em">reported ${escapeHTML(cal.lastReportedDate)}</div>` : '';
+  const nextLine = `<span class="${lbl.cls}">${escapeHTML(lbl.text)}</span>`;
   if (u === 'revision_needed') {
-    return `<span class="urgency-badge revision" title="Earnings has passed since the thesis was locked — re-score recommended">📝 revision</span>`;
+    return `<span class="urgency-badge revision" title="A report (${escapeHTML((cal && cal.lastReportedDate) || 'date unknown')}) has come out since the thesis was locked — re-score recommended">📝 revision</span>${reported}${dateStr || (cal && cal.status) ? `<div title="${tip}" style="font-size:0.8em">next: ${nextLine}</div>` : ''}`;
   }
   if (u === 'red') {
-    return `<span class="urgency-badge red" title="Earnings in ≤3 days">🔴 ${escapeHTML(dateStr || '')}</span>`;
+    return `<span class="urgency-badge red" title="Earnings in ≤3 days · ${tip}">🔴 ${escapeHTML(dateStr || '')}${cal && cal.isEstimate ? ' est' : ''}</span>${reported}`;
   }
   if (u === 'amber') {
-    return `<span class="urgency-badge amber" title="Earnings in ≤14 days">🟡 ${escapeHTML(dateStr || '')}</span>`;
+    return `<span class="urgency-badge amber" title="Earnings in ≤14 days · ${tip}">🟡 ${escapeHTML(dateStr || '')}${cal && cal.isEstimate ? ' est' : ''}</span>${reported}`;
   }
-  return escapeHTML(dateStr || '—');
+  return `<span title="${tip}">${nextLine}</span>${reported}`;
 }
 
 function scoreCellTheses(score, max) {
@@ -12580,7 +12620,7 @@ async function renderTheses() {
         <td>${scoreCellTheses(t.score, t.maxScore)}</td>
         <td><span class="dim">v${t.version}</span></td>
         <td><span class="dim">${escapeHTML(t.lockedDate || '—')}</span></td>
-        <td>${urgencyBadge(t.earningsUrgency, t.nextEarningsDate)}</td>
+        <td>${urgencyBadge(t.earningsUrgency, t.nextEarningsDate, t)}</td>
         <td>
           ${t.earningsUrgency === 'revision_needed'
             ? `<button class="row-mini" data-revprompt="${t.id}" title="Generate LLM prompt to revise this thesis">📋</button>`

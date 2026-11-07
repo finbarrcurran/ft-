@@ -1,0 +1,28 @@
+{
+ "quoteSummary": {
+  "result": [
+   {
+    "calendarEvents": {
+     "maxAge": 1,
+     "earnings": {
+      "earningsDate": [],
+      "earningsCallDate": [],
+      "isEarningsDateEstimate": false,
+      "earningsAverage": {},
+      "earningsLow": {},
+      "earningsHigh": {},
+      "revenueAverage": {},
+      "revenueLow": {},
+      "revenueHigh": {}
+     },
+     "exDividendDate": {
+      "raw": 1785974400,
+      "fmt": "2026-08-06"
+     },
+     "dividendDate": {}
+    }
+   }
+  ],
+  "error": null
+ }
+}

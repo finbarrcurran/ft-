@@ -33,6 +33,11 @@ type Result struct {
 type Service struct {
 	Store *store.Store
 
+	// SC-56 report dates: nil Calendar = Yahoo; tests inject fixtures, a fixed clock and no pacing.
+	Calendar    CalendarSource
+	Now         func() time.Time
+	CalendarGap time.Duration
+
 	hmMu sync.Mutex
 	hm   map[string]*hmState // per exchange: heatmap refresh bookkeeping
 }
