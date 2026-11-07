@@ -20,7 +20,7 @@ type RegistryArtifact struct {
 	Name          string `json:"name"`       // company / coin / display name ("" if none)
 	AssetClass    string `json:"assetClass"` // stock | crypto | cross-asset
 	Version       string `json:"version"`
-	Status        string `json:"status"`      // raw source status (locked|draft|needs-review|superseded)
+	Status        string `json:"status"`      // raw source status (locked|draft|needs-review|superseded|archived)
 	LastUpdated   string `json:"lastUpdated"` // YYYY-MM-DD, "" when the source carries no date
 	Source        string `json:"source"`      // table#id pointer (D28.11 fallback, C3=a)
 	Score         *int   `json:"score,omitempty"`
@@ -44,7 +44,7 @@ var registryFrameworkCodes = map[string]bool{
 func (s *Store) RegistryArtifacts(ctx context.Context) ([]RegistryArtifact, error) {
 	out := make([]RegistryArtifact, 0, 128)
 
-	// 1) Stock theses (theses_index) — ALL rows incl. superseded (D28.10).
+	// 1) Stock theses (theses_index) — ALL rows incl. superseded (D28.10) and archived (SC-55; status passes through).
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT ticker, COALESCE(company_name,''), version, score, max_score,
 		       status, COALESCE(locked_date,''), COALESCE(github_url,'')

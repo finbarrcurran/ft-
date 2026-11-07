@@ -12497,9 +12497,11 @@ async function renderTheses() {
   const gapList = (gaps.gaps || []);
   const ownedGaps = gapList.filter(g => g.kind === 'holding');
   const watchGaps = gapList.filter(g => g.kind === 'watchlist');
+  // SC-55: a gap can mean "thesis archived" (file gone or unreadable) or "no live thesis"; plain gaps have no reason.
+  const gapReasonLabel = { archived: 'thesis archived (file missing or unreadable)', no_live_thesis: 'no live thesis (only superseded versions)' };
   const renderGapPill = (g, klass) => `
-    <span class="gap-pill ${klass}" title="${escapeHTML(g.name)}${g.sector ? ' · ' + escapeHTML(g.sector) : ''}">
-      ${escapeHTML(g.ticker)}
+    <span class="gap-pill ${klass}" title="${escapeHTML(g.name)}${g.sector ? ' · ' + escapeHTML(g.sector) : ''}${g.reason ? ' · ' + escapeHTML(gapReasonLabel[g.reason] || g.reason) : ''}">
+      ${escapeHTML(g.ticker)}${g.reason ? ' ⚠' : ''}
     </span>`;
   const gapHTML = gapList.length === 0
     ? `<div class="gap-empty">✓ Every holding and watchlist stock has a thesis on file.</div>`

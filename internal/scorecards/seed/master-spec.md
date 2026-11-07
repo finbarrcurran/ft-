@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.99.4 · 2026-11-03** — latest change: Demo mode and exports, watchlist, note targets (§13).
+> **Current version: v1.100.0 · 2026-11-07** — latest change: Locked theses are never deleted (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.99.4 2026-11-03 -->
+<!-- reference_reviewed: v1.100.0 2026-11-07 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -115,6 +115,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0058 | `etoro_capital_flows` | SC-52 P4 — `etoro_capital_flows` (dated deposits, transfers to/from eToro Money, withdrawals, reversals and FX conversion fees from the statements' Account Activity; idempotent on a hash of the activity row; `manual = 1` rows are the deletable fallback) and `etoro_statement_periods.flows_summary_json` (the Account Summary vs rows reconciliation of each statement) |
 | 0059 | `regime_history_seed_flag` | SC-52 P6 — `regime_history.seed_excluded` (rows kept, but skipped when the weekly snapshot seeds its history); the four 2026-05-16 smoke-test / reset rows are flagged by the migration; the June 2026 Jordi flips wait for Fin's confirmation (`ft regime-history flag --ids …`) |
 | 0064 | `crypto_index_exchanges` | Jordi-46 follow-up — records the exchange of COIN and HOOD (Nasdaq) and CRCL (NYSE) in `crypto_index_members`, checked against Finnhub and Yahoo responses |
+| 0065 | `theses_archive` | SC-55 P1 — `theses_index` gains `archived_at` and `archive_reason`; new status `archived`; table `thesis_delete_unlock` and trigger `theses_index_no_delete` (nothing can `DELETE` from `theses_index` unless an admin has inserted an unlock row) |
 | 0063 | `crypto_index_members` | Jordi-46 Phase 1 — the 46 constituents of the Visser-Labs tokenized index (list_version 2026-09-21; 42 tokens with CoinGecko ids, 4 stocks COIN/HOOD/CRCL/FIGR; 10 verticals; soft `removed_at`); reference only, read by the screener and the list endpoint and by nothing else (no alert, gap-report, entry-zone, watchlist, holdings or thesis code) |
 | 0062 | `video_frame_reads` | SC-54 — `video_frame_reads` (what the vision model read off each chart frame: series, visible values, confidence, model, date; re-reads add rows) and `video_frame_runs` (one row per pass: status, reason, frames, calls, reads, cost) |
 | 0061 | `video_items` | SC-53 — `video_item_runs` (one per digest: model, chunks, tokens, cost, gate counts, status) and `video_items` (block, fields, cited span, gate class + issues, chart-unverified numbers, ticker resolution, direction verdict/speaker view/reason) |
@@ -136,7 +137,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Live refresh | `FT_REFRESH_INTERVAL` (default 15m), plus once ~5 s after boot | FX → stocks → crypto → heatmap. Provider chain: Finnhub → TwelveData → Yahoo |
 | eToro sync + holdings reconcile | every 30 min, around the clock; first run ~1 min after boot | SC-42: one portfolio call to eToro's Public API → lot history + effective SL/TP. SC-44: then diffs against FT holdings — matched values update silently, adds/removes queue for approval |
 | Earnings-only refresh | hourly | Updates `earnings_date` / `ex_dividend_date` so thesis revision warnings fire within ~1 h |
-| Thesis Library sync | `FT_THESIS_SYNC_EVERY` (default 5m) | `git pull` + re-index of `cross_sector_research`; no-op without `FT_GITHUB_TOKEN` |
+| Thesis Library sync | `FT_THESIS_SYNC_EVERY` (default 5m) | `git fetch` + `reset --hard origin/main`, then re-index of `cross_sector_research`; no-op without `FT_GITHUB_TOKEN`. **Never deletes** (SC-55): a row whose file is gone or no longer parses is archived; supersede is recomputed every pass; a missing `theses/` directory aborts the pass with no change |
 | Session GC | hourly | Purges expired sessions |
 | Crypto Indicators | 00:30, plus ~30 s after boot | Refresh all indicators + composite snapshot |
 | Macro Regime | 01:00, plus ~75 s after boot | FRED refresh + regime snapshot |
@@ -225,6 +226,7 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 **Per-holding theses (Spec 14):** `GET/PUT /api/holdings/{kind}/{id}/thesis`, `GET .../thesis/versions`, `PUT .../thesis/status`, `POST .../thesis/preview`
 
 **Stock Thesis Library (Spec 15, SC-38):** `GET /api/theses{,/gaps,/{id},/{id}/revision-prompt}`, `POST /api/theses/{upload,scoring-log,sync}`, `GET /api/calibration/theses`. GitHub repo `finbarrcurran/cross_sector_research` is the source of truth; FT keeps a clone at `/var/lib/ft/research/`.
+  **Thesis lifecycle (SC-55 P1, v1.100.0):** status is `locked`, `draft`, `superseded` or `archived`. Per ticker, every non-archived version below the highest is `superseded`, recomputed on every sync; the highest is live, keeps its status, and if it had been superseded it returns to the status its header declares — so removing v2 returns v1 to live. A row whose file is missing is archived with reason `file_missing`, one whose header no longer parses with `header_invalid`; both keep their markdown and SHA and are restored (archive fields cleared) when a valid file for the same (ticker, version) returns. Nothing in code or migrations deletes from `theses_index`, and a `BEFORE DELETE` trigger enforces it (admin path in migration 0065). A missing `theses/` directory after a good fetch is an error and changes nothing. Readers: the Theses tab, `get_theses` and the holdings score overlay show only `locked`/`draft` rows (not superseded or archived); calibration uses `locked`; the registry and the Drive bridge list every status. The gap report (`/api/theses/gaps`, `get_gap_report`) counts a ticker as covered only when it has a `locked` row; gaps carry an optional `reason` (`archived`, `no_live_thesis`; absent for a ticker with no row at all).
 
 **Crypto Indicators (9e):** `GET /api/crypto-indicators{,/composite/latest,/composite/history,/btc-history,/etf-flow/history,/ism}`, `POST /api/crypto-indicators/{refresh,backfill,ism}`
 
@@ -395,13 +397,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.100.0 · 2026-11-07 · pass 115 · SC-55 P1
+
+**Locked theses are never deleted.** The thesis sync archives instead of deleting (file gone → `file_missing`, header unreadable → `header_invalid`) and restores when the file returns; supersede is recomputed each pass so removing v2 brings v1 back; a missing `theses/` directory aborts with no change; a DB trigger blocks `DELETE FROM theses_index`. Gap report counts only `locked` rows and adds an optional `reason`. Behaviour: sync, gaps (today's output unchanged). Migration: 0065. Reference updated: §3, §4, §5. Supersedes v1.99.4.
+
 ### v1.99.4 · 2026-11-03 · pass 114 · Demo mode
 
 **Demo mode and exports, watchlist, note targets.** In demo mode the xlsx and CSV exports answer 403, `/api/watchlist` and `/api/notes/resolve` answer an empty list; route-level checks, internal callers unaffected; export buttons hidden. Demo off unchanged. Behaviour: four endpoints, UI. Migrations: none. Reference updated: §5. Supersedes v1.99.3.
 
+
 ### v1.99.3 · 2026-11-03 · pass 113 · Demo mode
 
 **Stock screener demo-mode flags.** `/api/screener` no longer reads holdings or the watchlist when demo mode is on (all rows held:false, onWatchlist:false); demo off is unchanged. Behaviour: one endpoint. Migrations: none. Reference updated: §5. Supersedes v1.99.2.
+
 
 
 ### v1.99.2 · 2026-11-03 · pass 112 · Demo mode
@@ -410,9 +418,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.99.1 · 2026-11-02 · pass 111 · Jordi-46
 
 **Index stock exchanges and a screener pill fix.** Migration 0064 records COIN and HOOD (Nasdaq) and CRCL (NYSE), checked against Finnhub and Yahoo; the V46 pill moves into the crypto screener; §8 states the Demo plan's 100 calls/min per the pricing page. Behaviour: Screener tab, data rows. Migrations: 0064. Reference updated: §5, §8. Supersedes v1.99.0.
+
 
 
 
@@ -425,9 +435,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.98.0 · 2026-11-02 · pass 109 · Jordi-46
 
 **CoinGecko call chatter fixed and counted.** Measured about 2,600 calls a day (not the stated 100-200): the 15-minute refresh made 27 calls. 7d/30d changes now come from one keyed `/coins/markets` call at most hourly; every CoinGecko call is counted in `provider_daily` (`coingecko` keyless, `coingecko_key` keyed); the 04:00 history job now uses the key and retries 429s (5 of 13 coins became 13 of 13). §8 corrected. Behaviour: refresh, daily job, counters. Migrations: none. Reference updated: §8. Supersedes v1.97.0.
+
 
 
 
@@ -444,9 +456,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.96.1 · 2026-11-02 · pass 107 · SC-53
 
 **Gate stop words.** Named-ticker name text is not scanned for tickers; stop list gains GLP, SK, NAND, DRAM. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.96.0.
+
 
 
 
@@ -467,21 +481,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.95.3 · 2026-11-02 · pass 105 · SC-53
-
-**Ticker spoken forms.** A ticker is invented only if no spoken form of the company (phrases included) occurs anywhere in the transcript; otherwise near or far. Behaviour: grounding gate. Migrations: none. Reference updated: §5. Supersedes v1.95.2.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.99.4 -->
+<!-- END FT-master-spec v1.100.0 -->

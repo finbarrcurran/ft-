@@ -45,6 +45,8 @@ type GapRow struct {
 	Kind     string  `json:"kind"` // 'holding' | 'watchlist'
 	Category *string `json:"category,omitempty"`
 	Sector   *string `json:"sector,omitempty"`
+	// Reason is empty for the original case (no thesis row at all); see GapNoLiveThesis / GapArchived.
+	Reason string `json:"reason,omitempty"`
 }
 
 // List returns all rows in the index, ordered by (score desc, ticker asc).
@@ -69,7 +71,7 @@ func (e *Engine) List(ctx context.Context, adapter string) ([]Row, error) {
 		         ELSE 'other'
 		       END AS ownership
 		  FROM theses_index t
-		 WHERE t.status != 'superseded'`
+		 WHERE t.status NOT IN ('superseded', 'archived')`
 	args := []any{}
 	if adapter != "" {
 		q += ` AND t.adapter = ?`
@@ -153,26 +155,40 @@ func (e *Engine) Get(ctx context.Context, id int64) (*Full, error) {
 	return &f, nil
 }
 
-// Gaps returns the list of stock_holdings + watchlist rows where the ticker
-// has no entry in theses_index. Useful for the "stocks owned with no
-// thesis" report at the top of the Theses tab.
+// Gap reasons (GapRow.Reason). The empty string is the original case: no row of any status.
+const (
+	GapNoLiveThesis = "no_live_thesis" // rows exist but none is live (all superseded)
+	GapArchived     = "archived"       // no live row and at least one archived row
+)
+
+// Gaps returns the stock_holdings + watchlist rows that have no LIVE thesis (SC-55 P1): a ticker is
+// covered only when it has at least one row with status 'locked'. Tickers with no row at all keep
+// Reason "" (unchanged output for them); tickers whose rows are all superseded or archived carry
+// Reason "no_live_thesis" or "archived". Used by the "stocks owned with no thesis" report at the top
+// of the Theses tab and by the MCP get_gap_report tool.
 func (e *Engine) Gaps(ctx context.Context) ([]GapRow, error) {
 	rows, err := e.DB.QueryContext(ctx, `
-		SELECT s.ticker, s.name, 'holding' AS kind, s.category, s.sector
+		SELECT s.ticker, s.name, 'holding' AS kind, s.category, s.sector,
+		       CASE WHEN EXISTS (SELECT 1 FROM theses_index t WHERE t.ticker = s.ticker AND t.status = 'archived') THEN 'archived'
+		            WHEN EXISTS (SELECT 1 FROM theses_index t WHERE t.ticker = s.ticker) THEN 'no_live_thesis'
+		            ELSE '' END AS reason
 		  FROM stock_holdings s
 		 WHERE s.deleted_at IS NULL
 		   AND s.ticker IS NOT NULL AND s.ticker != ''
 		   AND NOT EXISTS (
-		         SELECT 1 FROM theses_index t WHERE t.ticker = s.ticker
+		         SELECT 1 FROM theses_index t WHERE t.ticker = s.ticker AND t.status = 'locked'
 		       )
 		UNION ALL
 		SELECT w.ticker, COALESCE(w.company_name, w.ticker) AS name,
-		       'watchlist' AS kind, NULL AS category, w.sector
+		       'watchlist' AS kind, NULL AS category, w.sector,
+		       CASE WHEN EXISTS (SELECT 1 FROM theses_index t WHERE t.ticker = w.ticker AND t.status = 'archived') THEN 'archived'
+		            WHEN EXISTS (SELECT 1 FROM theses_index t WHERE t.ticker = w.ticker) THEN 'no_live_thesis'
+		            ELSE '' END AS reason
 		  FROM watchlist w
 		 WHERE w.deleted_at IS NULL
 		   AND w.kind = 'stock'
 		   AND NOT EXISTS (
-		         SELECT 1 FROM theses_index t WHERE t.ticker = w.ticker
+		         SELECT 1 FROM theses_index t WHERE t.ticker = w.ticker AND t.status = 'locked'
 		       )
 		 ORDER BY ticker ASC`)
 	if err != nil {
@@ -184,7 +200,7 @@ func (e *Engine) Gaps(ctx context.Context) ([]GapRow, error) {
 	for rows.Next() {
 		var g GapRow
 		var category, sector sql.NullString
-		if err := rows.Scan(&g.Ticker, &g.Name, &g.Kind, &category, &sector); err != nil {
+		if err := rows.Scan(&g.Ticker, &g.Name, &g.Kind, &category, &sector, &g.Reason); err != nil {
 			return nil, err
 		}
 		if category.Valid {
