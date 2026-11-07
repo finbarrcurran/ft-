@@ -6,13 +6,16 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"ft/internal/monitor"
 	"ft/internal/scorecards"
 	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -26,6 +29,13 @@ type Engine struct {
 	RepoOwner   string // "finbarrcurran"
 	RepoName    string // "cross_sector_research"
 	GitHubToken string // PAT used for git pull/push (HTTPS basic-auth with x-access-token user)
+
+	// Alerts evaluates the Thesis Library checks (reconciliation, SC-55) right after a sync or a nightly
+	// run. Built by New with the Telegram notifier; tests replace Notify.
+	Alerts *monitor.Monitor
+
+	// passFn replaces syncPass in tests (to make the sync that follows an upload fail).
+	passFn func(ctx context.Context) (*syncPass, error)
 }
 
 // New constructs an Engine. RepoDir is created (and the repo cloned) lazily
@@ -35,6 +45,7 @@ func New(db *sql.DB, repoDir, owner, name, token string) *Engine {
 		DB: db, RepoDir: repoDir,
 		RepoOwner: owner, RepoName: name,
 		GitHubToken: token,
+		Alerts:      &monitor.Monitor{DB: db, Checks: monitor.ThesisChecks(db), Notify: &monitor.Telegram{}},
 	}
 }
 
@@ -72,28 +83,94 @@ func (e *Engine) EnsureClone(ctx context.Context) error {
 	return nil
 }
 
+// ErrThesesDirMissing is returned when `theses/` does not exist after a good fetch. It is an error, never
+// "no files": treating it as empty would archive every thesis (SC-55 P1).
+var ErrThesesDirMissing = errors.New("theses: theses/ directory missing after fetch; nothing changed")
+
+// Archive reasons stored in theses_index.archive_reason.
+const (
+	ArchiveFileMissing   = "file_missing"
+	ArchiveHeaderInvalid = "header_invalid"
+)
+
+// syncFile is one valid *_locked.md file seen in a pass.
+type syncFile struct {
+	Key      string // TICKER_vN
+	Header   Header
+	RelPath  string
+	FileSHA  string
+	Declared string // status the header declares (locked | draft | superseded)
+	body     string
+}
+
+// syncFailure is one *_locked.md file that could not be ingested.
+type syncFailure struct {
+	RelPath string
+	Error   string
+	Kind    string // FailHeader | FailDuplicate | FailRead | FailDatabase
+}
+
+// syncPass is everything one Sync saw; later hooks (reconciliation, failure records) read it.
+type syncPass struct {
+	Files      map[string]*syncFile // valid files by key
+	Failures   []syncFailure        // invalid or conflicting files
+	Archived   []archivedRow        // rows archived in this pass
+	SafetyStop []archivedRow        // rows the pass WOULD have archived; non-empty = it archived nothing (SC-55 P2)
+}
+
+type archivedRow struct {
+	ID      int64
+	Ticker  string
+	Version int
+	Reason  string
+}
+
 // Sync runs one full reconciliation pass:
 //  1. `git fetch && git reset --hard origin/main` to pull latest
-//  2. Walk theses/<adapter>/*.md
-//  3. Parse, render, upsert into theses_index keyed by (ticker, version)
-//  4. Recompute earnings_urgency from stock_holdings.earnings_date
-//  5. Delete rows whose source file is gone
+//  2. Walk theses/<adapter>/*_locked.md (a missing theses/ directory is an error, nothing changes)
+//  3. Parse, render, upsert into theses_index keyed by (ticker, version); an archived row whose
+//     valid file is back is restored
+//  4. ARCHIVE (never delete) rows whose file is gone (file_missing) or no longer parses (header_invalid)
+//  5. Recompute supersede from scratch: per ticker the highest non-archived version is live
+//  6. Recompute earnings_urgency from stock_holdings.earnings_date
 //
 // Safe to call concurrently with reads — uses a transaction per upsert.
 func (e *Engine) Sync(ctx context.Context) error {
-	if !e.Configured() {
-		return nil // graceful no-op when token missing (dev)
+	run := e.syncPass
+	if e.passFn != nil {
+		run = e.passFn
 	}
-	if err := e.EnsureClone(ctx); err != nil {
-		return err
+	pass, err := run(ctx)
+	if e.Configured() {
+		e.recordTick(ctx, err)
+		if pass != nil {
+			e.recordIngestFailures(ctx, pass.Failures)
+		}
 	}
-	if err := e.gitFetchReset(ctx); err != nil {
-		return err
-	}
+	e.afterSync(ctx, pass, err)
+	return err
+}
 
+// Archive safety stop (SC-55 P2): one pass that would archive more than this many rows, or more than this
+// share of all rows, archives nothing and raises an alert instead. Variables so tests can tighten them.
+var (
+	maxArchivePerRun   = 2
+	maxArchiveFraction = 0.05
+	// The percentage rule only applies from this many rows: in a tiny table a single row is always
+	// more than 5%. With 63 rows the absolute limit (2) is the binding one until the table passes 40.
+	minRowsForFraction = 20
+)
+
+// scanRepo reads every theses/**/*_locked.md in the local clone (no database access): the valid files by
+// key and the files that failed to parse or duplicate another file's (ticker, version). The first path in
+// walk order wins a duplicate key.
+func (e *Engine) scanRepo() (map[string]*syncFile, []syncFailure, error) {
 	thesesRoot := filepath.Join(e.RepoDir, "theses")
-	seen := map[string]bool{} // ticker_v<n>
-
+	if st, err := os.Stat(thesesRoot); err != nil || !st.IsDir() {
+		return nil, nil, ErrThesesDirMissing
+	}
+	files := map[string]*syncFile{}
+	var failures []syncFailure
 	err := filepath.WalkDir(thesesRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -101,63 +178,137 @@ func (e *Engine) Sync(ctx context.Context) error {
 		if !strings.HasSuffix(path, "_locked.md") {
 			return nil
 		}
+		rel, _ := filepath.Rel(e.RepoDir, path)
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("read %s: %w", path, err)
+			slog.Error("theses: read failed", "path", rel, "err", err)
+			failures = append(failures, syncFailure{RelPath: rel, Error: "read: " + err.Error(), Kind: FailRead})
+			return nil
 		}
 		h := ParseHeader(string(raw))
 		if err := h.Validate(); err != nil {
-			slog.Warn("theses: skip malformed", "path", path, "err", err)
+			slog.Warn("theses: skip malformed", "path", rel, "err", err)
+			failures = append(failures, syncFailure{RelPath: rel, Error: err.Error(), Kind: FailHeader})
 			return nil
 		}
-		rel, _ := filepath.Rel(e.RepoDir, path)
 		key := fmt.Sprintf("%s_v%d", h.Ticker, h.Version)
-		seen[key] = true
-
-		sum := sha1.Sum(raw)
-		fileSHA := hex.EncodeToString(sum[:])
-
-		if err := e.upsert(ctx, h, string(raw), rel, fileSHA); err != nil {
-			slog.Error("theses: upsert", "path", path, "err", err)
-			return nil // keep walking
+		if first, dup := files[key]; dup {
+			msg := fmt.Sprintf("duplicate %s: %s already provides this ticker and version", key, first.RelPath)
+			slog.Warn("theses: duplicate key", "path", rel, "first", first.RelPath)
+			failures = append(failures, syncFailure{RelPath: rel, Error: msg, Kind: FailDuplicate})
+			return nil
 		}
+		sum := sha1.Sum(raw)
+		files[key] = &syncFile{Key: key, Header: h, RelPath: rel, FileSHA: hex.EncodeToString(sum[:]),
+			Declared: h.Status, body: string(raw)}
 		return nil
 	})
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("walk theses dir: %w", err)
+	if err != nil {
+		return nil, nil, fmt.Errorf("walk theses dir: %w", err)
+	}
+	return files, failures, nil
+}
+
+func (e *Engine) syncPass(ctx context.Context) (*syncPass, error) {
+	if !e.Configured() {
+		return nil, nil // graceful no-op when token missing (dev)
+	}
+	if err := e.EnsureClone(ctx); err != nil {
+		return nil, err
+	}
+	if err := e.gitFetchReset(ctx); err != nil {
+		return nil, err
+	}
+	files, failures, err := e.scanRepo()
+	if err != nil {
+		return nil, err
+	}
+	pass := &syncPass{Files: files, Failures: failures}
+
+	keys := make([]string, 0, len(files))
+	for k := range files {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		f := files[k]
+		if err := e.upsert(ctx, f.Header, f.body, f.RelPath, f.FileSHA); err != nil {
+			slog.Error("theses: upsert", "path", f.RelPath, "err", err)
+			pass.Failures = append(pass.Failures, syncFailure{RelPath: f.RelPath, Error: "database: " + err.Error(), Kind: FailDatabase})
+		}
 	}
 
-	// Purge rows whose source MD no longer exists.
-	if err := e.purgeMissing(ctx, seen); err != nil {
-		slog.Error("theses: purge", "err", err)
+	// Archive rows whose source file is gone or no longer parses. Never deletes.
+	if err := e.archiveMissing(ctx, pass); err != nil {
+		slog.Error("theses: archive", "err", err)
 	}
-	// Stamp lower-version rows as superseded when a higher version exists
-	// for the same ticker. Runs after upserts so the parser-supplied
-	// status='locked' on the older file gets overwritten each sync.
-	if err := e.markSuperseded(ctx); err != nil {
-		slog.Error("theses: mark superseded", "err", err)
+	// Supersede is recomputed every sync, so removing v2 brings v1 back.
+	if err := e.recomputeStatus(ctx, pass); err != nil {
+		slog.Error("theses: recompute status", "err", err)
 	}
 	// Recompute earnings urgency for every row (cheap — handful of rows).
 	if err := e.refreshEarningsUrgency(ctx); err != nil {
 		slog.Error("theses: refresh earnings", "err", err)
 	}
-	return nil
+	return pass, nil
 }
 
-// markSuperseded sets status='superseded' on any row where a higher-version
-// row exists for the same ticker. The newest version per ticker keeps
-// whatever status its MD declares (typically 'locked').
-func (e *Engine) markSuperseded(ctx context.Context) error {
-	_, err := e.DB.ExecContext(ctx, `
-		UPDATE theses_index
-		   SET status = 'superseded'
-		 WHERE status != 'superseded'
-		   AND EXISTS (
-		         SELECT 1 FROM theses_index t2
-		          WHERE t2.ticker = theses_index.ticker
-		            AND t2.version > theses_index.version
-		       )`)
-	return err
+// recomputeStatus marks, per ticker, every non-archived version below the highest one 'superseded', and
+// returns the highest one to the status its header declares if it had been superseded. It does not
+// depend on which files changed, so a vanished v2 returns v1 to live on the next sync. A live row
+// whose status is already locked or draft is left alone (the live DB holds one such row, 373220.KS,
+// locked while its header says Draft; the sync must not silently change that).
+func (e *Engine) recomputeStatus(ctx context.Context, pass *syncPass) error {
+	rows, err := e.DB.QueryContext(ctx, `SELECT id, ticker, version, status FROM theses_index WHERE status != 'archived'`)
+	if err != nil {
+		return err
+	}
+	type r struct {
+		id      int64
+		ticker  string
+		version int
+		status  string
+	}
+	byTicker := map[string][]r{}
+	for rows.Next() {
+		var x r
+		if err := rows.Scan(&x.id, &x.ticker, &x.version, &x.status); err != nil {
+			rows.Close()
+			return err
+		}
+		byTicker[x.ticker] = append(byTicker[x.ticker], x)
+	}
+	rows.Close()
+	for tk, list := range byTicker {
+		top := 0
+		for _, x := range list {
+			if x.version > top {
+				top = x.version
+			}
+		}
+		for _, x := range list {
+			want := "superseded"
+			if x.version == top {
+				// The live row keeps whatever status it has (set from the header at ingest; a hand edit
+				// is preserved, as before). Only a row that was superseded returns to the status its
+				// header declares.
+				want = x.status
+				if x.status == "superseded" {
+					f, ok := pass.Files[fmt.Sprintf("%s_v%d", tk, x.version)]
+					if !ok || f.Declared == "" || f.Declared == "superseded" {
+						continue // nothing says what it should be
+					}
+					want = f.Declared
+				}
+			}
+			if want != x.status {
+				if _, err := e.DB.ExecContext(ctx, `UPDATE theses_index SET status = ? WHERE id = ?`, want, x.id); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (e *Engine) gitFetchReset(ctx context.Context) error {
@@ -166,6 +317,8 @@ func (e *Engine) gitFetchReset(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", e.RepoDir,
 		"-c", "http.https://github.com/.extraheader=Authorization: Basic "+basicAuth(bearer),
 		"fetch", "origin", "main")
+	// A rejected token (401/403) must fail the pass, never wait for a credential prompt.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %s: %w", scrub(string(out), e.GitHubToken), err)
 	}
@@ -181,12 +334,15 @@ func (e *Engine) upsert(ctx context.Context, h Header, body, relPath, fileSHA st
 	html := scorecards.Render(body)
 	now := time.Now().Unix()
 
-	// Check if row exists with same SHA — skip if unchanged.
-	var existingSHA string
+	// Skip if the row exists with the same SHA at the same path — but never skip an archived row:
+	// its file is back and it must be restored. A moved file (same content, new folder) is updated so
+	// github_path always names the file that exists.
+	var existingSHA, existingStatus, existingPath string
 	row := e.DB.QueryRowContext(ctx,
-		`SELECT file_sha FROM theses_index WHERE ticker = ? AND version = ?`,
+		`SELECT file_sha, status, github_path FROM theses_index WHERE ticker = ? AND version = ?`,
 		h.Ticker, h.Version)
-	if err := row.Scan(&existingSHA); err == nil && existingSHA == fileSHA {
+	if err := row.Scan(&existingSHA, &existingStatus, &existingPath); err == nil &&
+		existingSHA == fileSHA && existingStatus != "archived" && existingPath == relPath {
 		return nil // unchanged
 	}
 
@@ -214,6 +370,8 @@ func (e *Engine) upsert(ctx context.Context, h Header, body, relPath, fileSHA st
 		   markdown_content = excluded.markdown_content,
 		   rendered_html    = excluded.rendered_html,
 		   file_sha         = excluded.file_sha,
+		   archived_at      = NULL,
+		   archive_reason   = NULL,
 		   updated_at       = excluded.updated_at`,
 		h.Ticker, nullStr(h.CompanyName), h.Adapter, nullStr(h.SubType),
 		scoreVal, h.MaxScore, h.Version,
@@ -222,27 +380,55 @@ func (e *Engine) upsert(ctx context.Context, h Header, body, relPath, fileSHA st
 	return err
 }
 
-func (e *Engine) purgeMissing(ctx context.Context, seen map[string]bool) error {
-	rows, err := e.DB.QueryContext(ctx, `SELECT id, ticker, version FROM theses_index`)
+// archiveMissing archives (never deletes) every live row whose (ticker, version) has no valid file
+// in this pass. The reason is header_invalid when a file at the row's stored path exists but failed
+// to parse, file_missing otherwise.
+func (e *Engine) archiveMissing(ctx context.Context, pass *syncPass) error {
+	rows, err := e.DB.QueryContext(ctx, `SELECT id, ticker, version, github_path FROM theses_index WHERE status != 'archived'`)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	type del struct{ id int64 }
-	var deletes []del
+	invalidPath := map[string]bool{}
+	for _, f := range pass.Failures {
+		invalidPath[f.RelPath] = true
+	}
+	var todo []archivedRow
 	for rows.Next() {
-		var id int64
-		var tk string
-		var ver int
-		if err := rows.Scan(&id, &tk, &ver); err != nil {
+		var a archivedRow
+		var path string
+		if err := rows.Scan(&a.ID, &a.Ticker, &a.Version, &path); err != nil {
+			rows.Close()
 			return err
 		}
-		if !seen[fmt.Sprintf("%s_v%d", tk, ver)] {
-			deletes = append(deletes, del{id})
+		if _, ok := pass.Files[fmt.Sprintf("%s_v%d", a.Ticker, a.Version)]; ok {
+			continue
+		}
+		a.Reason = ArchiveFileMissing
+		if invalidPath[path] {
+			a.Reason = ArchiveHeaderInvalid
+		}
+		todo = append(todo, a)
+	}
+	rows.Close()
+	if len(todo) > 0 {
+		var total int
+		_ = e.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM theses_index`).Scan(&total)
+		if len(todo) > maxArchivePerRun || (total >= minRowsForFraction && float64(len(todo)) > maxArchiveFraction*float64(total)) {
+			slog.Error("theses: SAFETY STOP — archive batch too large, nothing archived",
+				"would_archive", len(todo), "rows", total)
+			pass.SafetyStop = todo
+			return nil
 		}
 	}
-	for _, d := range deletes {
-		_, _ = e.DB.ExecContext(ctx, `DELETE FROM theses_index WHERE id = ?`, d.id)
+	now := time.Now().Unix()
+	for _, a := range todo {
+		if _, err := e.DB.ExecContext(ctx,
+			`UPDATE theses_index SET status = 'archived', archived_at = ?, archive_reason = ? WHERE id = ? AND status != 'archived'`,
+			now, a.Reason, a.ID); err != nil {
+			return err
+		}
+		slog.Warn("theses: archived", "ticker", a.Ticker, "version", a.Version, "reason", a.Reason)
+		pass.Archived = append(pass.Archived, a)
 	}
 	return nil
 }

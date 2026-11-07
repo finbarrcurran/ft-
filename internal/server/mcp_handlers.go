@@ -155,7 +155,7 @@ func (s *Server) mountMCP() {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_gap_report",
-		Description: "Live thesis coverage gaps — held/watchlisted tickers without a current locked thesis. Read-only, no cache.",
+		Description: "Live thesis coverage gaps — held/watchlisted tickers without a current locked thesis. Each gap may carry a reason: archived (file missing or unreadable), no_live_thesis, or file_not_indexed (a locked file exists in the repo but is not indexed). Read-only, no cache.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args struct{}) (*mcp.CallToolResult, any, error) {
 		userID := mcpUserID(ctx)
 		slog.Info("mcp tool call", "tool", "get_gap_report", "user_id", userID)

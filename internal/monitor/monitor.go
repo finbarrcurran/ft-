@@ -53,6 +53,8 @@ type Check struct {
 	// returns whether the source is down and a human detail (SC-49: the ETF-flow check
 	// judges the DATA's age in US trading days, not a file's modification time).
 	Eval func(ctx context.Context, now time.Time) (down bool, lastOK time.Time, found bool, detail string, err error)
+	// Domain names the alert family in the message ("FT <domain>: …"); empty = "connectivity".
+	Domain string
 }
 
 // Notifier delivers an alert text.
@@ -80,6 +82,14 @@ type Result struct {
 	Detail   string
 	Custom   bool // judged by Check.Eval: the detail already says everything
 	ReminderEvery time.Duration
+	Domain   string
+}
+
+func (r Result) domain() string {
+	if r.Domain == "" {
+		return "connectivity"
+	}
+	return r.Domain
 }
 
 func (m *Monitor) now() time.Time {
@@ -94,7 +104,7 @@ func (m *Monitor) Evaluate(ctx context.Context) []Result {
 	now := m.now()
 	out := make([]Result, 0, len(m.Checks))
 	for _, c := range m.Checks {
-		r := Result{Source: c.Source, Label: c.Label, Optional: c.Optional, MaxAge: c.MaxAge, ReminderEvery: c.ReminderEvery}
+		r := Result{Source: c.Source, Label: c.Label, Optional: c.Optional, MaxAge: c.MaxAge, ReminderEvery: c.ReminderEvery, Domain: c.Domain}
 		if c.Eval != nil {
 			down, last, found, detail, err := c.Eval(ctx, now)
 			r.LastOK, r.Found, r.Detail, r.Custom = last, found, detail, true
@@ -166,7 +176,7 @@ func (m *Monitor) Tick(ctx context.Context) {
 		case status == statusOK && r.Down:
 			la := sql.NullInt64{}
 			if !r.Optional {
-				text := fmt.Sprintf("🔴 FT connectivity: %s looks down\n%s", r.Label, describe(r, now))
+				text := fmt.Sprintf("🔴 FT %s: %s looks down\n%s", r.domain(), r.Label, describe(r, now))
 				m.alert(ctx, r.Source, "down", text, now)
 				la = sql.NullInt64{Int64: now.Unix(), Valid: true}
 			}
@@ -178,15 +188,15 @@ func (m *Monitor) Tick(ctx context.Context) {
 				every = r.ReminderEvery
 			}
 			if !r.Optional && (!lastAlert.Valid || now.Sub(time.Unix(lastAlert.Int64, 0)) >= every) {
-				text := fmt.Sprintf("🟠 FT connectivity: %s is STILL down (since %s)\n%s",
-					r.Label, time.Unix(since, 0).UTC().Format("2006-01-02 15:04 UTC"), describe(r, now))
+				text := fmt.Sprintf("🟠 FT %s: %s is STILL down (since %s)\n%s",
+					r.domain(), r.Label, time.Unix(since, 0).UTC().Format("2006-01-02 15:04 UTC"), describe(r, now))
 				m.alert(ctx, r.Source, "still_down", text, now)
 				la = sql.NullInt64{Int64: now.Unix(), Valid: true}
 			}
 			m.upsert(ctx, r, statusDown, since, lastOK, la)
 		case status == statusDown && !r.Down:
 			if !r.Optional && lastAlert.Valid {
-				text := fmt.Sprintf("🟢 FT connectivity: %s is back (down for %s)", r.Label,
+				text := fmt.Sprintf("🟢 FT %s: %s is back (down for %s)", r.domain(), r.Label,
 					humanDur(now.Sub(time.Unix(since, 0))))
 				m.alert(ctx, r.Source, "recovered", text, now)
 			}

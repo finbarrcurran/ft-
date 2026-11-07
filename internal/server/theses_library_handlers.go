@@ -35,6 +35,12 @@ func (s *Server) handleListTheses(w http.ResponseWriter, r *http.Request) {
 		mapStoreError(w, err)
 		return
 	}
+	if s.demoModeOn(r.Context()) {
+		// Demo mode: the research library is not portfolio data, but the owned/watchlist tag is.
+		for i := range rows {
+			rows[i].Ownership = "other"
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"theses":     rows,
 		"configured": s.theses.Configured(),
@@ -72,6 +78,20 @@ func (s *Server) handleThesesGaps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"gaps": gaps})
+}
+
+// GET /api/theses/health — SC-55 P4: open ingest failures, the sync-tick counter and the latest reconciliation.
+func (s *Server) handleThesesHealth(w http.ResponseWriter, r *http.Request) {
+	if s.theses == nil {
+		writeJSON(w, http.StatusOK, theses.Health{Failures: []theses.IngestFailure{}})
+		return
+	}
+	h, err := s.theses.Health(r.Context())
+	if err != nil {
+		mapStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h)
 }
 
 // POST /api/theses/upload
