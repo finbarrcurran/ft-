@@ -74,6 +74,20 @@ func (s *Server) handleThesesGaps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"gaps": gaps})
 }
 
+// GET /api/theses/health — SC-55 P4: open ingest failures, the sync-tick counter and the latest reconciliation.
+func (s *Server) handleThesesHealth(w http.ResponseWriter, r *http.Request) {
+	if s.theses == nil {
+		writeJSON(w, http.StatusOK, theses.Health{Failures: []theses.IngestFailure{}})
+		return
+	}
+	h, err := s.theses.Health(r.Context())
+	if err != nil {
+		mapStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h)
+}
+
 // POST /api/theses/upload
 //
 // multipart/form-data:

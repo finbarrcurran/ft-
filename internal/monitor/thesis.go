@@ -20,6 +20,85 @@ func ThesisChecks(db *sql.DB) []Check {
 	return []Check{
 		{Source: "thesis_reconcile", Label: "Thesis library vs repo", Domain: thesisDomain,
 			MaxAge: 36 * time.Hour, Eval: thesisReconcileEval(db)},
+		// SC-55 P4: a file that cannot be ingested is loud — one message when it first fails.
+		{Source: "thesis_ingest", Label: "Thesis ingest failures", Domain: thesisDomain,
+			MaxAge: 36 * time.Hour, Eval: thesisIngestEval(db)},
+		// SC-55 P4: the sync itself failing N times in a row (fetch / clone), about 30 minutes at the
+		// 5-minute default. Over 6 months of history this fires once (a six-hour DNS outage, 2026-09-23);
+		// the 9 isolated single failures stay quiet.
+		{Source: "thesis_sync", Label: "Thesis library sync", Domain: thesisDomain,
+			MaxAge: 36 * time.Hour, Eval: thesisSyncEval(db)},
+	}
+}
+
+// ThesisSyncFailThreshold is the number of consecutive failed sync passes that raises the alert.
+const ThesisSyncFailThreshold = 6
+
+func thesisIngestEval(db *sql.DB) func(ctx context.Context, now time.Time) (bool, time.Time, bool, string, error) {
+	return func(ctx context.Context, now time.Time) (bool, time.Time, bool, string, error) {
+		rows, err := db.QueryContext(ctx, `SELECT path, error FROM thesis_ingest_failures WHERE resolved_at IS NULL ORDER BY first_seen, path`)
+		if err != nil {
+			return false, time.Time{}, false, "", err
+		}
+		defer rows.Close()
+		var items []string
+		n := 0
+		for rows.Next() {
+			var path, msg string
+			if err := rows.Scan(&path, &msg); err != nil {
+				return false, time.Time{}, false, "", err
+			}
+			n++
+			if len(items) < 5 {
+				if len(msg) > 140 {
+					msg = msg[:140] + "…"
+				}
+				items = append(items, fmt.Sprintf("%s: %s", path, msg))
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return false, time.Time{}, false, "", err
+		}
+		if n == 0 {
+			return false, now, true, "no failed files", nil
+		}
+		more := ""
+		if n > len(items) {
+			more = fmt.Sprintf(" (+%d more)", n-len(items))
+		}
+		return true, now, true, fmt.Sprintf("%d file(s) cannot be ingested: %s%s", n, strings.Join(items, " | "), more), nil
+	}
+}
+
+func thesisSyncEval(db *sql.DB) func(ctx context.Context, now time.Time) (bool, time.Time, bool, string, error) {
+	return func(ctx context.Context, now time.Time) (bool, time.Time, bool, string, error) {
+		var n int
+		var first, lastOK sql.NullInt64
+		var lastErr sql.NullString
+		err := db.QueryRowContext(ctx, `SELECT consecutive_failures, first_failure_at, last_error, last_ok_at FROM thesis_sync_state WHERE id = 1`).
+			Scan(&n, &first, &lastErr, &lastOK)
+		if err == sql.ErrNoRows {
+			return false, time.Time{}, false, "no sync recorded yet", nil
+		}
+		if err != nil {
+			return false, time.Time{}, false, "", err
+		}
+		at := now
+		if lastOK.Valid {
+			at = time.Unix(lastOK.Int64, 0).UTC()
+		}
+		if n < ThesisSyncFailThreshold {
+			return false, at, true, fmt.Sprintf("%d consecutive failed sync(s)", n), nil
+		}
+		since := ""
+		if first.Valid {
+			since = " since " + time.Unix(first.Int64, 0).UTC().Format("2006-01-02 15:04 UTC")
+		}
+		msg := lastErr.String
+		if len(msg) > 200 {
+			msg = msg[:200] + "…"
+		}
+		return true, at, true, fmt.Sprintf("%d consecutive failed syncs%s; last error: %s", n, since, msg), nil
 	}
 }
 

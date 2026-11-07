@@ -29,6 +29,9 @@ type UploadResult struct {
 	GitHubPath string `json:"githubPath"`
 	GitHubURL  string `json:"githubUrl"`
 	CommitSHA  string `json:"commitSha"`
+	// SyncError is set when the file reached GitHub but the index sync that follows failed
+	// (SC-55 P4); FT retries on its next sync.
+	SyncError string `json:"syncError,omitempty"`
 }
 
 // UploadOpts bundles inputs for an upload. ScoringLog and Registry are both
@@ -136,8 +139,10 @@ func (e *Engine) Upload(ctx context.Context, opts UploadOpts) (*UploadResult, er
 	sha := strings.TrimSpace(string(shaOut))
 
 	// Re-sync our index now so the new row is immediately visible.
+	syncErr := ""
 	if err := e.Sync(ctx); err != nil {
 		slog.Warn("theses: post-upload sync failed", "err", err)
+		syncErr = err.Error()
 	}
 
 	// Best-effort: if a stock_holdings or watchlist row exists for this
@@ -156,6 +161,7 @@ func (e *Engine) Upload(ctx context.Context, opts UploadOpts) (*UploadResult, er
 		GitHubPath: targetRel,
 		GitHubURL:  url,
 		CommitSHA:  sha,
+		SyncError:  syncErr,
 	}, nil
 }
 

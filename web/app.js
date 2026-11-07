@@ -12410,6 +12410,31 @@ const ADAPTER_LABEL = {
   asset_hedge: 'Asset-Hedge',  // Spec 9i 4-pillar /8 framework
 };
 
+// SC-55 P4 — loud ingest problems: files FT could not ingest, a failing sync, a reconciliation that found
+// something. Nothing is rendered while everything is healthy.
+function thesisHealthBanner(h) {
+  if (!h || !h.configured) return '';
+  const parts = [];
+  const fails = h.failures || [];
+  if (fails.length) {
+    parts.push(`<div><strong>${fails.length} file${fails.length === 1 ? '' : 's'} could not be ingested</strong> (any existing thesis for the file is archived, not deleted):<ul style="margin:0.3rem 0 0 1.2rem">${
+      fails.map(f => `<li><code>${escapeHTML(f.path)}</code> — ${escapeHTML(f.error)} <span class="dim">(since ${escapeHTML(new Date(f.firstSeen * 1000).toISOString().slice(0, 16).replace('T', ' '))} UTC)</span></li>`).join('')}</ul></div>`);
+  }
+  const sy = h.sync || {};
+  if ((sy.consecutiveFailures || 0) >= 1) {
+    parts.push(`<div><strong>Sync is failing</strong> — ${sy.consecutiveFailures} in a row${sy.lastError ? ': ' + escapeHTML(sy.lastError) : ''}. New or edited theses are not being picked up.</div>`);
+  }
+  const rc = h.reconcile;
+  if (rc && rc.status !== 'ok') {
+    parts.push(`<div><strong>Repo vs index: ${rc.status === 'aborted' ? 'sync aborted, nothing changed' : rc.mismatches + ' mismatch' + (rc.mismatches === 1 ? '' : 'es')}</strong> <span class="dim">(last check ${escapeHTML(new Date(rc.ranAt * 1000).toISOString().slice(0, 16).replace('T', ' '))} UTC, ${escapeHTML(rc.trigger)})</span></div>`);
+  }
+  if (!parts.length) return '';
+  return `<div class="thesis-gaps" style="border-left:3px solid var(--loss, #c0392b);padding:0.6rem 0.9rem;margin-bottom:0.8rem">
+    <div class="gap-title loss">⚠ Thesis library needs attention</div>
+    ${parts.join('')}
+  </div>`;
+}
+
 function urgencyBadge(u, dateStr) {
   // u ∈ {none, amber, red, revision_needed}
   if (!u || u === 'none') {
@@ -12444,11 +12469,12 @@ function scoreCellTheses(score, max) {
 async function renderTheses() {
   const content = $('#content');
   content.innerHTML = `<div class="empty"><div>Loading thesis library…</div></div>`;
-  let payload, gaps;
+  let payload, gaps, health;
   try {
-    [payload, gaps] = await Promise.all([
+    [payload, gaps, health] = await Promise.all([
       api('/api/theses' + (state.theses.adapterFilter ? `?adapter=${encodeURIComponent(state.theses.adapterFilter)}` : '')),
       api('/api/theses/gaps').catch(() => ({ gaps: [] })),
+      api('/api/theses/health').catch(() => null), // SC-55 P4
     ]);
   } catch (err) {
     content.innerHTML = `<div class="empty"><div class="loss">error loading theses: ${escapeHTML(err.message)}</div></div>`;
@@ -12612,6 +12638,7 @@ async function renderTheses() {
       </div>
       <div id="dz-status"></div>
 
+      ${thesisHealthBanner(health)}
       <!-- Gap report -->
       <div class="thesis-gaps">
         <div class="gap-title">Coverage gaps <span class="dim">— ${ownedGaps.length + watchGaps.length} stock${ownedGaps.length + watchGaps.length === 1 ? '' : 's'} without a thesis</span></div>
@@ -12981,6 +13008,9 @@ function openStockThesisForm() {
       const result = JSON.parse(txt);
       closeImportModal();
       const scorePart = result.score != null ? ` ${result.score}/${result.maxScore}` : '';
+      if (result.syncError) {
+        setDropStatus('error', `Pushed ${result.ticker} v${result.version} to GitHub (commit ${result.commitSha.slice(0, 7)}) but the index sync FAILED: ${result.syncError}. The file is safe on GitHub; FT retries on its next sync.`);
+      } else
       setDropStatus('ok', `✓ Pushed ${result.ticker} v${result.version} (${result.adapter}${scorePart}) — commit ${result.commitSha.slice(0, 7)}. View on GitHub: ${result.githubUrl}`);
       setTimeout(() => renderTheses(), 600);
     } catch (e) {
@@ -13043,6 +13073,9 @@ async function handleThesisDrop(files) {
     }
     const result = await resp.json();
     const scorePart = result.score != null ? ` ${result.score}/${result.maxScore}` : '';
+    if (result.syncError) {
+      setDropStatus('error', `Pushed ${result.ticker} v${result.version} to GitHub (commit ${result.commitSha.slice(0, 7)}) but the index sync FAILED: ${result.syncError}. The file is safe on GitHub; FT retries on its next sync.`);
+    } else
     setDropStatus('ok',
       `✓ Pushed ${result.ticker} v${result.version} (${result.adapter}${scorePart}) — commit ${result.commitSha.slice(0, 7)}. View on GitHub: ${result.githubUrl}`);
     setTimeout(() => renderTheses(), 600);

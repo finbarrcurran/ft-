@@ -33,6 +33,9 @@ type Engine struct {
 	// Alerts evaluates the Thesis Library checks (reconciliation, SC-55) right after a sync or a nightly
 	// run. Built by New with the Telegram notifier; tests replace Notify.
 	Alerts *monitor.Monitor
+
+	// passFn replaces syncPass in tests (to make the sync that follows an upload fail).
+	passFn func(ctx context.Context) (*syncPass, error)
 }
 
 // New constructs an Engine. RepoDir is created (and the repo cloned) lazily
@@ -104,6 +107,7 @@ type syncFile struct {
 type syncFailure struct {
 	RelPath string
 	Error   string
+	Kind    string // FailHeader | FailDuplicate | FailRead | FailDatabase
 }
 
 // syncPass is everything one Sync saw; later hooks (reconciliation, failure records) read it.
@@ -132,7 +136,17 @@ type archivedRow struct {
 //
 // Safe to call concurrently with reads — uses a transaction per upsert.
 func (e *Engine) Sync(ctx context.Context) error {
-	pass, err := e.syncPass(ctx)
+	run := e.syncPass
+	if e.passFn != nil {
+		run = e.passFn
+	}
+	pass, err := run(ctx)
+	if e.Configured() {
+		e.recordTick(ctx, err)
+		if pass != nil {
+			e.recordIngestFailures(ctx, pass.Failures)
+		}
+	}
 	e.afterSync(ctx, pass, err)
 	return err
 }
@@ -168,20 +182,20 @@ func (e *Engine) scanRepo() (map[string]*syncFile, []syncFailure, error) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			slog.Error("theses: read failed", "path", rel, "err", err)
-			failures = append(failures, syncFailure{RelPath: rel, Error: "read: " + err.Error()})
+			failures = append(failures, syncFailure{RelPath: rel, Error: "read: " + err.Error(), Kind: FailRead})
 			return nil
 		}
 		h := ParseHeader(string(raw))
 		if err := h.Validate(); err != nil {
 			slog.Warn("theses: skip malformed", "path", rel, "err", err)
-			failures = append(failures, syncFailure{RelPath: rel, Error: err.Error()})
+			failures = append(failures, syncFailure{RelPath: rel, Error: err.Error(), Kind: FailHeader})
 			return nil
 		}
 		key := fmt.Sprintf("%s_v%d", h.Ticker, h.Version)
 		if first, dup := files[key]; dup {
 			msg := fmt.Sprintf("duplicate %s: %s already provides this ticker and version", key, first.RelPath)
 			slog.Warn("theses: duplicate key", "path", rel, "first", first.RelPath)
-			failures = append(failures, syncFailure{RelPath: rel, Error: msg})
+			failures = append(failures, syncFailure{RelPath: rel, Error: msg, Kind: FailDuplicate})
 			return nil
 		}
 		sum := sha1.Sum(raw)
@@ -220,6 +234,7 @@ func (e *Engine) syncPass(ctx context.Context) (*syncPass, error) {
 		f := files[k]
 		if err := e.upsert(ctx, f.Header, f.body, f.RelPath, f.FileSHA); err != nil {
 			slog.Error("theses: upsert", "path", f.RelPath, "err", err)
+			pass.Failures = append(pass.Failures, syncFailure{RelPath: f.RelPath, Error: "database: " + err.Error(), Kind: FailDatabase})
 		}
 	}
 

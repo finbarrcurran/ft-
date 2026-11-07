@@ -17,7 +17,6 @@ const (
 	IssueFileNotIndexed = "file_not_indexed" // valid file in the repo, no row
 	IssueRowWithoutFile = "row_without_file" // live row, no valid file
 	IssueArchived       = "archived"         // row archived (file missing or unreadable) and not yet resolved
-	IssueFileInvalid    = "file_invalid"     // file present but its header does not parse (or duplicates another)
 	IssueSHAMismatch    = "sha_mismatch"     // row's stored SHA differs from the file
 	IssuePathMismatch   = "path_mismatch"    // row's github_path differs from where the file is
 	IssueStatusSanity   = "status_sanity"    // no live row, or more than one, for a ticker
@@ -152,8 +151,10 @@ func (e *Engine) reconcileWith(ctx context.Context, files map[string]*syncFile, 
 		_, has := files[key]
 		switch {
 		case r.status == "archived":
-			note := r.archiveReason
-			issues = append(issues, monitor.ReconcileIssue{Type: IssueArchived, Ticker: r.ticker, Version: r.version, Path: r.path, Note: note})
+			if r.archiveReason == ArchiveHeaderInvalid {
+				continue // reported once, by the failed-ingest list and its alert (P4)
+			}
+			issues = append(issues, monitor.ReconcileIssue{Type: IssueArchived, Ticker: r.ticker, Version: r.version, Path: r.path, Note: r.archiveReason})
 		case !has:
 			issues = append(issues, monitor.ReconcileIssue{Type: IssueRowWithoutFile, Ticker: r.ticker, Version: r.version, Path: r.path})
 		}
@@ -174,9 +175,9 @@ func (e *Engine) reconcileWith(ctx context.Context, files map[string]*syncFile, 
 			}
 		}
 	}
-	for _, f := range failures {
-		issues = append(issues, monitor.ReconcileIssue{Type: IssueFileInvalid, Path: f.RelPath, Note: f.Error})
-	}
+	// Header, duplicate, read and database failures are not repeated here: the failed-ingest list and its own
+	// alert report them (P4), and a file whose row could not be written shows up above as file_not_indexed.
+	_ = failures
 	for tk, n := range nonArchived {
 		if liveByTicker[tk] != 1 {
 			issues = append(issues, monitor.ReconcileIssue{Type: IssueStatusSanity, Ticker: tk, Note: fmt.Sprintf("%d live rows among %d non-archived", liveByTicker[tk], n)})

@@ -45,14 +45,15 @@ func TestReconcile_MalformedHeaderAlertsOnceThenRecovers(t *testing.T) {
 	if err := e.sync(); err != nil {
 		t.Fatal(err)
 	}
+	// One fault, one message: the failed-ingest check reports it; the reconciliation does not repeat it.
 	a := e.takeAlerts()
-	if len(a) != 1 || !strings.Contains(a[0], "FT thesis library: Thesis library vs repo looks down") || !strings.Contains(a[0], "AAA") {
+	if len(a) != 1 || !strings.Contains(a[0], "FT thesis library: Thesis ingest failures looks down") || !strings.Contains(a[0], "AAA_v1_locked.md") {
 		t.Fatalf("alerts after the break: %q", a)
 	}
-	st, _, d := e.lastRun()
-	if st != "mismatch" || !strings.Contains(d, `"type":"archived"`) || !strings.Contains(d, `"type":"file_invalid"`) {
-		t.Fatalf("run: %s %s", st, d)
+	if st, n, d := e.lastRun(); st != "ok" || n != 0 {
+		t.Fatalf("reconcile should not repeat the header fault: %s %d %s", st, n, d)
 	}
+	e.want("AAA", 1, "archived")
 	// Same fault on the next syncs: deduped, no second message.
 	for i := 0; i < 2; i++ {
 		if err := e.sync(); err != nil {
@@ -148,7 +149,9 @@ func TestReconcile_FileNotIndexedWhenUpsertFails(t *testing.T) {
 	if st != "mismatch" || !strings.Contains(d, `"type":"file_not_indexed"`) || !strings.Contains(d, "EEE") {
 		t.Fatalf("run: %s %s", st, d)
 	}
-	if a := e.takeAlerts(); len(a) != 1 || !strings.Contains(a[0], "EEE") {
+	// Two real faults, two messages: the file is not indexed, and the ingest failed with a database error.
+	a := e.takeAlerts()
+	if len(a) != 2 || !strings.Contains(strings.Join(a, "\n"), "Thesis library vs repo") || !strings.Contains(strings.Join(a, "\n"), "Thesis ingest failures") {
 		t.Fatalf("alerts: %q", a)
 	}
 }
