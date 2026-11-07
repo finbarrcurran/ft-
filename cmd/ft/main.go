@@ -484,6 +484,18 @@ func runServe() {
 	// publishing the updated calendar (~3-4 hrs after the actual release).
 	go func() {
 		earningsSvc := refresh.New(st)
+		// SC-56 P4 — fetch faults alert within the hour, through the same sender as the other monitors
+		// (FT_TELEGRAM_*: the chat ft-bot uses, @FinsFTAlerts_bot).
+		earningsSvc.Alerts = &monitor.Monitor{DB: st.DB, Checks: monitor.CalendarChecks(st.DB), Notify: &monitor.Telegram{}}
+		// SC-56 P4 — daily digest of report-date changes for owned and watchlist tickers, 07:30 UTC; silent
+		// when nothing changed, at most one per UTC day.
+		scheduleAt(bgCtx, 7, 30, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, time.Minute)
+			defer cancel()
+			if _, err := monitor.CalendarDigest(ctx, st.DB, &monitor.Telegram{}, time.Now()); err != nil {
+				slog.Warn("calendar: daily digest", "err", err)
+			}
+		})
 		// SC-56 — first pass shortly after boot, so a deploy backfills the whole set without waiting an hour.
 		select {
 		case <-bgCtx.Done():

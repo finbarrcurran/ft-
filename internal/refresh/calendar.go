@@ -158,6 +158,9 @@ func (s *Service) finishCalendar(ctx context.Context, sum CalendarSummary) {
 	}
 	slog.Info("calendar refresh complete", "total", sum.Total, "fetched", sum.Fetched, "failed", len(sum.Failed),
 		"not_updated", len(sum.NotUpdated), "states", sum.String())
+	if s.Alerts != nil {
+		s.Alerts.Tick(ctx)
+	}
 }
 
 // RefreshEarningsOnly is the hourly job entry point (name kept from v1.9.0). userID is unused: the set is

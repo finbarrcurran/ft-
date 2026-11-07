@@ -15,6 +15,7 @@ import (
 
 	"ft/internal/domain"
 	"ft/internal/market"
+	"ft/internal/monitor"
 	"ft/internal/store"
 )
 
@@ -416,5 +417,46 @@ func TestCalendar_P2_ReportedHistoryBackfillForThesisTickers(t *testing.T) {
 	c := e.want("CEG", store.CalDateKnown, "2026-11-09") // the primary date stands
 	if c.Source != "yahoo_calendar" || c.LastReportedDate == nil || *c.LastReportedDate != "2026-08-05" {
 		t.Fatalf("CEG: %+v", c)
+	}
+}
+
+type memNotifier struct{ msgs []string }
+
+func (m *memNotifier) Send(_ context.Context, text string) error {
+	m.msgs = append(m.msgs, text)
+	return nil
+}
+
+// SC-56 P4 end to end: the hourly job ticks the report-dates check; an injected 404 gives one alert and,
+// once cleared, one recovery message; a clean day gives none.
+func TestCalendar_P4_InjectedFetchErrorAlertsOnceThenRecovers(t *testing.T) {
+	e := newEnv(t)
+	n := &memNotifier{}
+	e.svc.Alerts = &monitor.Monitor{DB: e.st.DB, Checks: monitor.CalendarChecks(e.st.DB), Notify: n, Now: func() time.Time { return e.now }}
+	e.holding("AVGO")
+	e.watch("CEG")
+	e.src.events = map[string]any{"AVGO": "calendar_AVGO.json", "CEG": "calendar_CEG.json"}
+	for i := 0; i < 3; i++ { // clean hours
+		e.run()
+		e.now = e.now.Add(time.Hour)
+	}
+	if len(n.msgs) != 0 {
+		t.Fatalf("clean day alerted: %q", n.msgs)
+	}
+	e.src.events["CEG"] = nil // Yahoo now answers 404 for CEG
+	e.run()
+	if len(n.msgs) != 1 || !strings.Contains(n.msgs[0], "CEG") || !strings.Contains(n.msgs[0], "404") {
+		t.Fatalf("after the 404: %q", n.msgs)
+	}
+	e.now = e.now.Add(time.Hour)
+	e.run() // still failing, same day: no repeat
+	if len(n.msgs) != 1 {
+		t.Fatalf("repeat alert: %q", n.msgs)
+	}
+	e.src.events["CEG"] = "calendar_CEG.json"
+	e.now = e.now.Add(time.Hour)
+	e.run()
+	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1], "is back") {
+		t.Fatalf("recovery: %q", n.msgs)
 	}
 }

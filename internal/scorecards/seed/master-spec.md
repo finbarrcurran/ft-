@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.104.0 · 2026-11-07** — latest change: Report dates for every ticker, rolled forward, with visible state (§13).
+> **Current version: v1.105.0 · 2026-11-07** — latest change: Report-date alerts and daily digest (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.104.0 2026-11-07 -->
+<!-- reference_reviewed: v1.105.0 2026-11-07 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -119,6 +119,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0066 | `thesis_reconcile` | SC-55 P2 — `thesis_reconcile_runs`: one row per repo-vs-database reconciliation (after every sync and nightly; latest 90 kept; `detail` is a JSON list of issues) |
 | 0067 | `thesis_ingest_health` | SC-55 P4 — `thesis_ingest_failures` (one row per repo file that could not be ingested; `resolved_at` set when it parses again or is gone) and `thesis_sync_state` (one row: consecutive failed sync passes, last error, last ok) |
 | 0068 | `ticker_calendar` | SC-56 — `ticker_calendar` (next report date, estimate flag, status, source, fetched-at, error, last reported date, ex-dividend), `ticker_symbol_map` (BESI→BESI.AS, BYD→1211.HK), `ticker_calendar_na` (GLD, SLV, WBA, DJTWW); seeded from `stock_holdings.earnings_date` |
+| 0069 | `ticker_calendar_digest` | SC-56 P4 — `ticker_calendar_digest_sent` (one row per UTC day the date-change digest went out) |
 | 0063 | `crypto_index_members` | Jordi-46 Phase 1 — the 46 constituents of the Visser-Labs tokenized index (list_version 2026-09-21; 42 tokens with CoinGecko ids, 4 stocks COIN/HOOD/CRCL/FIGR; 10 verticals; soft `removed_at`); reference only, read by the screener and the list endpoint and by nothing else (no alert, gap-report, entry-zone, watchlist, holdings or thesis code) |
 | 0062 | `video_frame_reads` | SC-54 — `video_frame_reads` (what the vision model read off each chart frame: series, visible values, confidence, model, date; re-reads add rows) and `video_frame_runs` (one row per pass: status, reason, frames, calls, reads, cost) |
 | 0061 | `video_items` | SC-53 — `video_item_runs` (one per digest: model, chunks, tokens, cost, gate counts, status) and `video_items` (block, fields, cited span, gate class + issues, chart-unverified numbers, ticker resolution, direction verdict/speaker view/reason) |
@@ -139,7 +140,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 |-----|----------|------|
 | Live refresh | `FT_REFRESH_INTERVAL` (default 15m), plus once ~5 s after boot | FX → stocks → crypto → heatmap. Provider chain: Finnhub → TwelveData → Yahoo |
 | eToro sync + holdings reconcile | every 30 min, around the clock; first run ~1 min after boot | SC-42: one portfolio call to eToro's Public API → lot history + effective SL/TP. SC-44: then diffs against FT holdings — matched values update silently, adds/removes queue for approval |
-| Report-date refresh | hourly, first pass 2 min after boot; 3-minute budget | SC-56: for every active stock holding, stock-watchlist row and live thesis (about 63 tickers) asks Yahoo `calendarEvents` (symbol via `ticker_symbol_map`; `ticker_calendar_na` tickers are not asked) and stores the result in `ticker_calendar`. A passed date becomes `last_reported_date` / `REPORTED`; the next date is then read from Yahoo's earnings calendar page, at most daily per ticker and 8 pages per run, labelled an estimate. An answer without a date never clears a stored future date; a failed fetch keeps it and sets `FETCH_ERROR`. Logs each failure and counts by state. `ft calendar-refresh`, `ft calendar-report` |
+| Report-date refresh | hourly, first pass 2 min after boot; 3-minute budget | SC-56: for every active stock holding, stock-watchlist row and live thesis (about 63 tickers) asks Yahoo `calendarEvents` (symbol via `ticker_symbol_map`; `ticker_calendar_na` tickers are not asked) and stores the result in `ticker_calendar`. A passed date becomes `last_reported_date` / `REPORTED`; the next date is then read from Yahoo's earnings calendar page, at most daily per ticker and 8 pages per run, labelled an estimate. An answer without a date never clears a stored future date; a failed fetch keeps it and sets `FETCH_ERROR`. Logs each failure and counts by state, then ticks the `report_dates` check. `ft calendar-refresh`, `ft calendar-report` |
 | Thesis Library sync | `FT_THESIS_SYNC_EVERY` (default 5m) | `git fetch` + `reset --hard origin/main`, then re-index of `cross_sector_research`; no-op without `FT_GITHUB_TOKEN`. **Never deletes** (SC-55): a row whose file is gone or no longer parses is archived; supersede is recomputed every pass; a missing `theses/` directory aborts the pass with no change |
 | Thesis reconciliation | 02:40 UTC (and after every sync) | SC-55: repo files vs `theses_index`, clone vs `origin/main`; `thesis_reconcile_runs`; `thesis_reconcile` monitor check |
 | Session GC | hourly | Purges expired sessions |
@@ -230,10 +231,10 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 **Per-holding theses (Spec 14):** `GET/PUT /api/holdings/{kind}/{id}/thesis`, `GET .../thesis/versions`, `PUT .../thesis/status`, `POST .../thesis/preview`
 
 **Stock Thesis Library (Spec 15, SC-38):** `GET /api/theses{,/gaps,/health,/{id},/{id}/revision-prompt}`, `POST /api/theses/{upload,scoring-log,sync}`, `GET /api/calibration/theses`. GitHub repo `finbarrcurran/cross_sector_research` is the source of truth; FT keeps a clone at `/var/lib/ft/research/`.
-  **Thesis lifecycle (SC-55, v1.100.0):** status is `locked`, `draft`, `superseded` or `archived`. Per ticker every non-archived version below the highest is `superseded`, recomputed each sync (removing v2 returns v1 to live); the highest keeps its status. A row whose file is gone is archived (`file_missing`), one whose header no longer parses likewise (`header_invalid`); it keeps its markdown and SHA and is restored when a valid file returns. Nothing deletes from `theses_index` (a trigger enforces it; admin path in migration 0065), and a missing `theses/` directory aborts the pass with no change. The Theses tab, `get_theses` and the score overlay show only `locked`/`draft` rows; the gap report counts a ticker as covered only with a `locked` row and gives gaps an optional `reason` (`archived`, `no_live_thesis`, `file_not_indexed` = a valid file in the repo with no row, shown under "Not indexed").
-  **Reconciliation (SC-55, v1.101.0):** after every sync and nightly (02:40 UTC, which also checks the clone is not behind `origin/main`) the repo's files are compared with `theses_index` and stored in `thesis_reconcile_runs` (ok / mismatch / aborted). Safety stop: a pass that would archive more than 2 rows (or 5% from 20 rows up) archives nothing and records `aborted`. The monitor check `thesis_reconcile` (domain "thesis library", also in Diagnostics) sends one Telegram message when a run is not clean, a daily reminder and a recovery message; a clean run sends nothing. The engine ticks it right after each sync.
-  **Loud ingest failures (SC-55, v1.103.0):** a locked file that cannot be ingested (bad header, duplicate ticker+version, unreadable, database error) is recorded in `thesis_ingest_failures` and shown in a red box on the Theses tab until it parses or is gone (`GET /api/theses/health`); monitor check `thesis_ingest` alerts once, `thesis_sync` alerts after 6 failed sync passes in a row (`thesis_sync_state`). A header fault is reported once, by the ingest check. An upload whose follow-up sync failed says so (`syncError`). `thesis_token` (main monitor only) alerts when `FT_GITHUB_TOKEN` is missing while the clone directory exists; a rejected token (HTTP 401/403 on fetch) is an ordinary failed pass and counts toward the six (`GIT_TERMINAL_PROMPT=0`, so it fails at once).
-  **Report dates (SC-56, v1.104.0):** `earnings_urgency` comes from `ticker_calendar`: `revision_needed` when the LAST REPORTED date is later than the thesis lock (a re-lock clears it; it survives the next date rolling forward and beats red/amber), else `red`/`amber` from the next date (≤3 / ≤14 days). `/api/theses` rows gain optional `earningsStatus`, `earningsIsEstimate`, `earningsSource`, `earningsFetchedAt`, `lastReportedDate`, `earningsNote`; holdings and watchlist rows gain a `calendar` object. A past date is never shown as next: the UI shows "reported <date>", "est" for estimates, "n/a", "not announced", ⚠ for a fetch error, with source and fetch time on hover. Statuses: `DATE_KNOWN`, `DATE_ESTIMATED`, `REPORTED`, `NOT_ANNOUNCED`, `NOT_APPLICABLE`, `FETCH_ERROR`.
+  **Thesis lifecycle (SC-55, v1.100.0):** status is `locked`, `draft`, `superseded` or `archived`. Per ticker every non-archived version below the highest is `superseded`, recomputed each sync (removing v2 restores v1). A row whose file is gone, or whose header no longer parses, is archived (`file_missing` / `header_invalid`), keeps its markdown and SHA, and is restored when a valid file returns. Nothing deletes from `theses_index` (a DB trigger enforces it); a missing `theses/` directory aborts the pass. The Theses tab, `get_theses` and the score overlay show only `locked`/`draft` rows; the gap report counts a ticker as covered only with a `locked` row and gives gaps an optional `reason` (`archived`, `no_live_thesis`, `file_not_indexed` = a valid file in the repo with no row).
+  **Reconciliation (SC-55, v1.101.0):** after every sync and nightly (02:40 UTC, which also checks the clone is not behind `origin/main`) the repo's files are compared with `theses_index` into `thesis_reconcile_runs`. Safety stop: a pass that would archive over 2 rows (5% from 20 rows up) archives nothing. Monitor check `thesis_reconcile` (domain "thesis library", also in Diagnostics): one Telegram message when a run is not clean, a daily reminder, a recovery message; silent when clean.
+  **Loud ingest failures (SC-55, v1.103.0):** a locked file that cannot be ingested (bad header, duplicate ticker+version, unreadable, database error) is recorded in `thesis_ingest_failures` and shown in a red box on the Theses tab until it parses or is gone (`GET /api/theses/health`); monitor check `thesis_ingest` alerts once, `thesis_sync` alerts after 6 failed sync passes in a row (`thesis_sync_state`). A header fault is reported once, by the ingest check. An upload whose follow-up sync failed says so (`syncError`). `thesis_token` alerts when `FT_GITHUB_TOKEN` is missing while the clone exists; a rejected token (401/403) is a failed pass and counts toward the six.
+  **Report dates (SC-56, v1.104.0):** `earnings_urgency` comes from `ticker_calendar`: `revision_needed` when the LAST REPORTED date is later than the thesis lock (a re-lock clears it; it survives the next date rolling forward and beats red/amber), else `red`/`amber` from the next date (≤3 / ≤14 days). `/api/theses` rows gain optional `earningsStatus`, `earningsIsEstimate`, `earningsSource`, `earningsFetchedAt`, `lastReportedDate`, `earningsNote`; holdings and watchlist rows gain a `calendar` object. A past date is never shown as next: the UI shows "reported <date>", "est", "n/a", "not announced" or ⚠, with source and fetch time on hover. **Alerts (v1.105.0):** monitor check `report_dates` (domain "report dates") flags holdings/watchlist stocks with a 404 or 3+ consecutive failed fetches, no row, or a past date shown as next (one message, daily reminder, recovery); a 07:30 UTC digest lists the last 24 h's date changes for owned and watchlist tickers (one a day at most, silent when none).
 
 **Crypto Indicators (9e):** `GET /api/crypto-indicators{,/composite/latest,/composite/history,/btc-history,/etf-flow/history,/ism}`, `POST /api/crypto-indicators/{refresh,backfill,ism}`
 
@@ -405,13 +406,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.105.0 · 2026-11-07 · pass 120 · SC-56 P4
+
+**Report-date alerts and daily digest.** A fetch fault (404 at once, other errors after 3 hourly runs), a missing date or a past date shown as next raises one Telegram message through the monitor (daily reminder, recovery message, silent when clean). A 07:30 UTC digest lists date changes for owned and watchlist tickers, at most one a day. Same sender and chat as SC-55 (@FinsFTAlerts_bot). Behaviour: monitor, Telegram. Migration: 0069. Reference updated: §3, §4, §5. Supersedes v1.104.0.
+
 ### v1.104.0 · 2026-11-07 · pass 119 · SC-56 P1-P3
 
 **Report dates for every ticker, rolled forward, with visible state.** The hourly job now covers holdings, watchlist and live theses (about 63 tickers) into a new `ticker_calendar`; passed dates become "reported" and the next date is found at a second Yahoo source; an answer without a date never clears one; states, source and fetch time show on the Theses tab, holdings and a new watchlist column. `revision_needed` now reads the last reported date. Behaviour: job, API fields (additive), UI. Migration: 0068. Reference updated: §3, §4, §5, §8. Supersedes v1.103.0.
 
 ### v1.103.1 · 2026-11-07 · pass 118 · SC-55
 
-**Missing-token alert; rejected token counts as a failed pass.** New monitor check `thesis_token` alerts when `FT_GITHUB_TOKEN` is absent on a server that has the thesis clone (silent in dev and demo, silent with a token; daily reminder, recovery message). An expired or revoked token (401/403) already fails the sync pass and counts toward the six; the fetch now fails at once instead of waiting for a credential prompt. Behaviour: monitor. Migrations: none. Reference updated: §5. Supersedes v1.103.0.
+**Missing-token alert; rejected token counts as a failed pass.** Monitor check `thesis_token` alerts when `FT_GITHUB_TOKEN` is absent on a server with the thesis clone (silent in dev and demo). An expired token (401/403) already fails the sync pass and counts toward the six; the fetch now fails at once. Behaviour: monitor. Migrations: none. Reference updated: §5. Supersedes v1.103.0.
+
+
 
 ### v1.103.0 · 2026-11-07 · pass 118 · SC-55 P4
 
@@ -423,12 +430,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Gap report flags locked files that are not indexed.** `/api/theses/gaps` and `get_gap_report` now also list tickers whose valid locked file is in the repo but has no row (reason `file_not_indexed`), alongside the P1 reasons `archived` and `no_live_thesis`; the Theses tab shows them under "Not indexed". Today's output is unchanged. Behaviour: gap report, Theses tab, MCP tool text. Migrations: none. Reference updated: §5. Supersedes v1.101.0.
 
 
-
 ### v1.101.0 · 2026-11-07 · pass 116 · SC-55 P2
 
 **Thesis reconciliation, safety stop and alert.** After every sync and nightly (02:40 UTC) FT compares the repo's locked files with `theses_index` and stores the result; a sync that would archive more than 2 rows (or 5% from 20 rows up) archives nothing and alerts. A non-clean run sends one Telegram message through the connectivity monitor (reminder daily, recovery message, silent when green). Restore-verify now compares restored thesis counts with live. Behaviour: sync, monitor, restore script. Migration: 0066. Reference updated: §3, §4, §5. Supersedes v1.100.0.
-
-
 
 
 ### v1.100.0 · 2026-11-07 · pass 115 · SC-55 P1
@@ -436,16 +440,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Locked theses are never deleted.** The thesis sync archives instead of deleting (file gone → `file_missing`, header unreadable → `header_invalid`) and restores when the file returns; supersede is recomputed each pass so removing v2 brings v1 back; a missing `theses/` directory aborts with no change; a DB trigger blocks `DELETE FROM theses_index`. Gap report counts only `locked` rows and adds an optional `reason`. Behaviour: sync, gaps (today's output unchanged). Migration: 0065. Reference updated: §3, §4, §5. Supersedes v1.99.4.
 
 
-
-
-
 ### v1.99.4 · 2026-11-03 · pass 114 · Demo mode
 
 **Demo mode and exports, watchlist, note targets.** In demo mode the xlsx and CSV exports answer 403, `/api/watchlist` and `/api/notes/resolve` answer an empty list; route-level checks, internal callers unaffected; export buttons hidden. Demo off unchanged. Behaviour: four endpoints, UI. Migrations: none. Reference updated: §5. Supersedes v1.99.3.
-
-
-
-
 
 
 ### v1.99.3 · 2026-11-03 · pass 113 · Demo mode
@@ -453,38 +450,13 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Stock screener demo-mode flags.** `/api/screener` no longer reads holdings or the watchlist when demo mode is on (all rows held:false, onWatchlist:false); demo off is unchanged. Behaviour: one endpoint. Migrations: none. Reference updated: §5. Supersedes v1.99.2.
 
 
-
-
-
-
-
 ### v1.99.2 · 2026-11-03 · pass 112 · Demo mode
 
 **Crypto screener demo-mode flags.** `/api/crypto-screener` no longer reads holdings or the watchlist when demo mode is on: all rows carry held:false and onWatchlist:false; demo off is unchanged. Other endpoints with the same pattern are reported, not fixed. Behaviour: one endpoint. Migrations: none. Reference updated: §5. Supersedes v1.99.1.
-
-
-
-
-
-
-
-
-### v1.99.1 · 2026-11-02 · pass 111 · Jordi-46
-
-**Index stock exchanges and a screener pill fix.** Migration 0064 records COIN and HOOD (Nasdaq) and CRCL (NYSE), checked against Finnhub and Yahoo; the V46 pill moves into the crypto screener; §8 states the Demo plan's 100 calls/min per the pricing page. Behaviour: Screener tab, data rows. Migrations: 0064. Reference updated: §5, §8. Supersedes v1.99.0.
-
-
-
-
-
-
-
-
-
 
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.104.0 -->
+<!-- END FT-master-spec v1.105.0 -->

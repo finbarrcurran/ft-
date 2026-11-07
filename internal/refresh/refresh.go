@@ -9,6 +9,7 @@ import (
 	"ft/internal/heatmap"
 	"ft/internal/market"
 	"ft/internal/marketdata"
+	"ft/internal/monitor"
 	"ft/internal/store"
 	"log/slog"
 	"strconv"
@@ -37,6 +38,8 @@ type Service struct {
 	Calendar    CalendarSource
 	Now         func() time.Time
 	CalendarGap time.Duration
+	// Alerts, when set, is ticked after each calendar pass so a fetch fault alerts within the hour (SC-56 P4).
+	Alerts *monitor.Monitor
 
 	hmMu sync.Mutex
 	hm   map[string]*hmState // per exchange: heatmap refresh bookkeeping
