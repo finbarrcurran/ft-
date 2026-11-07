@@ -12497,8 +12497,9 @@ async function renderTheses() {
   const gapList = (gaps.gaps || []);
   const ownedGaps = gapList.filter(g => g.kind === 'holding');
   const watchGaps = gapList.filter(g => g.kind === 'watchlist');
+  const otherGaps = gapList.filter(g => g.kind !== 'holding' && g.kind !== 'watchlist'); // SC-55 P3: file in repo, not indexed, ticker neither held nor watched
   // SC-55: a gap can mean "thesis archived" (file gone or unreadable) or "no live thesis"; plain gaps have no reason.
-  const gapReasonLabel = { archived: 'thesis archived (file missing or unreadable)', no_live_thesis: 'no live thesis (only superseded versions)' };
+  const gapReasonLabel = { archived: 'thesis archived (file missing or unreadable)', no_live_thesis: 'no live thesis (only superseded versions)', file_not_indexed: 'locked file is in the repo but not indexed' };
   const renderGapPill = (g, klass) => `
     <span class="gap-pill ${klass}" title="${escapeHTML(g.name)}${g.sector ? ' · ' + escapeHTML(g.sector) : ''}${g.reason ? ' · ' + escapeHTML(gapReasonLabel[g.reason] || g.reason) : ''}">
       ${escapeHTML(g.ticker)}${g.reason ? ' ⚠' : ''}
@@ -12523,7 +12524,14 @@ async function renderTheses() {
         ${watchGaps.length === 0
           ? `<div class="gap-empty-sub">✓ All watchlist stocks have a thesis on file.</div>`
           : `<div class="gap-pills">${watchGaps.map(g => renderGapPill(g, 'watch')).join('')}</div>`}
-      </div>`;
+      </div>${otherGaps.length === 0 ? '' : `
+      <div class="gap-section">
+        <div class="gap-section-title">
+          <span class="gap-section-label watch">Not indexed</span>
+          <span class="dim">${otherGaps.length} locked file${otherGaps.length === 1 ? '' : 's'} in the repo without a row</span>
+        </div>
+        <div class="gap-pills">${otherGaps.map(g => renderGapPill(g, 'watch')).join('')}</div>
+      </div>`}`;
 
   // Group sorted theses by ownership (owned > watchlist > other).
   const owned     = theses.filter(t => t.ownership === 'owned');
@@ -12606,7 +12614,7 @@ async function renderTheses() {
 
       <!-- Gap report -->
       <div class="thesis-gaps">
-        <div class="gap-title">Coverage gaps <span class="dim">— ${gapList.length} stock${gapList.length === 1 ? '' : 's'} without a thesis</span></div>
+        <div class="gap-title">Coverage gaps <span class="dim">— ${ownedGaps.length + watchGaps.length} stock${ownedGaps.length + watchGaps.length === 1 ? '' : 's'} without a thesis</span></div>
         ${gapHTML}
       </div>
 

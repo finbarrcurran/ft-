@@ -268,3 +268,78 @@ func TestReconcile_ShaAndPathMismatch(t *testing.T) {
 		t.Fatalf("alerts: %q", a)
 	}
 }
+
+func TestGaps_FileNotIndexedFlag(t *testing.T) {
+	e := newEnv(t)
+	seed(e)
+	// A valid file is in the repo but its row is gone (admin delete): the nightly run flags it.
+	if _, err := e.db.Exec(`INSERT INTO thesis_delete_unlock (reason, created_at) VALUES ('test', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(`DELETE FROM theses_index WHERE ticker = 'CCC'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(`DELETE FROM thesis_delete_unlock`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(`INSERT INTO watchlist (user_id, ticker, kind, company_name, added_at, updated_at) VALUES (1, 'BBB', 'stock', 'Bee Inc', 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.eng.ReconcileNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	gaps, err := e.eng.Gaps(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]GapRow{}
+	for _, g := range gaps {
+		got[g.Ticker] = g
+	}
+	if g, ok := got["CCC"]; !ok || g.Reason != GapFileNotIndexed || g.Kind != "other" {
+		t.Fatalf("CCC gap = %+v (present %v), want reason file_not_indexed kind other", g, ok)
+	}
+	for _, covered := range []string{"AAA", "BBB"} {
+		if _, ok := got[covered]; ok {
+			t.Fatalf("%s is covered but listed: %+v", covered, got[covered])
+		}
+	}
+	// A held or watched ticker keeps its own kind.
+	if _, err := e.db.Exec(`INSERT INTO thesis_delete_unlock (reason, created_at) VALUES ('test', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(`DELETE FROM theses_index WHERE ticker = 'BBB'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(`DELETE FROM thesis_delete_unlock`); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.eng.ReconcileNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	gaps, _ = e.eng.Gaps(context.Background())
+	found := false
+	for _, g := range gaps {
+		if g.Ticker == "BBB" {
+			found = true
+			// BBB is on the watchlist and has no row at all now: the plain gap (no reason) takes precedence
+			// over the file flag, and keeps kind=watchlist.
+			if g.Kind != "watchlist" {
+				t.Fatalf("BBB kind %q", g.Kind)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("BBB missing from gaps")
+	}
+	// Once the sync re-indexes the files the flag disappears.
+	if err := e.sync(); err != nil {
+		t.Fatal(err)
+	}
+	gaps, _ = e.eng.Gaps(context.Background())
+	for _, g := range gaps {
+		if g.Ticker == "CCC" || g.Ticker == "BBB" {
+			t.Fatalf("%s still a gap after re-index: %+v", g.Ticker, g)
+		}
+	}
+}
