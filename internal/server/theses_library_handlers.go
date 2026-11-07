@@ -35,6 +35,12 @@ func (s *Server) handleListTheses(w http.ResponseWriter, r *http.Request) {
 		mapStoreError(w, err)
 		return
 	}
+	if s.demoModeOn(r.Context()) {
+		// Demo mode: the research library is not portfolio data, but the owned/watchlist tag is.
+		for i := range rows {
+			rows[i].Ownership = "other"
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"theses":     rows,
 		"configured": s.theses.Configured(),

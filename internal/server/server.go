@@ -327,7 +327,7 @@ func (s *Server) routes() {
 
 	// Spec 15: Thesis Library (GitHub-backed).
 	s.mux.HandleFunc("GET /api/theses", s.requireUser(s.handleListTheses))
-	s.mux.HandleFunc("GET /api/theses/gaps", s.requireUser(s.handleThesesGaps))
+	s.mux.HandleFunc("GET /api/theses/gaps", s.requireUser(s.emptyInDemo(s.handleThesesGaps, map[string]any{"gaps": []any{}})))
 	s.mux.HandleFunc("GET /api/theses/{id}", s.requireUser(s.handleGetThesisLibrary))
 	s.mux.HandleFunc("POST /api/theses/upload", s.requireUser(s.handleUploadThesis))
 	s.mux.HandleFunc("POST /api/theses/scoring-log", s.requireUser(s.handleUploadScoringLog))
