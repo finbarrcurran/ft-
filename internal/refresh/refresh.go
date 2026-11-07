@@ -38,6 +38,9 @@ type Service struct {
 	Calendar    CalendarSource
 	Now         func() time.Time
 	CalendarGap time.Duration
+	// SecondPerRun overrides the per-run cap on second-source page fetches (0 = secondPerRun). The manual
+	// backfill after a deploy raises it (ft calendar-refresh --second-per-run).
+	SecondPerRun int
 	// Alerts, when set, is ticked after each calendar pass so a fetch fault alerts within the hour (SC-56 P4).
 	Alerts *monitor.Monitor
 

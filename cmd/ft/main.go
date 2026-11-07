@@ -206,6 +206,7 @@ func runDaily(args []string) {
 // runCalendarRefresh runs one SC-56 report-date pass (the hourly job's body) and prints the summary.
 func runCalendarRefresh(args []string) {
 	fs := flag.NewFlagSet("calendar-refresh", flag.ExitOnError)
+	pages := fs.Int("second-per-run", 0, "cap on second-source page fetches this run (default 8; the post-deploy backfill uses ~40)")
 	_ = fs.Parse(args)
 	cfg, err := config.Load()
 	must("load config", err)
@@ -215,7 +216,9 @@ func runCalendarRefresh(args []string) {
 	must("migrate", st.Migrate())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	sum := refresh.New(st).RefreshCalendar(ctx)
+	svc := refresh.New(st)
+	svc.SecondPerRun = *pages
+	sum := svc.RefreshCalendar(ctx)
 	fmt.Printf("calendar: %d tickers, %d answered by the provider, %d failed, %d not reached; states: %s\n",
 		sum.Total, sum.Fetched, len(sum.Failed), len(sum.NotUpdated), sum.String())
 	for _, f := range sum.Failed {
@@ -296,7 +299,7 @@ USAGE
   ft token list [--user-id N]                  list service tokens (no plaintext)
   ft backfill-bars [--user-id N] [--range 2y]  fetch 2y daily OHLC for all holdings (Spec 9c)
   ft perf-derive [--user-id N]                 derive closed_trades + regen snapshots (Spec 9d)
-  ft calendar-refresh                          SC-56: one report-date pass over every holding, watchlist row and live thesis
+  ft calendar-refresh [--second-per-run N]     SC-56: one report-date pass over every holding, watchlist row and live thesis
   ft calendar-report                           SC-56: print the report-date state of every ticker (reads the store only)
   ft sector-backfill [--months 14]             one-off Spec 9f 14-month ETF snapshot backfill
   ft sector-ingest                             one Spec 9f daily sector ingest (manual trigger)

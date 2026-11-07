@@ -460,3 +460,35 @@ func TestCalendar_P4_InjectedFetchErrorAlertsOnceThenRecovers(t *testing.T) {
 		t.Fatalf("recovery: %q", n.msgs)
 	}
 }
+
+// History lookups (last reported date) may never crowd out the lookups that find a missing next date.
+func TestCalendar_BudgetKeepsRoomForNextDateLookups(t *testing.T) {
+	e := newEnv(t)
+	// 6 thesis tickers with a future date but unknown history (history lookups) ...
+	for i := 0; i < 6; i++ {
+		tk := string(rune('A'+i)) + "HH"
+		e.holding(tk)
+		e.thesis(tk, "2026-05-28")
+		e.src.events[tk] = "calendar_CEG.json"
+		e.src.pages[tk] = rows("r:2026-08-05")
+	}
+	// ... and 6 tickers whose date has passed (next-date lookups).
+	for i := 0; i < 6; i++ {
+		tk := string(rune('A'+i)) + "PP"
+		e.holding(tk)
+		e.src.events[tk] = "calendar_BE.json"
+		e.src.pages[tk] = rows("2027-02-01")
+	}
+	e.run()
+	hist, next := 0, 0
+	for _, s := range e.src.pgCalls {
+		if strings.HasSuffix(s, "HH") {
+			hist++
+		} else {
+			next++
+		}
+	}
+	if next != 6 || hist != secondPerRun-6 || hist > historyPerRun {
+		t.Fatalf("page fetches: next-date %d (want 6), history %d (want %d: what is left of %d), cap %d", next, hist, secondPerRun-6, secondPerRun, historyPerRun)
+	}
+}

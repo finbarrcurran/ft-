@@ -38,7 +38,12 @@ func (yahooCalendarSource) EarningsPage(ctx context.Context, symbol string) ([]m
 var errSecondBudget = errors.New("second-source budget for this run is used")
 
 // secondPerRun caps second-source page fetches per hourly run; the rest wait for the next run.
-const secondPerRun = 8
+// At most historyPerRun of them may be spent on "last reported date" history, so the lookups that find a
+// missing or passed NEXT date always come first.
+const (
+	secondPerRun  = 8
+	historyPerRun = 3
+)
 
 const (
 	sourceCalendar = "yahoo_calendar"
@@ -85,7 +90,12 @@ func (s *Service) RefreshCalendar(ctx context.Context) CalendarSummary {
 		gap = 250 * time.Millisecond
 	}
 	sum := CalendarSummary{ByState: map[string]int{}}
-	secondUsed := 0
+	secondUsed, historyUsed := 0, 0
+	secondCap := secondPerRun
+	if s.SecondPerRun > 0 {
+		secondCap = s.SecondPerRun
+	}
+	var needHistory []store.CalendarTicker
 	set, err := s.Store.CalendarTickerSet(ctx)
 	if err != nil {
 		slog.Error("calendar: ticker set", "err", err)
@@ -130,7 +140,7 @@ func (s *Service) RefreshCalendar(ctx context.Context) CalendarSummary {
 			time.Sleep(gap)
 		}
 		c := applyCalendar(prev[ct.Ticker], ct, ev, evErr, func() ([]market.EarningsRow, error) {
-			if secondUsed >= secondPerRun {
+			if secondUsed >= secondCap {
 				return nil, errSecondBudget
 			}
 			secondUsed++
@@ -147,9 +157,56 @@ func (s *Service) RefreshCalendar(ctx context.Context) CalendarSummary {
 			slog.Warn("calendar: fetch failed", "ticker", ct.Ticker, "symbol", ct.ProviderSymbol, "err", c.LastError, "consecutive", c.ErrorCount)
 		}
 		sum.ByState[c.Status]++
+		if ct.Thesis && c.LastReportedDate == nil && (c.Status == store.CalDateKnown || c.Status == store.CalDateEstimated) &&
+			(c.SecondCheckedAt == nil || t.Sub(time.Unix(*c.SecondCheckedAt, 0)) >= secondEvery) {
+			needHistory = append(needHistory, ct)
+		}
+	}
+
+	// Phase 2 — history. The calendar only names the NEXT date; for a thesis ticker whose last report is
+	// unknown, read the earnings page once for its reported rows (revision_needed depends on them). It runs
+	// after every next-date lookup and only with what is left of the per-run budget, at most historyPerRun.
+	for _, ct := range needHistory {
+		if secondUsed >= secondCap || historyUsed >= historyPerRun || ctx.Err() != nil {
+			break
+		}
+		cur, err := s.Store.GetTickerCalendar(ctx, ct.Ticker)
+		if err != nil || cur == nil {
+			continue
+		}
+		secondUsed++
+		historyUsed++
+		rows, perr := src.EarningsPage(ctx, ct.ProviderSymbol)
+		time.Sleep(gap)
+		t := now().UTC()
+		applyHistory(cur, rows, perr, t)
+		if err := s.Store.SaveTickerCalendar(ctx, cur); err != nil {
+			slog.Error("calendar: save history", "ticker", ct.Ticker, "err", err)
+		}
 	}
 	s.finishCalendar(ctx, sum)
 	return sum
+}
+
+// applyHistory records the most recent reported date found on the earnings page. A failed read is retried
+// in two hours; the next date already stored is never touched.
+func applyHistory(c *store.TickerCalendar, rows []market.EarningsRow, err error, now time.Time) {
+	unix := now.Unix()
+	c.UpdatedAt = unix
+	if err != nil {
+		retry := unix - int64(secondEvery/time.Second) + int64(secondRetry/time.Second)
+		c.SecondCheckedAt = &retry
+		slog.Warn("calendar: history lookup failed", "ticker", c.Ticker, "err", err)
+		return
+	}
+	chk := unix
+	c.SecondCheckedAt = &chk
+	for _, r := range rows {
+		if r.Reported && (c.LastReportedDate == nil || r.Date > *c.LastReportedDate) {
+			d := r.Date
+			c.LastReportedDate = &d
+		}
+	}
 }
 
 func (s *Service) finishCalendar(ctx context.Context, sum CalendarSummary) {
@@ -292,11 +349,6 @@ func applyCalendar(prev *store.TickerCalendar, ct store.CalendarTicker, ev *mark
 	switch {
 	case future != "":
 		setNext(future, ev.IsEstimate, sourceCalendar)
-		// The calendar only names the next date. For a thesis ticker whose last report is unknown, read the
-		// page once (budgeted) for the reported rows: revision_needed depends on them. Its next date is ignored.
-		if c.LastReportedDate == nil && ct.Thesis {
-			_, _ = trySecond()
-		}
 
 	case past != "":
 		// Yahoo is still returning the date that has passed: remember it as reported, look for the next one.
