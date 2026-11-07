@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -68,6 +69,49 @@ func thesisIngestEval(db *sql.DB) func(ctx context.Context, now time.Time) (bool
 		}
 		return true, now, true, fmt.Sprintf("%d file(s) cannot be ingested: %s%s", n, strings.Join(items, " | "), more), nil
 	}
+}
+
+// Seams for the token check (tests replace them). Defaults mirror internal/config: the token comes from
+// FT_GITHUB_TOKEN and the clone lives in FT_THESIS_REPO_DIR (default /var/lib/ft/research).
+var (
+	thesisTokenPresent = func() bool { return os.Getenv("FT_GITHUB_TOKEN") != "" }
+	thesisRepoDir      = func() string {
+		if d := os.Getenv("FT_THESIS_REPO_DIR"); d != "" {
+			return d
+		}
+		return "/var/lib/ft/research"
+	}
+)
+
+// thesisTokenMissing reports whether this server is meant to sync the Thesis Library but cannot: the token
+// is absent while the clone directory exists (so it has been set up here). With no clone directory (dev, demo
+// copies) or with a token it is false. Without a token the engine is not configured and Sync is a silent
+// no-op, which is exactly the fault this catches. An expired or invalid token is different: the sync runs
+// and fails, and the consecutive-failure count below catches it.
+func thesisTokenMissing() (bool, string) {
+	if thesisTokenPresent() {
+		return false, ""
+	}
+	dir := thesisRepoDir()
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return false, ""
+	}
+	return true, dir
+}
+
+// ThesisTokenCheck goes down when FT_GITHUB_TOKEN is absent on a server that has the clone (SC-55 Task A).
+// It is a separate source from thesis_sync (failed passes) because it reads the process environment: it
+// belongs in the main monitor only. The per-sync monitor inside the Thesis engine must not carry it, or the two
+// would write the same state row and flap; and when the token is missing there is no engine to tick it.
+func ThesisTokenCheck() Check {
+	return Check{Source: "thesis_token", Label: "Thesis library sync", Domain: thesisDomain, MaxAge: 36 * time.Hour,
+		Eval: func(ctx context.Context, now time.Time) (bool, time.Time, bool, string, error) {
+			if missing, dir := thesisTokenMissing(); missing {
+				return true, now, true, "thesis sync is NOT running because FT_GITHUB_TOKEN is missing on this server " +
+					"(the clone at " + dir + " exists, so it is meant to sync): no new or edited thesis is being picked up", nil
+			}
+			return false, now, true, "token present, or no clone on this server", nil
+		}}
 }
 
 func thesisSyncEval(db *sql.DB) func(ctx context.Context, now time.Time) (bool, time.Time, bool, string, error) {

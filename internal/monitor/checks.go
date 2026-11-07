@@ -129,6 +129,7 @@ func DefaultChecks(db *sql.DB) []Check {
 	}
 	checks = append(checks, indicatorChecksFor(db)...)
 	checks = append(checks, ThesisChecks(db)...)
+	checks = append(checks, ThesisTokenCheck())
 	return append(checks, marketFeedChecks(db)...)
 }
 

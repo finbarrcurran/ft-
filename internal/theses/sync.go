@@ -317,6 +317,8 @@ func (e *Engine) gitFetchReset(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "git", "-C", e.RepoDir,
 		"-c", "http.https://github.com/.extraheader=Authorization: Basic "+basicAuth(bearer),
 		"fetch", "origin", "main")
+	// A rejected token (401/403) must fail the pass, never wait for a credential prompt.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git fetch: %s: %w", scrub(string(out), e.GitHubToken), err)
 	}

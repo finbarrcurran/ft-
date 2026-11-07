@@ -3,6 +3,8 @@ package theses
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -154,5 +156,66 @@ func TestUpload_SyncFailureIsInTheResponse(t *testing.T) {
 	// a bad header is refused up front, with the parser's message
 	if _, err := e.eng.Upload(context.Background(), UploadOpts{ThesisFilename: "bad.md", ThesisContent: []byte("nope")}); err == nil || !strings.Contains(err.Error(), "invalid thesis MD") {
 		t.Fatalf("bad header upload: %v", err)
+	}
+}
+
+// SC-55 Task A — an expired or revoked GitHub token (HTTP 401/403 on fetch) is a failed sync pass and
+// counts toward the six that raise the alert. The remote is a local HTTP server that answers like GitHub does.
+func TestHealth_RejectedTokenCountsTowardTheAlert(t *testing.T) {
+	for _, code := range []int{401, 403} {
+		code := code
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			t.Setenv("GIT_TERMINAL_PROMPT", "0")
+			e := newEnv(t)
+			seed(e)
+			e.takeAlerts()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="GitHub"`)
+				http.Error(w, "remote: Invalid username or token. Password authentication is not supported for Git operations.", code)
+			}))
+			defer srv.Close()
+			git(t, e.eng.RepoDir, "remote", "set-url", "origin", srv.URL+"/finbarrcurran/cross_sector_research.git")
+			e.eng.GitHubToken = "ghp_SECRET_TOKEN_VALUE"
+			for i := 1; i <= 5; i++ {
+				if err := e.sync(); err == nil {
+					t.Fatalf("pass %d unexpectedly succeeded against a %d", i, code)
+				}
+				if len(e.alerts) != 0 {
+					t.Fatalf("alert after only %d rejected pass(es): %q", i, e.alerts)
+				}
+			}
+			err := e.sync()
+			if err == nil {
+				t.Fatal("sixth pass succeeded")
+			}
+			if strings.Contains(err.Error(), "ghp_SECRET_TOKEN_VALUE") {
+				t.Fatalf("token leaked into the error: %v", err)
+			}
+			a := e.takeAlerts()
+			if len(a) != 1 || !strings.Contains(a[0], "Thesis library sync looks down") || !strings.Contains(a[0], "6 consecutive failed syncs") {
+				t.Fatalf("alerts after six %d answers: %q", code, a)
+			}
+			for i := 0; i < 3; i++ {
+				_ = e.sync()
+			}
+			if len(e.alerts) != 0 {
+				t.Fatalf("repeat alerts: %q", e.alerts)
+			}
+			h, _ := e.eng.Health(context.Background())
+			if h.Sync.ConsecutiveFailures != 9 || h.Sync.LastError == "" || strings.Contains(h.Sync.LastError, "ghp_SECRET") {
+				t.Fatalf("sync state: %+v", h.Sync)
+			}
+			// data untouched; a fresh valid token (remote back) recovers with one message
+			for _, tk := range []string{"AAA", "BBB", "CCC"} {
+				e.want(tk, 1, "locked")
+			}
+			git(t, e.eng.RepoDir, "remote", "set-url", "origin", e.origin)
+			if err := e.sync(); err != nil {
+				t.Fatal(err)
+			}
+			if a := e.takeAlerts(); len(a) != 1 || !strings.Contains(a[0], "is back") {
+				t.Fatalf("recovery: %q", a)
+			}
+		})
 	}
 }
