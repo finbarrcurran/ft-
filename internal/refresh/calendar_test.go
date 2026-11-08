@@ -599,3 +599,82 @@ func TestCalendar_FollowUpB_SecondSourceFailuresAreStoredCountedAndClear(t *test
 		t.Fatalf("a successful read did not clear the failure: %+v / %+v", sum.SecondFailed, e.cal("LLY"))
 	}
 }
+
+// A last-reported date is only ever replaced by a NEWER one, whichever path finds the older date:
+// the quote endpoint, the earnings-page history, the page read for a next date, and Yahoo still returning a
+// passed date.
+func TestCalendar_LastReportedNeverReplacedByAnOlderDate(t *testing.T) {
+	const stored = "2026-08-05"
+	seed := func(e *env, tk string) {
+		now := e.now.Unix()
+		old := now - 400*86400 // old enough that the quote path is allowed to ask
+		if _, err := e.st.DB.Exec(`INSERT OR REPLACE INTO ticker_calendar (ticker, earnings_status, last_reported_date, quote_checked_at, updated_at) VALUES (?, 'DATE_KNOWN', ?, ?, ?)`, tk, stored, old, now-10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lr := func(e *env, tk string) string {
+		c := e.cal(tk)
+		if c.LastReportedDate == nil {
+			return ""
+		}
+		return *c.LastReportedDate
+	}
+	// 1. quote path (stored date is stale enough to be asked, quote only knows older dates)
+	e := newEnv(t)
+	e.holding("QQ")
+	e.now = time.Date(2027, 6, 1, 10, 0, 0, 0, time.UTC) // stored date is now 300 days old: stale
+	seed(e, "QQ")
+	e.src.events = map[string]any{"QQ": &market.CalendarEvents{Symbol: "QQ", EarningsDates: []string{"2027-08-01"}}}
+	e.src.quotes = map[string][]string{"QQ": {"2026-03-01", "2026-06-30"}}
+	e.run()
+	if len(e.src.qCalls) != 1 || lr(e, "QQ") != stored {
+		t.Fatalf("quote path: asked %v, last reported %q (want %s kept)", e.src.qCalls, lr(e, "QQ"), stored)
+	}
+	// 2. page-history path
+	e = newEnv(t)
+	e.holding("PH")
+	e.thesis("PH", "2026-05-28")
+	seed(e, "PH")
+	e.src.events = map[string]any{"PH": "calendar_CEG.json"}
+	e.src.pages["PH"] = rows("2026-11-09", "r:2026-07-01", "r:2026-04-01")
+	e.src.quotes = map[string][]string{}
+	e.run()
+	if lr(e, "PH") != stored {
+		t.Fatalf("history path: last reported %q, want %s kept", lr(e, "PH"), stored)
+	}
+	// 3. Yahoo still returns an OLDER passed date than the stored last reported date
+	e = newEnv(t)
+	e.holding("OP")
+	seed(e, "OP")
+	e.src.events = map[string]any{"OP": &market.CalendarEvents{Symbol: "OP", EarningsDates: []string{"2026-02-01"}}}
+	e.src.pages["OP"] = rows("2027-02-01", "r:2026-01-01")
+	e.run()
+	if lr(e, "OP") != stored {
+		t.Fatalf("passed-date path: last reported %q, want %s kept", lr(e, "OP"), stored)
+	}
+	// 4. and a NEWER date does replace it (so the guard is not simply "never change")
+	e = newEnv(t)
+	e.holding("NW")
+	seed(e, "NW")
+	e.src.events = map[string]any{"NW": &market.CalendarEvents{Symbol: "NW", EarningsDates: []string{"2026-10-01"}}}
+	e.src.pages["NW"] = rows("2027-02-01")
+	e.run()
+	if lr(e, "NW") != "2026-10-01" {
+		t.Fatalf("newer date not recorded: %q", lr(e, "NW"))
+	}
+}
+
+// applyHistory itself must never move the last-reported date backwards (defensive: the caller only asks
+// when the date is unknown, but the same page can already have set a newer one in the same run).
+func TestApplyHistory_NeverMovesLastReportedBackwards(t *testing.T) {
+	newer := "2026-08-05"
+	c := &store.TickerCalendar{Ticker: "X", LastReportedDate: &newer}
+	applyHistory(c, rows("r:2026-07-01", "r:2025-07-01", "2027-02-01"), nil, testNow)
+	if c.LastReportedDate == nil || *c.LastReportedDate != "2026-08-05" {
+		t.Fatalf("moved backwards: %v", c.LastReportedDate)
+	}
+	applyHistory(c, rows("r:2026-10-01"), nil, testNow)
+	if *c.LastReportedDate != "2026-10-01" {
+		t.Fatalf("did not advance: %v", *c.LastReportedDate)
+	}
+}

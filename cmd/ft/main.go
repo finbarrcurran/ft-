@@ -499,6 +499,15 @@ func runServe() {
 				slog.Warn("calendar: daily digest", "err", err)
 			}
 		})
+		// SC-56b — one daily summary of held theses to re-score (replaces the per-holding bot nudges); silent when
+		// there are none, at most one per UTC day.
+		scheduleAt(bgCtx, 7, 35, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, time.Minute)
+			defer cancel()
+			if _, err := monitor.RevisionSummary(ctx, st.DB, &monitor.Telegram{}, time.Now()); err != nil {
+				slog.Warn("thesis revision summary", "err", err)
+			}
+		})
 		// SC-56 — first pass shortly after boot, so a deploy backfills the whole set without waiting an hour.
 		select {
 		case <-bgCtx.Done():
