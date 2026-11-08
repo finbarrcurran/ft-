@@ -101,3 +101,17 @@ func TestParseEarningsPage_GenericLayoutIsAnErrorNotAnEmptyAnswer(t *testing.T) 
 		t.Fatalf("no table: %v", err)
 	}
 }
+
+func TestParseQuoteEarnings(t *testing.T) {
+	raw := []byte(`{"quoteResponse":{"result":[{"symbol":"SU.PA","earningsTimestamp":1785405600,"earningsTimestampStart":1785405600,"earningsTimestampEnd":1803000000}],"error":null}}`)
+	got, err := ParseQuoteEarnings("SU.PA", raw)
+	if err != nil || len(got) != 2 || got[0] != "2026-07-30" || got[1] != "2027-02-19" {
+		t.Fatalf("got %v err %v", got, err)
+	}
+	if _, err := ParseQuoteEarnings("X", []byte(`{"quoteResponse":{"result":[]}}`)); !errors.Is(err, ErrNoCalendar) {
+		t.Fatalf("empty result: %v", err)
+	}
+	if got, err := ParseQuoteEarnings("X", []byte(`{"quoteResponse":{"result":[{"symbol":"X"}]}}`)); err != nil || len(got) != 0 {
+		t.Fatalf("no timestamps: %v %v", got, err)
+	}
+}

@@ -28,6 +28,9 @@ type fakeSource struct {
 	events   map[string]any // string = fixture file, error = failure, *market.CalendarEvents = literal
 	pages    map[string][]market.EarningsRow
 	pageErr  map[string]error
+	quotes   map[string][]string // QuoteDates answers
+	quoteErr map[string]error
+	qCalls   []string
 	evCalls  []string
 	pgCalls  []string
 	fixtures string
@@ -62,6 +65,16 @@ func (f *fakeSource) EarningsPage(_ context.Context, symbol string) ([]market.Ea
 		return nil, err
 	}
 	return f.pages[symbol], nil
+}
+
+func (f *fakeSource) QuoteDates(_ context.Context, symbol string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.qCalls = append(f.qCalls, symbol)
+	if err := f.quoteErr[symbol]; err != nil {
+		return nil, err
+	}
+	return f.quotes[symbol], nil
 }
 
 func (f *fakeSource) pageCallsFor(sym string) int {
@@ -490,5 +503,99 @@ func TestCalendar_BudgetKeepsRoomForNextDateLookups(t *testing.T) {
 	}
 	if next != 6 || hist != secondPerRun-6 || hist > historyPerRun {
 		t.Fatalf("page fetches: next-date %d (want 6), history %d (want %d: what is left of %d), cap %d", next, hist, secondPerRun-6, secondPerRun, historyPerRun)
+	}
+}
+
+// SC-56 follow-up A: a stale or missing last-reported date is backfilled from the quote endpoint's
+// timestamps (only dates that have passed), at most daily per ticker, and never goes backwards.
+func TestCalendar_FollowUpA_LastReportedBackfilledFromQuote(t *testing.T) {
+	e := newEnv(t)
+	e.holding("SU.PA")
+	e.thesis("SU.PA", "2026-05-28")
+	e.src.events = map[string]any{"SU.PA": "calendar_SU.PA.json"}
+	e.src.pages["SU.PA"] = rows("2027-02-18", "r:2020-07-28") // the page's only reported row is six years old
+	e.src.quotes = map[string][]string{"SU.PA": {"2026-07-30", "2027-02-18"}}
+	e.run()
+	c := e.cal("SU.PA")
+	if c.LastReportedDate == nil || *c.LastReportedDate != "2026-07-30" {
+		t.Fatalf("last reported not backfilled: %+v", c)
+	}
+	if c.EarningsDate == nil || *c.EarningsDate != "2027-02-18" {
+		t.Fatalf("the next date must not be touched by the quote: %+v", c)
+	}
+	// asked once; a second run within a day does not ask again
+	e.now = e.now.Add(time.Hour)
+	e.run()
+	if n := len(e.src.qCalls); n != 1 {
+		t.Fatalf("quote asked %d times in a day", n)
+	}
+	// a fresh last-reported date is never looked up
+	e2 := newEnv(t)
+	e2.holding("CEG")
+	e2.thesis("CEG", "2026-05-28")
+	e2.src.events = map[string]any{"CEG": "calendar_CEG.json"}
+	e2.src.pages["CEG"] = rows("2026-11-09", "r:2026-08-05")
+	e2.src.quotes = map[string][]string{"CEG": {"2026-08-04"}}
+	e2.run()
+	e2.now = e2.now.Add(25 * time.Hour)
+	e2.run()
+	if c := e2.cal("CEG"); c.LastReportedDate == nil || *c.LastReportedDate != "2026-08-05" {
+		t.Fatalf("a fresher stored date was replaced: %+v", c)
+	}
+	if len(e2.src.qCalls) != 0 {
+		t.Fatalf("asked the quote for a fresh ticker: %v", e2.src.qCalls)
+	}
+}
+
+func TestCalendar_FollowUpA_FutureQuoteDatesIgnoredFailureRetriedInTwoHours(t *testing.T) {
+	e := newEnv(t)
+	e.holding("RR.L")
+	e.src.events = map[string]any{"RR.L": "calendar_CEG.json"}
+	e.src.quotes = map[string][]string{"RR.L": {"2026-11-20", "2027-02-25"}} // only future dates
+	e.src.quoteErr = map[string]error{"RR.L": errors.New("quote http 500")}
+	e.run()
+	if c := e.cal("RR.L"); c.LastReportedDate != nil {
+		t.Fatalf("set from a failed quote: %+v", c)
+	}
+	e.now = e.now.Add(90 * time.Minute)
+	e.run()
+	if len(e.src.qCalls) != 1 {
+		t.Fatalf("retried too early: %v", e.src.qCalls)
+	}
+	delete(e.src.quoteErr, "RR.L")
+	e.now = e.now.Add(90 * time.Minute) // 3 h after the failure: retried
+	e.run()
+	if len(e.src.qCalls) != 2 {
+		t.Fatalf("not retried after two hours: %v", e.src.qCalls)
+	}
+	if c := e.cal("RR.L"); c.LastReportedDate != nil {
+		t.Fatalf("a future quote date became the last reported date: %+v", c)
+	}
+}
+
+// SC-56 follow-up B: every second-source failure is stored per ticker, counted in the run summary and
+// logged; a success clears it.
+func TestCalendar_FollowUpB_SecondSourceFailuresAreStoredCountedAndClear(t *testing.T) {
+	e := newEnv(t)
+	e.holding("LLY") // Yahoo still returns the passed date, so the page is needed for the next one
+	e.src.events = map[string]any{"LLY": "calendar_LLY.json"}
+	e.src.pageErr["LLY"] = market.ErrEarningsPageLayout
+	sum := e.run()
+	if len(sum.SecondFailed) != 1 || !strings.Contains(sum.SecondFailed[0], "LLY") {
+		t.Fatalf("summary does not carry the second-source failure: %+v", sum.SecondFailed)
+	}
+	if c := e.cal("LLY"); c.SecondErrorCount != 1 || !strings.Contains(c.SecondError, "Earnings Date") {
+		t.Fatalf("failure not stored: %+v", c)
+	}
+	e.now = e.now.Add(3 * time.Hour) // past the two-hour retry
+	if sum := e.run(); len(sum.SecondFailed) != 1 || e.cal("LLY").SecondErrorCount != 2 {
+		t.Fatalf("second consecutive failure not counted: %+v / %+v", sum.SecondFailed, e.cal("LLY"))
+	}
+	delete(e.src.pageErr, "LLY")
+	e.src.pages["LLY"] = rows("2027-02-03")
+	e.now = e.now.Add(3 * time.Hour)
+	sum = e.run()
+	if len(sum.SecondFailed) != 0 || e.cal("LLY").SecondErrorCount != 0 || e.cal("LLY").SecondError != "" {
+		t.Fatalf("a successful read did not clear the failure: %+v / %+v", sum.SecondFailed, e.cal("LLY"))
 	}
 }

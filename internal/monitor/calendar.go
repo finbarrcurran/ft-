@@ -28,6 +28,58 @@ func CalendarChecks(db *sql.DB) []Check {
 	return []Check{
 		{Source: "report_dates", Label: "Report dates", Domain: calendarDomain,
 			MaxAge: 36 * time.Hour, Eval: calendarEval(db)},
+		{Source: "report_dates_second", Label: "Report dates: second source", Domain: calendarDomain,
+			MaxAge: 36 * time.Hour, Eval: calendarSecondEval(db)},
+	}
+}
+
+// A single page can fail once for a network reason; a Yahoo layout change fails every lookup. The check goes
+// down when at least this many tickers have failed the second source at least this many times in a row.
+const (
+	calendarSecondTickers = 3
+	calendarSecondRuns    = 2
+)
+
+func calendarSecondEval(db *sql.DB) func(ctx context.Context, now time.Time) (bool, time.Time, bool, string, error) {
+	return func(ctx context.Context, now time.Time) (bool, time.Time, bool, string, error) {
+		rows, err := db.QueryContext(ctx, `
+			SELECT ticker, COALESCE(second_error, ''), second_error_count
+			  FROM ticker_calendar
+			 WHERE second_error_count >= ?
+			 ORDER BY second_error_count DESC, ticker`, calendarSecondRuns)
+		if err != nil {
+			return false, time.Time{}, false, "", err
+		}
+		defer rows.Close()
+		var items []string
+		lastErr := ""
+		for rows.Next() {
+			var tk, e string
+			var n int
+			if err := rows.Scan(&tk, &e, &n); err != nil {
+				return false, time.Time{}, false, "", err
+			}
+			items = append(items, fmt.Sprintf("%s x%d", tk, n))
+			if lastErr == "" {
+				lastErr = e
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return false, time.Time{}, false, "", err
+		}
+		if len(items) < calendarSecondTickers {
+			return false, now, true, "second source (earnings page) answering", nil
+		}
+		if len(lastErr) > 110 {
+			lastErr = lastErr[:110] + "…"
+		}
+		total, more := len(items), ""
+		if total > 8 {
+			more = fmt.Sprintf(" +%d more", total-8)
+			items = items[:8]
+		}
+		return true, now, true, fmt.Sprintf("the Yahoo earnings page failed for %d tickers in a row (%s%s); next dates after a report may be missing; Yahoo may have changed the page. Last error: %s",
+			total, strings.Join(items, ", "), more, lastErr), nil
 	}
 }
 

@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -40,8 +41,23 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	// SC-47 — connectivity monitor: live freshness per external source, recent
 	// transitions, and whether Telegram delivery is configured.
 	mon := &monitor.Monitor{DB: s.store.DB, Checks: monitor.DefaultChecks(s.store.DB)}
-	out["monitor"] = mon.Snapshot(r.Context())
-	out["monitorEvents"] = recentMonitorEvents(r.Context(), s.store.DB)
+	snap := mon.Snapshot(r.Context())
+	events := recentMonitorEvents(r.Context(), s.store.DB)
+	if s.demoModeOn(r.Context()) {
+		// SC-56: the report-date checks name real holdings and watchlist tickers in their detail text.
+		for i := range snap {
+			if strings.HasPrefix(snap[i].Source, "report_dates") && snap[i].Detail != "" {
+				snap[i].Detail = "(hidden in demo mode)"
+			}
+		}
+		for _, e := range events {
+			if src, _ := e["source"].(string); strings.HasPrefix(src, "report_dates") {
+				e["detail"] = "(hidden in demo mode)"
+			}
+		}
+	}
+	out["monitor"] = snap
+	out["monitorEvents"] = events
 	out["monitorAlertsConfigured"] = os.Getenv("FT_TELEGRAM_BOT_TOKEN") != "" && os.Getenv("FT_TELEGRAM_CHAT_ID") != ""
 
 	if s.oauth != nil {

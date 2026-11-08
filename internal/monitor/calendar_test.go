@@ -222,3 +222,46 @@ func TestCalendarDigest_OncePerDay_SilentWhenNothingChanged(t *testing.T) {
 		t.Fatal("digest repeated the old changes the next day")
 	}
 }
+
+// SC-56 follow-up B: a Yahoo page change fails the second source for many tickers at once; one or two
+// failures (a bad hour) stay silent.
+func TestReportDatesSecondSourceCheck_SilentForBlips_AlertsOnceForALayoutChange_Recovers(t *testing.T) {
+	e := newCalEnv(t)
+	for _, tk := range []string{"AAA", "BBB", "CCC", "DDD"} {
+		e.holding(tk)
+		e.row(tk, "REPORTED", "", 0, false, "")
+	}
+	fail := func(tk string, n int) {
+		e.exec(`UPDATE ticker_calendar SET second_error = 'earnings page: expected table with an ''Earnings Date'' column not found', second_error_count = ?, updated_at = ? WHERE ticker = ?`, n, e.now.Unix(), tk)
+	}
+	touch := func() { e.exec(`UPDATE ticker_calendar SET updated_at = ?`, e.now.Unix()) }
+	// two tickers failing repeatedly, one failing once: a blip
+	fail("AAA", 3)
+	fail("BBB", 2)
+	fail("CCC", 1)
+	// the state check itself is quiet here (REPORTED is a state, not a fault), so any message is the new check
+	if m := e.tick(); len(m) != 0 {
+		t.Fatalf("blip alerted: %q", m)
+	}
+	// the third ticker reaches two failures in a row: layout change
+	e.now = e.now.Add(time.Hour)
+	touch()
+	fail("CCC", 2)
+	m := e.tick()
+	if len(m) != 1 || !strings.Contains(m[0], "Report dates: second source looks down") || !strings.Contains(m[0], "AAA x3") || !strings.Contains(m[0], "earnings page") {
+		t.Fatalf("layout-change alert: %q", m)
+	}
+	// still failing: no repeat the same day
+	e.now = e.now.Add(time.Hour)
+	touch()
+	if m := e.tick(); len(m) != 0 {
+		t.Fatalf("repeat: %q", m)
+	}
+	// Yahoo answers again: one recovery message
+	e.now = e.now.Add(time.Hour)
+	e.exec(`UPDATE ticker_calendar SET second_error = NULL, second_error_count = 0, updated_at = ?`, e.now.Unix())
+	m = e.tick()
+	if len(m) != 1 || !strings.Contains(m[0], "is back") {
+		t.Fatalf("recovery: %q", m)
+	}
+}

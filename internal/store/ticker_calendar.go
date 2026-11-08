@@ -35,6 +35,9 @@ type TickerCalendar struct {
 	ExDividendDate   *string `json:"exDividendDate,omitempty"`
 	NotApplicableWhy string  `json:"notApplicableReason,omitempty"`
 	SecondCheckedAt  *int64  `json:"-"`
+	SecondError      string  `json:"-"` // SC-56 follow-up: last second-source failure for this ticker
+	SecondErrorCount int     `json:"-"` // consecutive second-source failures
+	QuoteCheckedAt   *int64  `json:"-"` // last time the quote endpoint was asked for the last reported date
 	PrevEarningsDate *string `json:"-"`
 	DateChangedAt    *int64  `json:"-"`
 	UpdatedAt        int64   `json:"-"`
@@ -53,15 +56,15 @@ type CalendarTicker struct {
 const calCols = `ticker, COALESCE(provider_symbol,''), earnings_date, earnings_is_estimate, earnings_status,
 	COALESCE(earnings_source,''), earnings_fetched_at, COALESCE(last_error,''), error_count, error_permanent,
 	last_reported_date, ex_dividend_date, COALESCE(not_applicable_reason,''), second_checked_at,
-	prev_earnings_date, date_changed_at, updated_at`
+	prev_earnings_date, date_changed_at, updated_at, COALESCE(second_error,''), second_error_count, quote_checked_at`
 
 func scanCal(sc interface{ Scan(...any) error }) (*TickerCalendar, error) {
 	var c TickerCalendar
 	var ed, lr, xd, prev sql.NullString
-	var fetched, second, changed sql.NullInt64
+	var fetched, second, changed, quoteAt sql.NullInt64
 	var est, perm int
 	if err := sc.Scan(&c.Ticker, &c.ProviderSymbol, &ed, &est, &c.Status, &c.Source, &fetched, &c.LastError,
-		&c.ErrorCount, &perm, &lr, &xd, &c.NotApplicableWhy, &second, &prev, &changed, &c.UpdatedAt); err != nil {
+		&c.ErrorCount, &perm, &lr, &xd, &c.NotApplicableWhy, &second, &prev, &changed, &c.UpdatedAt, &c.SecondError, &c.SecondErrorCount, &quoteAt); err != nil {
 		return nil, err
 	}
 	c.IsEstimate, c.ErrorPermanent = est != 0, perm != 0
@@ -85,6 +88,9 @@ func scanCal(sc interface{ Scan(...any) error }) (*TickerCalendar, error) {
 	}
 	if changed.Valid {
 		c.DateChangedAt = &changed.Int64
+	}
+	if quoteAt.Valid {
+		c.QuoteCheckedAt = &quoteAt.Int64
 	}
 	return &c, nil
 }
@@ -163,8 +169,9 @@ func (s *Store) SaveTickerCalendar(ctx context.Context, c *TickerCalendar) error
 	_, err := s.DB.ExecContext(ctx, `
 		INSERT INTO ticker_calendar (ticker, provider_symbol, earnings_date, earnings_is_estimate, earnings_status,
 		    earnings_source, earnings_fetched_at, last_error, error_count, error_permanent, last_reported_date,
-		    ex_dividend_date, not_applicable_reason, second_checked_at, prev_earnings_date, date_changed_at, updated_at)
-		VALUES (?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
+		    ex_dividend_date, not_applicable_reason, second_checked_at, prev_earnings_date, date_changed_at, updated_at,
+		    second_error, second_error_count, quote_checked_at)
+		VALUES (?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
 		ON CONFLICT (ticker) DO UPDATE SET
 		    provider_symbol = excluded.provider_symbol, earnings_date = excluded.earnings_date,
 		    earnings_is_estimate = excluded.earnings_is_estimate, earnings_status = excluded.earnings_status,
@@ -173,10 +180,11 @@ func (s *Store) SaveTickerCalendar(ctx context.Context, c *TickerCalendar) error
 		    last_reported_date = excluded.last_reported_date, ex_dividend_date = excluded.ex_dividend_date,
 		    not_applicable_reason = excluded.not_applicable_reason, second_checked_at = excluded.second_checked_at,
 		    prev_earnings_date = excluded.prev_earnings_date, date_changed_at = excluded.date_changed_at,
-		    updated_at = excluded.updated_at`,
+		    updated_at = excluded.updated_at, second_error = excluded.second_error,
+		    second_error_count = excluded.second_error_count, quote_checked_at = excluded.quote_checked_at`,
 		c.Ticker, c.ProviderSymbol, c.EarningsDate, b2i(c.IsEstimate), c.Status, c.Source, c.FetchedAt, c.LastError,
 		c.ErrorCount, b2i(c.ErrorPermanent), c.LastReportedDate, c.ExDividendDate, c.NotApplicableWhy,
-		c.SecondCheckedAt, c.PrevEarningsDate, c.DateChangedAt, c.UpdatedAt)
+		c.SecondCheckedAt, c.PrevEarningsDate, c.DateChangedAt, c.UpdatedAt, c.SecondError, c.SecondErrorCount, c.QuoteCheckedAt)
 	return err
 }
 

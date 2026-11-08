@@ -236,3 +236,59 @@ func FetchYahooEarningsPage(ctx context.Context, symbol string) ([]EarningsRow, 
 	}
 	return nil, lastErr
 }
+
+// ParseQuoteEarnings reads a v7/finance/quote answer and returns the earnings timestamps it carries as ISO
+// UTC dates (earningsTimestamp, earningsTimestampStart, earningsTimestampEnd), oldest first, de-duplicated.
+// The caller decides which of them have passed. An answer with no result is ErrNoCalendar.
+func ParseQuoteEarnings(symbol string, raw []byte) ([]string, error) {
+	var env struct {
+		QuoteResponse struct {
+			Result []struct {
+				Symbol    string `json:"symbol"`
+				Timestamp int64  `json:"earningsTimestamp"`
+				Start     int64  `json:"earningsTimestampStart"`
+				End       int64  `json:"earningsTimestampEnd"`
+			} `json:"result"`
+		} `json:"quoteResponse"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("quote %s: %w", symbol, err)
+	}
+	if len(env.QuoteResponse.Result) == 0 {
+		return nil, ErrNoCalendar
+	}
+	r := env.QuoteResponse.Result[0]
+	seen := map[string]bool{}
+	var out []string
+	for _, ts := range []int64{r.Timestamp, r.Start, r.End} {
+		if ts <= 0 {
+			continue
+		}
+		d := time.Unix(ts, 0).UTC().Format("2006-01-02")
+		if !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	sortStrings(out)
+	return out, nil
+}
+
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
+}
+
+// FetchYahooQuoteEarnings asks v7/finance/quote for a symbol's earnings timestamps. It is used only to learn
+// the LAST REPORTED date for tickers whose earnings page has no recent reported row.
+func FetchYahooQuoteEarnings(ctx context.Context, symbol string) ([]string, error) {
+	u := fmt.Sprintf("https://query1.finance.yahoo.com/v7/finance/quote?symbols=%s", url.QueryEscape(symbol))
+	raw, err := yahoo.yahooGet(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	return ParseQuoteEarnings(symbol, raw)
+}

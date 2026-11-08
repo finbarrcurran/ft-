@@ -75,6 +75,9 @@ func maskThesisRowForDemo(r *theses.Row) {
 	r.Ownership = "other"
 	r.NextEarningsDate = nil
 	r.EarningsUrgency = "none"
+	// SC-56 calendar fields: same rule (the reported date is what makes a held thesis "revision_needed").
+	r.EarningsStatus, r.EarningsIsEstimate, r.EarningsSource, r.EarningsFetchedAt = "", false, "", nil
+	r.LastReportedDate, r.EarningsNote = nil, ""
 }
 
 // GET /api/theses/gaps
