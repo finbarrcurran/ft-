@@ -38,6 +38,8 @@ type Service struct {
 	Calendar    CalendarSource
 	Now         func() time.Time
 	CalendarGap time.Duration
+	// SC-57 market stats: nil = Yahoo.
+	MarketStats MarketStatsSource
 	// SecondPerRun overrides the per-run cap on second-source page fetches (0 = secondPerRun). The manual
 	// backfill after a deploy raises it (ft calendar-refresh --second-per-run).
 	SecondPerRun int

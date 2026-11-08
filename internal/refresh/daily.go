@@ -235,6 +235,11 @@ func (s *Service) RunDailyJob(ctx context.Context, userID int64, days int) *Dail
 		}
 	}
 
+	// SC-57 — 52-week range, all-time high and market cap for the stock-watchlist rows.
+	if ms := s.RefreshMarketStats(ctx); ms.Failed > 0 {
+		r.Errors = append(r.Errors, fmt.Sprintf("market stats: %d of %d tickers failed", ms.Failed, ms.Total))
+	}
+
 	// ---- Prune ----
 	if n, err := s.Store.PrunePriceHistory(ctx, days+5); err == nil {
 		r.PrunedRows = n
