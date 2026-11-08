@@ -230,8 +230,9 @@ func (s *Server) handleBotAlerts(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				trigger := "earnings has passed since the thesis was locked — re-score recommended"
-				if t.NextEarningsDate != nil && t.LockedDate != nil {
-					trigger = "earnings " + *t.NextEarningsDate + " ≥ thesis lock " + *t.LockedDate + " — re-score recommended"
+				// SC-56: the trigger is the LAST REPORTED date; the next date may already have rolled forward.
+				if t.LastReportedDate != nil && t.LockedDate != nil {
+					trigger = "earnings reported " + *t.LastReportedDate + " after thesis lock " + *t.LockedDate + " — re-score recommended"
 				}
 				out = append(out, alertOut{
 					HoldingKind:  "stock",

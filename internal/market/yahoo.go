@@ -145,7 +145,7 @@ func (y *yahooClient) yahooGet(ctx context.Context, baseURL string) (json.RawMes
 		if res.StatusCode == 429 || res.StatusCode == 503 {
 			res.Body.Close()
 			if attempt == maxAttempts-1 {
-				return nil, fmt.Errorf("yahoo http %d after %d attempts (rate-limited)", res.StatusCode, maxAttempts)
+				return nil, &HTTPError{Status: res.StatusCode, Msg: fmt.Sprintf("yahoo http %d after %d attempts (rate-limited)", res.StatusCode, maxAttempts)}
 			}
 			jitter := time.Duration(time.Now().UnixNano()/1e6%250) * time.Millisecond
 			backoff := time.Duration(500*(1<<attempt))*time.Millisecond + jitter
@@ -161,7 +161,7 @@ func (y *yahooClient) yahooGet(ctx context.Context, baseURL string) (json.RawMes
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
 		body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
-		return nil, fmt.Errorf("http %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &HTTPError{Status: res.StatusCode, Msg: fmt.Sprintf("http %d: %s", res.StatusCode, strings.TrimSpace(string(body)))}
 	}
 	return io.ReadAll(io.LimitReader(res.Body, 1<<20))
 }

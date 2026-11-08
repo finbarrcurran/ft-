@@ -53,6 +53,7 @@ type stockResp struct {
 	SuggestedTPPct  float64                  `json:"suggestedTpPct"`   // positive; from risk_rules.go
 	Score           *scoreSummary            `json:"score,omitempty"`  // Spec 4 D7
 	Market          *marketdata.MarketStatus `json:"market,omitempty"` // Spec 5 D3
+	Calendar        *domain.CalendarInfo     `json:"calendar,omitempty"` // SC-56 report-date state and provenance
 }
 
 type cryptoResp struct {
@@ -90,6 +91,7 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 	// ticker (case-insensitive). Thesis wins over manual framework_scores
 	// when both exist.
 	thesisByTicker, _ := s.store.ThesisScoresByTicker(r.Context(), tickers)
+	calByTicker := s.store.CalendarInfoMap(r.Context()) // SC-56
 	now := time.Now().UTC()
 	margin := s.currentAlertMargin(r.Context()) // Spec 9b D6 — regime-scaled
 
@@ -144,6 +146,7 @@ func (s *Server) handleListStocks(w http.ResponseWriter, r *http.Request) {
 			SuggestedTPPct:  tpPct,
 			Score:           score,
 			Market:          marketPtr,
+			Calendar:        calByTicker[tkr],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"holdings": out})

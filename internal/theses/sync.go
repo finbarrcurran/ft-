@@ -433,24 +433,23 @@ func (e *Engine) archiveMissing(ctx context.Context, pass *syncPass) error {
 	return nil
 }
 
-// refreshEarningsUrgency joins to stock_holdings.earnings_date and computes
-// the urgency band per Spec 15 Phase 2:
+// refreshEarningsUrgency joins to ticker_calendar (SC-56; every live thesis ticker has a row once the
+// calendar job has run) and computes the urgency band:
 //
-//	none             — no upcoming earnings within 14 days
-//	amber            — earnings within (3d, 14d] from today
-//	red              — earnings within [0, 3d]
-//	revision_needed  — earnings has passed AND was after the locked_date
-//	                   (i.e. a print happened after the thesis was locked,
-//	                    so the thesis needs a fresh re-score)
+//	none             — no date, or none within 14 days
+//	amber            — next report within (3d, 14d] from today
+//	red              — next report within [0, 3d]
+//	revision_needed  — the LAST REPORTED date is later than the thesis lock date, i.e. a print happened
+//	                   after the thesis was locked and it has not been re-scored (a re-lock after the
+//	                   print clears it). It takes precedence over amber/red, and it keeps working after
+//	                   the next date has rolled forward, because it reads last_reported_date, not the
+//	                   (now future) next date.
 func (e *Engine) refreshEarningsUrgency(ctx context.Context) error {
 	today := time.Now().UTC().Format("2006-01-02")
-	// Pull all (ticker, locked_date) pairs from index, join to stocks.
 	rows, err := e.DB.QueryContext(ctx, `
-		SELECT t.id, t.ticker, COALESCE(t.locked_date, ''),
-		       COALESCE(s.earnings_date, '')
+		SELECT t.id, COALESCE(t.locked_date, ''), COALESCE(c.earnings_date, ''), COALESCE(c.last_reported_date, '')
 		  FROM theses_index t
-		  LEFT JOIN stock_holdings s
-		    ON s.ticker = t.ticker AND s.deleted_at IS NULL`)
+		  LEFT JOIN ticker_calendar c ON c.ticker = t.ticker`)
 	if err != nil {
 		return err
 	}
@@ -463,17 +462,21 @@ func (e *Engine) refreshEarningsUrgency(ctx context.Context) error {
 	var updates []up
 	for rows.Next() {
 		var id int64
-		var tk, locked, earn string
-		if err := rows.Scan(&id, &tk, &locked, &earn); err != nil {
+		var locked, next, reported string
+		if err := rows.Scan(&id, &locked, &next, &reported); err != nil {
 			return err
 		}
+		if next != "" && next < today && next > reported { // a next date that has itself just passed
+			reported = next
+			next = ""
+		}
 		urgency := "none"
-		if earn != "" {
-			daysOut, ok := daysBetween(today, earn)
-			if ok {
+		switch {
+		case reported != "" && locked != "" && reported > locked:
+			urgency = "revision_needed"
+		case next != "":
+			if daysOut, ok := daysBetween(today, next); ok {
 				switch {
-				case daysOut < 0 && locked != "" && earn > locked:
-					urgency = "revision_needed"
 				case daysOut >= 0 && daysOut <= 3:
 					urgency = "red"
 				case daysOut > 3 && daysOut <= 14:
@@ -481,7 +484,7 @@ func (e *Engine) refreshEarningsUrgency(ctx context.Context) error {
 				}
 			}
 		}
-		updates = append(updates, up{id, earn, urgency})
+		updates = append(updates, up{id, next, urgency})
 	}
 	for _, u := range updates {
 		_, _ = e.DB.ExecContext(ctx,

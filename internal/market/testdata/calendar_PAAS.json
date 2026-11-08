@@ -1,0 +1,62 @@
+{
+ "quoteSummary": {
+  "result": [
+   {
+    "calendarEvents": {
+     "maxAge": 1,
+     "earnings": {
+      "earningsDate": [
+       {
+        "raw": 1793826000,
+        "fmt": "2026-11-04"
+       }
+      ],
+      "earningsCallDate": [
+       {
+        "raw": 1793890800,
+        "fmt": "2026-11-05"
+       }
+      ],
+      "isEarningsDateEstimate": false,
+      "earningsAverage": {
+       "raw": 0.85306,
+       "fmt": "0.85"
+      },
+      "earningsLow": {
+       "raw": 0.63,
+       "fmt": "0.63"
+      },
+      "earningsHigh": {
+       "raw": 1.01,
+       "fmt": "1.01"
+      },
+      "revenueAverage": {
+       "raw": 1036891070,
+       "fmt": "1.04B",
+       "longFmt": "1,036,891,070"
+      },
+      "revenueLow": {
+       "raw": 1036891070,
+       "fmt": "1.04B",
+       "longFmt": "1,036,891,070"
+      },
+      "revenueHigh": {
+       "raw": 1036891070,
+       "fmt": "1.04B",
+       "longFmt": "1,036,891,070"
+      }
+     },
+     "exDividendDate": {
+      "raw": 1787529600,
+      "fmt": "2026-08-24"
+     },
+     "dividendDate": {
+      "raw": 1788480000,
+      "fmt": "2026-09-04"
+     }
+    }
+   }
+  ],
+  "error": null
+ }
+}

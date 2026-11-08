@@ -370,3 +370,16 @@ type FrameworkScore struct {
 	TagsJSON     *string   `json:"tagsJson,omitempty"` // raw JSON: {tagKey: value}
 	ReviewerNote *string   `json:"reviewerNote,omitempty"`
 }
+
+// CalendarInfo is the report-date provenance for a ticker (SC-56), attached to the stocks and watchlist
+// API rows. The next date itself stays in the existing fields (stock_holdings.earnings_date and, for the
+// watchlist, Date here); a past date is never exposed as the next one.
+type CalendarInfo struct {
+	Status           string  `json:"status"` // DATE_KNOWN | DATE_ESTIMATED | REPORTED | NOT_ANNOUNCED | NOT_APPLICABLE | FETCH_ERROR
+	Date             *string `json:"date"`   // next report date, nil when there is none to show
+	IsEstimate       bool    `json:"isEstimate,omitempty"`
+	Source           string  `json:"source,omitempty"`
+	FetchedAt        *int64  `json:"fetchedAt,omitempty"`
+	LastReportedDate *string `json:"lastReportedDate,omitempty"`
+	Note             string  `json:"note,omitempty"` // fetch error text or the not-applicable reason
+}

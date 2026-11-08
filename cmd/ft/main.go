@@ -100,6 +100,10 @@ func main() {
 		runBackfillBars(os.Args[2:])
 	case "perf-derive":
 		runPerfDerive(os.Args[2:])
+	case "calendar-refresh":
+		runCalendarRefresh(os.Args[2:])
+	case "calendar-report":
+		runCalendarReport(os.Args[2:])
 	case "sector-backfill":
 		runSectorBackfill(os.Args[2:])
 	case "sector-ingest":
@@ -199,6 +203,89 @@ func runDaily(args []string) {
 	}
 }
 
+// runCalendarRefresh runs one SC-56 report-date pass (the hourly job's body) and prints the summary.
+func runCalendarRefresh(args []string) {
+	fs := flag.NewFlagSet("calendar-refresh", flag.ExitOnError)
+	pages := fs.Int("second-per-run", 0, "cap on second-source page fetches this run (default 8; the post-deploy backfill uses ~40)")
+	_ = fs.Parse(args)
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	svc := refresh.New(st)
+	svc.SecondPerRun = *pages
+	sum := svc.RefreshCalendar(ctx)
+	fmt.Printf("calendar: %d tickers, %d answered by the provider, %d failed, %d not reached; states: %s\n",
+		sum.Total, sum.Fetched, len(sum.Failed), len(sum.NotUpdated), sum.String())
+	for _, f := range sum.Failed {
+		fmt.Fprintln(os.Stderr, "  failed:", f)
+	}
+}
+
+// runCalendarReport prints the per-ticker report-date table from the store (no network).
+func runCalendarReport(args []string) {
+	fs := flag.NewFlagSet("calendar-report", flag.ExitOnError)
+	_ = fs.Parse(args)
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	ctx := context.Background()
+	set, err := st.CalendarTickerSet(ctx)
+	must("ticker set", err)
+	rows, err := st.ListTickerCalendar(ctx)
+	must("calendar rows", err)
+	today := time.Now().UTC().Format("2006-01-02")
+	counts := map[string]int{}
+	fmt.Printf("%-10s %-9s %-14s %-12s %-15s %-20s %-12s %s\n", "TICKER", "OWNERSHIP", "SYMBOL", "NEXT DATE", "STATE", "SOURCE", "LAST REPORT", "NOTE")
+	for _, t := range set {
+		own := "thesis"
+		switch {
+		case t.Holding:
+			own = "owned"
+		case t.Watchlist:
+			own = "watchlist"
+		}
+		c := rows[t.Ticker]
+		state, next, src, lastRep, note := "MISSING", "—", "", "—", ""
+		if c != nil && c.Status != store.CalUnknown {
+			state = c.Status
+			if c.EarningsDate != nil {
+				next = *c.EarningsDate
+				if c.IsEstimate {
+					next += " est"
+				}
+				if *c.EarningsDate < today {
+					state = "STALE(past-as-next)"
+				}
+			}
+			src = c.Source
+			if c.LastReportedDate != nil {
+				lastRep = *c.LastReportedDate
+			}
+			switch c.Status {
+			case store.CalFetchError:
+				note = c.LastError
+			case store.CalNotApplicable:
+				note = c.NotApplicableWhy
+			}
+		}
+		counts[state]++
+		fmt.Printf("%-10s %-9s %-14s %-12s %-15s %-20s %-12s %s\n", t.Ticker, own, t.ProviderSymbol, next, state, src, lastRep, note)
+	}
+	fmt.Printf("\n%d tickers:", len(set))
+	for k, v := range counts {
+		fmt.Printf(" %s=%d", k, v)
+	}
+	fmt.Println()
+}
+
 func printUsage(w *os.File) {
 	fmt.Fprint(w, `FT — Finance Tracker
 
@@ -212,6 +299,8 @@ USAGE
   ft token list [--user-id N]                  list service tokens (no plaintext)
   ft backfill-bars [--user-id N] [--range 2y]  fetch 2y daily OHLC for all holdings (Spec 9c)
   ft perf-derive [--user-id N]                 derive closed_trades + regen snapshots (Spec 9d)
+  ft calendar-refresh [--second-per-run N]     SC-56: one report-date pass over every holding, watchlist row and live thesis
+  ft calendar-report                           SC-56: print the report-date state of every ticker (reads the store only)
   ft sector-backfill [--months 14]             one-off Spec 9f 14-month ETF snapshot backfill
   ft sector-ingest                             one Spec 9f daily sector ingest (manual trigger)
   ft nexus-ingest --dir DIR [--as-of DATE]     ingest AI-Nexus .xlsx snapshots (SC-36)
@@ -398,6 +487,27 @@ func runServe() {
 	// publishing the updated calendar (~3-4 hrs after the actual release).
 	go func() {
 		earningsSvc := refresh.New(st)
+		// SC-56 P4 — fetch faults alert within the hour, through the same sender as the other monitors
+		// (FT_TELEGRAM_*: the chat ft-bot uses, @FinsFTAlerts_bot).
+		earningsSvc.Alerts = &monitor.Monitor{DB: st.DB, Checks: monitor.CalendarChecks(st.DB), Notify: &monitor.Telegram{}}
+		// SC-56 P4 — daily digest of report-date changes for owned and watchlist tickers, 07:30 UTC; silent
+		// when nothing changed, at most one per UTC day.
+		scheduleAt(bgCtx, 7, 30, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, time.Minute)
+			defer cancel()
+			if _, err := monitor.CalendarDigest(ctx, st.DB, &monitor.Telegram{}, time.Now()); err != nil {
+				slog.Warn("calendar: daily digest", "err", err)
+			}
+		})
+		// SC-56 — first pass shortly after boot, so a deploy backfills the whole set without waiting an hour.
+		select {
+		case <-bgCtx.Done():
+			return
+		case <-time.After(2 * time.Minute):
+			ctx, cancel := context.WithTimeout(bgCtx, 3*time.Minute)
+			earningsSvc.RefreshEarningsOnly(ctx, 1)
+			cancel()
+		}
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
 		for {

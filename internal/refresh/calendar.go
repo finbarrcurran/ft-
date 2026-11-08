@@ -1,0 +1,479 @@
+package refresh
+
+// SC-56 — report (earnings) dates for every holding, stock-watchlist row and live thesis.
+//
+// The state machine in applyCalendar is pure (no database, no network) so fixtures can drive it.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sort"
+	"strings"
+	"time"
+
+	"ft/internal/market"
+	"ft/internal/store"
+)
+
+// CalendarSource is where report dates come from. Production uses Yahoo; tests use fixtures.
+type CalendarSource interface {
+	// Events is the primary source (quoteSummary calendarEvents).
+	Events(ctx context.Context, symbol string) (*market.CalendarEvents, error)
+	// EarningsPage is the second source, asked only for the NEXT date when the primary one has passed or is missing.
+	EarningsPage(ctx context.Context, symbol string) ([]market.EarningsRow, error)
+	// QuoteDates is the quote endpoint's earnings timestamps (ISO dates), used only to backfill the LAST REPORTED
+	// date of tickers whose earnings page has no recent reported row (SC-56 follow-up A).
+	QuoteDates(ctx context.Context, symbol string) ([]string, error)
+}
+
+type yahooCalendarSource struct{}
+
+func (yahooCalendarSource) Events(ctx context.Context, symbol string) (*market.CalendarEvents, error) {
+	return market.FetchYahooCalendarEvents(ctx, symbol)
+}
+func (yahooCalendarSource) EarningsPage(ctx context.Context, symbol string) ([]market.EarningsRow, error) {
+	return market.FetchYahooEarningsPage(ctx, symbol)
+}
+
+func (yahooCalendarSource) QuoteDates(ctx context.Context, symbol string) ([]string, error) {
+	return market.FetchYahooQuoteEarnings(ctx, symbol)
+}
+
+// errSecondBudget: this run already used its share of second-source page fetches (each page is about 0.8 MB).
+var errSecondBudget = errors.New("second-source budget for this run is used")
+
+// secondPerRun caps second-source page fetches per hourly run; the rest wait for the next run.
+// At most historyPerRun of them may be spent on "last reported date" history, so the lookups that find a
+// missing or passed NEXT date always come first.
+const (
+	secondPerRun  = 8
+	historyPerRun = 3
+)
+
+const (
+	sourceCalendar = "yahoo_calendar"
+	sourcePage     = "yahoo_earnings_page"
+	secondEvery    = 24 * time.Hour
+	secondRetry    = 2 * time.Hour
+	quoteEvery     = 24 * time.Hour
+	// A last-reported date older than this is treated as "page has no recent row" (a half-year reporter is
+	// never more than about 190 days behind, an annual one about 370 only for a handful of names).
+	staleReported = 220 * 24 * time.Hour
+	quotePerRun   = 20
+)
+
+// CalendarSummary is what one pass did, for the hourly log line and the tests.
+type CalendarSummary struct {
+	Total           int
+	Fetched         int // provider answered
+	Failed          []string
+	SecondFailed    []string // second-source (earnings page) failures this run: a Yahoo layout change shows up here
+	QuoteBackfilled int      // tickers whose last reported date was set or advanced from the quote endpoint
+	NotUpdated      []string // not reached before the context ended
+	ByState         map[string]int
+}
+
+func (c CalendarSummary) String() string {
+	var parts []string
+	keys := make([]string, 0, len(c.ByState))
+	for k := range c.ByState {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, c.ByState[k]))
+	}
+	return strings.Join(parts, " ")
+}
+
+// RefreshCalendar refreshes every ticker in the set once. It never clears a stored date on partial data and
+// logs every per-ticker failure with its error.
+func (s *Service) RefreshCalendar(ctx context.Context) CalendarSummary {
+	src := s.Calendar
+	if src == nil {
+		src = yahooCalendarSource{}
+	}
+	now := time.Now
+	if s.Now != nil {
+		now = s.Now
+	}
+	gap := s.CalendarGap
+	if gap == 0 {
+		gap = 250 * time.Millisecond
+	}
+	sum := CalendarSummary{ByState: map[string]int{}}
+	secondUsed, historyUsed := 0, 0
+	secondCap := secondPerRun
+	if s.SecondPerRun > 0 {
+		secondCap = s.SecondPerRun
+	}
+	var needHistory []store.CalendarTicker
+	set, err := s.Store.CalendarTickerSet(ctx)
+	if err != nil {
+		slog.Error("calendar: ticker set", "err", err)
+		return sum
+	}
+	prev, err := s.Store.ListTickerCalendar(ctx)
+	if err != nil {
+		slog.Error("calendar: read rows", "err", err)
+		return sum
+	}
+	sum.Total = len(set)
+	// stalest first, so a run cut short by the timeout rotates through the set
+	sort.SliceStable(set, func(i, j int) bool {
+		pi, pj := int64(0), int64(0)
+		if p := prev[set[i].Ticker]; p != nil {
+			pi = p.UpdatedAt
+		}
+		if p := prev[set[j].Ticker]; p != nil {
+			pj = p.UpdatedAt
+		}
+		return pi < pj
+	})
+	for i, ct := range set {
+		select {
+		case <-ctx.Done():
+			for _, rest := range set[i:] {
+				sum.NotUpdated = append(sum.NotUpdated, rest.Ticker)
+			}
+			slog.Warn("calendar: context ended before the pass finished", "done", i, "total", len(set), "not_updated", sum.NotUpdated)
+			s.finishCalendar(ctx, sum)
+			return sum
+		default:
+		}
+		t := now().UTC()
+		var ev *market.CalendarEvents
+		var evErr error
+		if ct.NotApplicable == "" {
+			ev, evErr = src.Events(ctx, ct.ProviderSymbol)
+			if evErr == nil {
+				sum.Fetched++
+			}
+			time.Sleep(gap)
+		}
+		c := applyCalendar(prev[ct.Ticker], ct, ev, evErr, func() ([]market.EarningsRow, error) {
+			if secondUsed >= secondCap {
+				return nil, errSecondBudget
+			}
+			secondUsed++
+			rows, e := src.EarningsPage(ctx, ct.ProviderSymbol)
+			time.Sleep(gap)
+			if e != nil {
+				sum.SecondFailed = append(sum.SecondFailed, ct.Ticker+": "+e.Error())
+			}
+			return rows, e
+		}, t)
+		if err := s.Store.SaveTickerCalendar(ctx, c); err != nil {
+			slog.Error("calendar: save", "ticker", ct.Ticker, "err", err)
+			continue
+		}
+		if c.Status == store.CalFetchError {
+			sum.Failed = append(sum.Failed, ct.Ticker+": "+c.LastError)
+			slog.Warn("calendar: fetch failed", "ticker", ct.Ticker, "symbol", ct.ProviderSymbol, "err", c.LastError, "consecutive", c.ErrorCount)
+		}
+		sum.ByState[c.Status]++
+		if ct.Thesis && c.LastReportedDate == nil && (c.Status == store.CalDateKnown || c.Status == store.CalDateEstimated) &&
+			(c.SecondCheckedAt == nil || t.Sub(time.Unix(*c.SecondCheckedAt, 0)) >= secondEvery) {
+			needHistory = append(needHistory, ct)
+		}
+	}
+
+	// Phase 2 — history. The calendar only names the NEXT date; for a thesis ticker whose last report is
+	// unknown, read the earnings page once for its reported rows (revision_needed depends on them). It runs
+	// after every next-date lookup and only with what is left of the per-run budget, at most historyPerRun.
+	for _, ct := range needHistory {
+		if secondUsed >= secondCap || historyUsed >= historyPerRun || ctx.Err() != nil {
+			break
+		}
+		cur, err := s.Store.GetTickerCalendar(ctx, ct.Ticker)
+		if err != nil || cur == nil {
+			continue
+		}
+		secondUsed++
+		historyUsed++
+		rows, perr := src.EarningsPage(ctx, ct.ProviderSymbol)
+		time.Sleep(gap)
+		t := now().UTC()
+		if perr != nil {
+			sum.SecondFailed = append(sum.SecondFailed, ct.Ticker+": "+perr.Error())
+		}
+		applyHistory(cur, rows, perr, t)
+		if err := s.Store.SaveTickerCalendar(ctx, cur); err != nil {
+			slog.Error("calendar: save history", "ticker", ct.Ticker, "err", err)
+		}
+	}
+	// Phase 3 — last reported date from the quote endpoint (follow-up A), after the page history so it only asks
+	// for tickers still missing a recent one. The earnings page can lack a recent
+	// reported row (SU.PA and RR.L showed 2020 and 2016); the quote endpoint's earnings timestamps give the last
+	// one. It asks only tickers whose last reported date is missing or stale, at most once a day each and
+	// quotePerRun a run, and it costs no second-source page budget.
+	quoteUsed := 0
+	for _, ct := range set {
+		if quoteUsed >= quotePerRun || ctx.Err() != nil {
+			break
+		}
+		if ct.NotApplicable != "" {
+			continue
+		}
+		cur, err := s.Store.GetTickerCalendar(ctx, ct.Ticker)
+		if err != nil || cur == nil || !needsQuoteBackfill(cur, now().UTC()) {
+			continue
+		}
+		quoteUsed++
+		dates, qerr := src.QuoteDates(ctx, ct.ProviderSymbol)
+		time.Sleep(gap)
+		if applyQuote(cur, dates, qerr, now().UTC()) {
+			sum.QuoteBackfilled++
+		}
+		if err := s.Store.SaveTickerCalendar(ctx, cur); err != nil {
+			slog.Error("calendar: save quote backfill", "ticker", ct.Ticker, "err", err)
+		}
+	}
+
+	s.finishCalendar(ctx, sum)
+	return sum
+}
+
+// applyHistory records the most recent reported date found on the earnings page. A failed read is retried
+// in two hours; the next date already stored is never touched.
+func applyHistory(c *store.TickerCalendar, rows []market.EarningsRow, err error, now time.Time) {
+	unix := now.Unix()
+	c.UpdatedAt = unix
+	if err != nil {
+		retry := unix - int64(secondEvery/time.Second) + int64(secondRetry/time.Second)
+		c.SecondCheckedAt = &retry
+		c.SecondError, c.SecondErrorCount = err.Error(), c.SecondErrorCount+1
+		slog.Warn("calendar: history lookup failed", "ticker", c.Ticker, "err", err)
+		return
+	}
+	chk := unix
+	c.SecondCheckedAt = &chk
+	c.SecondError, c.SecondErrorCount = "", 0
+	for _, r := range rows {
+		if r.Reported && (c.LastReportedDate == nil || r.Date > *c.LastReportedDate) {
+			d := r.Date
+			c.LastReportedDate = &d
+		}
+	}
+}
+
+func (s *Service) finishCalendar(ctx context.Context, sum CalendarSummary) {
+	if err := s.Store.SyncHoldingCalendarDates(ctx); err != nil {
+		slog.Error("calendar: sync holding dates", "err", err)
+	}
+	slog.Info("calendar refresh complete", "total", sum.Total, "fetched", sum.Fetched, "failed", len(sum.Failed),
+		"not_updated", len(sum.NotUpdated), "second_failed", len(sum.SecondFailed), "quote_backfilled", sum.QuoteBackfilled,
+		"states", sum.String())
+	for _, f := range sum.SecondFailed {
+		slog.Warn("calendar: second-source failure", "detail", f)
+	}
+	if s.Alerts != nil {
+		s.Alerts.Tick(ctx)
+	}
+}
+
+// RefreshEarningsOnly is the hourly job entry point (name kept from v1.9.0). userID is unused: the set is
+// the union of holdings, watchlist and live theses.
+func (s *Service) RefreshEarningsOnly(ctx context.Context, _ int64) {
+	s.RefreshCalendar(ctx)
+}
+
+func strp(s string) *string { return &s }
+
+// applyCalendar computes the new row for one ticker from the previous row and the provider's answer.
+func applyCalendar(prev *store.TickerCalendar, ct store.CalendarTicker, ev *market.CalendarEvents, evErr error,
+	second func() ([]market.EarningsRow, error), now time.Time) *store.TickerCalendar {
+
+	today := now.UTC().Format("2006-01-02")
+	unix := now.Unix()
+	var c store.TickerCalendar
+	hadRow := prev != nil && prev.Status != store.CalUnknown
+	if prev != nil {
+		c = *prev
+	}
+	c.Ticker, c.ProviderSymbol, c.UpdatedAt = ct.Ticker, ct.ProviderSymbol, unix
+	if c.Status == "" {
+		c.Status = store.CalUnknown
+	}
+
+	// Not applicable by flag (ETFs, delisted names, warrants): no provider call at all.
+	if ct.NotApplicable != "" {
+		c.Status, c.NotApplicableWhy = store.CalNotApplicable, ct.NotApplicable
+		c.EarningsDate, c.IsEstimate = nil, false
+		c.LastError, c.ErrorCount, c.ErrorPermanent = "", 0, false
+		return &c
+	}
+	c.NotApplicableWhy = ""
+
+	if evErr != nil {
+		var he *market.HTTPError
+		c.LastError = evErr.Error()
+		c.ErrorCount++
+		c.ErrorPermanent = errors.As(evErr, &he) && he.Status == 404
+		c.Status = store.CalFetchError // stored dates are left as they were
+		return &c
+	}
+
+	c.LastError, c.ErrorCount, c.ErrorPermanent = "", 0, false
+	fetched := unix
+	c.FetchedAt = &fetched
+	if ev.ExDividend != "" {
+		c.ExDividendDate = strp(ev.ExDividend) // never cleared by an answer that lacks it
+	}
+
+	// Yahoo may return a range [start, end]; use the earliest date that has not passed, else the latest past one.
+	future, past := "", ""
+	for _, d := range ev.EarningsDates {
+		if d >= today {
+			if future == "" || d < future {
+				future = d
+			}
+		} else if d > past {
+			past = d
+		}
+	}
+
+	setNext := func(date string, estimate bool, source string) {
+		old := ""
+		if c.EarningsDate != nil {
+			old = *c.EarningsDate
+		}
+		if hadRow && old != date {
+			if old != "" {
+				c.PrevEarningsDate = strp(old)
+			} else {
+				c.PrevEarningsDate = nil
+			}
+			changed := unix
+			c.DateChangedAt = &changed
+		}
+		c.EarningsDate, c.IsEstimate, c.Source = strp(date), estimate, source
+		if estimate {
+			c.Status = store.CalDateEstimated
+		} else {
+			c.Status = store.CalDateKnown
+		}
+	}
+	markReported := func(date string) {
+		if date != "" && (c.LastReportedDate == nil || date > *c.LastReportedDate) {
+			c.LastReportedDate = strp(date)
+		}
+	}
+	trySecond := func() (string, bool) {
+		if second == nil {
+			return "", false
+		}
+		if c.SecondCheckedAt != nil && now.Sub(time.Unix(*c.SecondCheckedAt, 0)) < secondEvery {
+			return "", false
+		}
+		rows, err := second()
+		chk := unix
+		if errors.Is(err, errSecondBudget) {
+			return "", false // not attempted; the next run will try
+		}
+		if err != nil {
+			retry := unix - int64(secondEvery/time.Second) + int64(secondRetry/time.Second)
+			c.SecondCheckedAt = &retry
+			c.SecondError, c.SecondErrorCount = err.Error(), c.SecondErrorCount+1
+			slog.Warn("calendar: second source failed", "ticker", ct.Ticker, "err", err)
+			return "", false
+		}
+		c.SecondCheckedAt = &chk
+		c.SecondError, c.SecondErrorCount = "", 0
+		next := ""
+		for _, r := range rows {
+			if r.Reported {
+				markReported(r.Date)
+				continue
+			}
+			if r.Date >= today && (next == "" || r.Date < next) {
+				next = r.Date
+			}
+		}
+		return next, next != ""
+	}
+
+	// A stored next date that has itself passed since the last refresh becomes the reported date, whatever
+	// the provider says now.
+	if c.EarningsDate != nil && *c.EarningsDate < today {
+		markReported(*c.EarningsDate)
+		c.EarningsDate, c.IsEstimate, c.Status = nil, false, store.CalReported
+	}
+
+	switch {
+	case future != "":
+		setNext(future, ev.IsEstimate, sourceCalendar)
+
+	case past != "":
+		// Yahoo is still returning the date that has passed: remember it as reported, look for the next one.
+		markReported(past)
+		if d, ok := trySecond(); ok {
+			setNext(d, true, sourcePage)
+		} else if c.EarningsDate != nil && *c.EarningsDate >= today {
+			// a second source we could not reach must not hide a still-valid stored date
+		} else {
+			c.EarningsDate, c.IsEstimate, c.Source, c.Status = nil, false, sourceCalendar, store.CalReported
+		}
+
+	default: // Yahoo answered with no earnings date
+		if c.EarningsDate != nil && *c.EarningsDate >= today {
+			// partial data (for example an ex-dividend-only answer): never clear a stored future date
+			break
+		}
+		if d, ok := trySecond(); ok {
+			setNext(d, true, sourcePage)
+		} else if c.Status == store.CalReported {
+			// still waiting for the next date after a report
+		} else {
+			c.EarningsDate, c.IsEstimate, c.Source, c.Status = nil, false, sourceCalendar, store.CalNotAnnounced
+		}
+	}
+
+	return &c
+}
+
+// needsQuoteBackfill: the last reported date is unknown or older than staleReported, and the quote endpoint
+// has not been asked in the last day.
+func needsQuoteBackfill(c *store.TickerCalendar, now time.Time) bool {
+	if c.Status == store.CalNotApplicable {
+		return false
+	}
+	if c.QuoteCheckedAt != nil && now.Sub(time.Unix(*c.QuoteCheckedAt, 0)) < quoteEvery {
+		return false
+	}
+	if c.LastReportedDate == nil {
+		return true
+	}
+	d, err := time.Parse("2006-01-02", *c.LastReportedDate)
+	return err != nil || now.Sub(d) > staleReported
+}
+
+// applyQuote sets the last reported date from the quote endpoint's timestamps: the latest one that has
+// passed, if it is newer than what is stored. A failed read is retried in two hours. It reports whether the
+// stored date changed. It never touches the next date.
+func applyQuote(c *store.TickerCalendar, dates []string, err error, now time.Time) bool {
+	unix := now.Unix()
+	c.UpdatedAt = unix
+	if err != nil {
+		retry := unix - int64(quoteEvery/time.Second) + int64(secondRetry/time.Second)
+		c.QuoteCheckedAt = &retry
+		slog.Warn("calendar: quote lookup failed", "ticker", c.Ticker, "err", err)
+		return false
+	}
+	chk := unix
+	c.QuoteCheckedAt = &chk
+	today := now.Format("2006-01-02")
+	best := ""
+	for _, d := range dates {
+		if d <= today && d > best {
+			best = d
+		}
+	}
+	if best == "" || (c.LastReportedDate != nil && best <= *c.LastReportedDate) {
+		return false
+	}
+	c.LastReportedDate = &best
+	return true
+}

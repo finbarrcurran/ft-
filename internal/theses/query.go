@@ -24,6 +24,13 @@ type Row struct {
 	GitHubURL        string  `json:"githubUrl"`
 	NextEarningsDate *string `json:"nextEarningsDate,omitempty"`
 	EarningsUrgency  string  `json:"earningsUrgency"` // none|amber|red|revision_needed
+	// SC-56 — additive report-date provenance (from ticker_calendar); all empty until the calendar job has run.
+	EarningsStatus     string  `json:"earningsStatus,omitempty"`     // DATE_KNOWN|DATE_ESTIMATED|REPORTED|NOT_ANNOUNCED|NOT_APPLICABLE|FETCH_ERROR
+	EarningsIsEstimate bool    `json:"earningsIsEstimate,omitempty"` //
+	EarningsSource     string  `json:"earningsSource,omitempty"`
+	EarningsFetchedAt  *int64  `json:"earningsFetchedAt,omitempty"`
+	LastReportedDate   *string `json:"lastReportedDate,omitempty"`
+	EarningsNote       string  `json:"earningsNote,omitempty"` // fetch error text or the not-applicable reason
 	// Ownership — derived at query time by joining to stock_holdings and
 	// watchlist. Drives the Theses tab section grouping (Owned / Watchlist
 	// / Other). Priority: owned > watchlist; if a ticker is in both,
@@ -72,8 +79,13 @@ func (e *Engine) List(ctx context.Context, adapter string) ([]Row, error) {
 		                       WHERE w.ticker = t.ticker AND w.deleted_at IS NULL)
 		           THEN 'watchlist'
 		         ELSE 'other'
-		       END AS ownership
+		       END AS ownership,
+		       COALESCE(c.earnings_status, ''), COALESCE(c.earnings_is_estimate, 0), COALESCE(c.earnings_source, ''),
+		       c.earnings_fetched_at, c.last_reported_date,
+		       CASE WHEN c.earnings_status = 'NOT_APPLICABLE' THEN COALESCE(c.not_applicable_reason, '')
+		            WHEN c.earnings_status = 'FETCH_ERROR' THEN COALESCE(c.last_error, '') ELSE '' END
 		  FROM theses_index t
+		  LEFT JOIN ticker_calendar c ON c.ticker = t.ticker
 		 WHERE t.status NOT IN ('superseded', 'archived')`
 	args := []any{}
 	if adapter != "" {
@@ -92,12 +104,21 @@ func (e *Engine) List(ctx context.Context, adapter string) ([]Row, error) {
 	out := []Row{}
 	for rows.Next() {
 		var r Row
-		var company, sub, locked, earn sql.NullString
-		var score sql.NullInt64
+		var company, sub, locked, earn, lastRep sql.NullString
+		var score, fetched sql.NullInt64
+		var est int
 		if err := rows.Scan(&r.ID, &r.Ticker, &company, &r.Adapter, &sub,
 			&score, &r.MaxScore, &r.Version, &r.Status, &locked, &r.GitHubURL,
-			&earn, &r.EarningsUrgency, &r.UpdatedAt, &r.Ownership); err != nil {
+			&earn, &r.EarningsUrgency, &r.UpdatedAt, &r.Ownership,
+			&r.EarningsStatus, &est, &r.EarningsSource, &fetched, &lastRep, &r.EarningsNote); err != nil {
 			return nil, err
+		}
+		r.EarningsIsEstimate = est != 0
+		if fetched.Valid {
+			r.EarningsFetchedAt = &fetched.Int64
+		}
+		if lastRep.Valid {
+			r.LastReportedDate = &lastRep.String
 		}
 		if company.Valid {
 			r.CompanyName = &company.String
@@ -123,21 +144,25 @@ func (e *Engine) List(ctx context.Context, adapter string) ([]Row, error) {
 // Get returns the full thesis (header + body + rendered HTML) by id.
 func (e *Engine) Get(ctx context.Context, id int64) (*Full, error) {
 	var f Full
-	var company, sub, locked, earn sql.NullString
+	var company, sub, locked, earn, lastRep sql.NullString
 	var score sql.NullInt64
 	err := e.DB.QueryRowContext(ctx, `
 		SELECT id, ticker, company_name, adapter, sub_type, score, max_score,
 		       version, status, locked_date, github_url,
 		       next_earnings_date, earnings_urgency, updated_at,
-		       markdown_content, rendered_html
+		       markdown_content, rendered_html,
+		       (SELECT c.last_reported_date FROM ticker_calendar c WHERE c.ticker = theses_index.ticker)
 		  FROM theses_index
 		 WHERE id = ?`, id).Scan(
 		&f.ID, &f.Ticker, &company, &f.Adapter, &sub,
 		&score, &f.MaxScore, &f.Version, &f.Status, &locked, &f.GitHubURL,
 		&earn, &f.EarningsUrgency, &f.UpdatedAt,
-		&f.MarkdownContent, &f.RenderedHTML)
+		&f.MarkdownContent, &f.RenderedHTML, &lastRep)
 	if err != nil {
 		return nil, err
+	}
+	if lastRep.Valid {
+		f.LastReportedDate = &lastRep.String
 	}
 	if company.Valid {
 		f.CompanyName = &company.String
