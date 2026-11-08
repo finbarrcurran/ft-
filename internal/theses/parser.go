@@ -242,6 +242,18 @@ var adapterAliases = map[string]string{
 	"storage integrator":            "grid_storage_integrator",
 	"bess integrator":               "grid_storage_integrator",
 	"bess":                          "grid_storage_integrator",
+	// Robotics & Embodiment adapter (physical-AI: humanoid, industrial automation, autonomous systems; AUR-class).
+	// SLUG RECONCILIATION: canonical parser slug is the UNDERSCORED "robotics_embodiment" (folder
+	// theses/robotics_embodiment/); the sector_scorecards DB code is the HYPHENATED "robotics-embodiment" (status
+	// needs-review) — deliberately mapped, same pattern as grid_storage_integrator. Aliases only: no keyword route,
+	// so "Industrial Automation" and "Design Automation" are not swallowed.
+	"robotics & embodiment":   "robotics_embodiment",
+	"robotics and embodiment": "robotics_embodiment",
+	"robotics/embodiment":     "robotics_embodiment",
+	"robotics / embodiment":   "robotics_embodiment",
+	"robotics-embodiment":     "robotics_embodiment",
+	"robotics_embodiment":     "robotics_embodiment",
+	"robotics embodiment":     "robotics_embodiment",
 }
 
 // NormaliseAdapter maps a free-form adapter name from the MD header to one
