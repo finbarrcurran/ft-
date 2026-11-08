@@ -38,7 +38,7 @@ func (s *Server) handleListTheses(w http.ResponseWriter, r *http.Request) {
 	if s.demoModeOn(r.Context()) {
 		// Demo mode: the research library is not portfolio data, but the owned/watchlist tag is.
 		for i := range rows {
-			rows[i].Ownership = "other"
+			maskThesisRowForDemo(&rows[i])
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -63,7 +63,18 @@ func (s *Server) handleGetThesisLibrary(w http.ResponseWriter, r *http.Request) 
 		mapStoreError(w, err)
 		return
 	}
+	if s.demoModeOn(r.Context()) {
+		maskThesisRowForDemo(&t.Row)
+	}
 	writeJSON(w, http.StatusOK, t)
+}
+
+// maskThesisRowForDemo drops the fields that are derived from the portfolio: the owned/watchlist tag and the
+// earnings date/urgency (only held tickers have them). The research text itself is not portfolio data.
+func maskThesisRowForDemo(r *theses.Row) {
+	r.Ownership = "other"
+	r.NextEarningsDate = nil
+	r.EarningsUrgency = "none"
 }
 
 // GET /api/theses/gaps
@@ -175,6 +186,9 @@ func (s *Server) handleThesisRevisionPrompt(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		mapStoreError(w, err)
 		return
+	}
+	if s.demoModeOn(r.Context()) {
+		maskThesisRowForDemo(&t.Row)
 	}
 	var prompt strings.Builder
 	prompt.WriteString("# Thesis Revision Request — " + t.Ticker)
