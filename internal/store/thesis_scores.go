@@ -55,7 +55,7 @@ func (s *Store) ThesisScoresByTicker(ctx context.Context, tickers []string) (map
 	             COALESCE(sub_type, ''), COALESCE(locked_date, ''),
 	             COALESCE(github_url, ''), COALESCE(earnings_urgency, 'none')
 	        FROM theses_index
-	       WHERE status != 'superseded'
+	       WHERE status NOT IN ('superseded', 'archived')
 	         AND UPPER(ticker) IN (` + strings.Join(placeholders, ",") + `)`
 	rows, err := s.DB.QueryContext(ctx, q, args...)
 	if err != nil {

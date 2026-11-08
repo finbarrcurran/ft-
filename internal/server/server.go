@@ -327,11 +327,12 @@ func (s *Server) routes() {
 
 	// Spec 15: Thesis Library (GitHub-backed).
 	s.mux.HandleFunc("GET /api/theses", s.requireUser(s.handleListTheses))
-	s.mux.HandleFunc("GET /api/theses/gaps", s.requireUser(s.handleThesesGaps))
+	s.mux.HandleFunc("GET /api/theses/gaps", s.requireUser(s.emptyInDemo(s.handleThesesGaps, map[string]any{"gaps": []any{}})))
 	s.mux.HandleFunc("GET /api/theses/{id}", s.requireUser(s.handleGetThesisLibrary))
-	s.mux.HandleFunc("POST /api/theses/upload", s.requireUser(s.handleUploadThesis))
-	s.mux.HandleFunc("POST /api/theses/scoring-log", s.requireUser(s.handleUploadScoringLog))
-	s.mux.HandleFunc("POST /api/theses/sync", s.requireUser(s.handleThesesSync))
+	s.mux.HandleFunc("POST /api/theses/upload", s.requireUser(s.denyInDemo(s.handleUploadThesis)))
+	s.mux.HandleFunc("POST /api/theses/scoring-log", s.requireUser(s.denyInDemo(s.handleUploadScoringLog)))
+	s.mux.HandleFunc("POST /api/theses/sync", s.requireUser(s.denyInDemo(s.handleThesesSync)))
+	s.mux.HandleFunc("GET /api/theses/health", s.requireUser(s.handleThesesHealth))
 	s.mux.HandleFunc("GET /api/theses/{id}/revision-prompt", s.requireUser(s.handleThesisRevisionPrompt))
 
 	// SC-36: AI Nexus tab (Visser replication layer).

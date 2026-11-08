@@ -35,6 +35,12 @@ func (s *Server) handleListTheses(w http.ResponseWriter, r *http.Request) {
 		mapStoreError(w, err)
 		return
 	}
+	if s.demoModeOn(r.Context()) {
+		// Demo mode: the research library is not portfolio data, but the owned/watchlist tag is.
+		for i := range rows {
+			maskThesisRowForDemo(&rows[i])
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"theses":     rows,
 		"configured": s.theses.Configured(),
@@ -57,7 +63,18 @@ func (s *Server) handleGetThesisLibrary(w http.ResponseWriter, r *http.Request) 
 		mapStoreError(w, err)
 		return
 	}
+	if s.demoModeOn(r.Context()) {
+		maskThesisRowForDemo(&t.Row)
+	}
 	writeJSON(w, http.StatusOK, t)
+}
+
+// maskThesisRowForDemo drops the fields that are derived from the portfolio: the owned/watchlist tag and the
+// earnings date/urgency (only held tickers have them). The research text itself is not portfolio data.
+func maskThesisRowForDemo(r *theses.Row) {
+	r.Ownership = "other"
+	r.NextEarningsDate = nil
+	r.EarningsUrgency = "none"
 }
 
 // GET /api/theses/gaps
@@ -72,6 +89,20 @@ func (s *Server) handleThesesGaps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"gaps": gaps})
+}
+
+// GET /api/theses/health — SC-55 P4: open ingest failures, the sync-tick counter and the latest reconciliation.
+func (s *Server) handleThesesHealth(w http.ResponseWriter, r *http.Request) {
+	if s.theses == nil {
+		writeJSON(w, http.StatusOK, theses.Health{Failures: []theses.IngestFailure{}})
+		return
+	}
+	h, err := s.theses.Health(r.Context())
+	if err != nil {
+		mapStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h)
 }
 
 // POST /api/theses/upload
@@ -155,6 +186,9 @@ func (s *Server) handleThesisRevisionPrompt(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		mapStoreError(w, err)
 		return
+	}
+	if s.demoModeOn(r.Context()) {
+		maskThesisRowForDemo(&t.Row)
 	}
 	var prompt strings.Builder
 	prompt.WriteString("# Thesis Revision Request — " + t.Ticker)
