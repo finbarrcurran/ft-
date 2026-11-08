@@ -23,6 +23,12 @@ func TestNormaliseAdapter_NewAndRegression(t *testing.T) {
 		{"Design Automation", "software_saas"},
 		{"Design IP", "software_saas"},
 		{"Semiconductor EDA", "software_saas"}, // guard: EDA wins over "semi"
+		// robotics_embodiment (parser slug underscored, scorecard code robotics-embodiment)
+		{"Robotics & Embodiment", "robotics_embodiment"},
+		{"Robotics/Embodiment", "robotics_embodiment"},
+		{"Robotics-Embodiment", "robotics_embodiment"},
+		{"robotics_embodiment", "robotics_embodiment"},
+		{"Industrial Automation", ""}, // guard: no keyword route for robotics
 		// regression — existing adapters unchanged
 		{"Pharma", "pharma"},
 		{"AI-Infra/Semi", "ai_infra_semi"},

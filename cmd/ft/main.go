@@ -104,6 +104,8 @@ func main() {
 		runCalendarRefresh(os.Args[2:])
 	case "calendar-report":
 		runCalendarReport(os.Args[2:])
+	case "market-stats-refresh":
+		runMarketStatsRefresh()
 	case "sector-backfill":
 		runSectorBackfill(os.Args[2:])
 	case "sector-ingest":
@@ -226,6 +228,23 @@ func runCalendarRefresh(args []string) {
 	}
 }
 
+// runMarketStatsRefresh runs one SC-57 pass (52-week range, all-time high, market cap for the stock watchlist).
+func runMarketStatsRefresh() {
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	sum := refresh.New(st).RefreshMarketStats(ctx)
+	fmt.Printf("market stats: %d tickers, %d answered, %d with a failed half\n", sum.Total, sum.Answered, sum.Failed)
+	for _, e := range sum.Errors {
+		fmt.Fprintln(os.Stderr, "  failed:", e)
+	}
+}
+
 // runCalendarReport prints the per-ticker report-date table from the store (no network).
 func runCalendarReport(args []string) {
 	fs := flag.NewFlagSet("calendar-report", flag.ExitOnError)
@@ -300,6 +319,7 @@ USAGE
   ft backfill-bars [--user-id N] [--range 2y]  fetch 2y daily OHLC for all holdings (Spec 9c)
   ft perf-derive [--user-id N]                 derive closed_trades + regen snapshots (Spec 9d)
   ft calendar-refresh [--second-per-run N]     SC-56: one report-date pass over every holding, watchlist row and live thesis
+  ft market-stats-refresh                      SC-57: refresh 52-week range, all-time high and market cap for the stock watchlist
   ft calendar-report                           SC-56: print the report-date state of every ticker (reads the store only)
   ft sector-backfill [--months 14]             one-off Spec 9f 14-month ETF snapshot backfill
   ft sector-ingest                             one Spec 9f daily sector ingest (manual trigger)

@@ -87,6 +87,10 @@ type watchlistRow struct {
 
 	// SC-56 — report-date state and provenance (nil for crypto and for tickers not yet fetched).
 	Calendar *domain.CalendarInfo `json:"calendar,omitempty"`
+
+	// SC-57 — 52-week high/low, all-time high (available history only) and market cap, each with source and
+	// as-of; null values when unavailable. Always present.
+	MarketStats *domain.MarketStatsInfo `json:"marketStats"`
 }
 
 // GET /api/watchlist
@@ -120,6 +124,7 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 	eff := s.currentEffectiveRegime(r.Context())
 	alertsActive := regime.GatesWatchlistEntryZone(eff)
 	calByTicker := s.store.CalendarInfoMap(r.Context()) // SC-56
+	statsByTicker := s.store.MarketStatsMap(r.Context()) // SC-57
 
 	now := time.Now().UTC()
 	out := make([]watchlistRow, 0, len(entries))
@@ -152,9 +157,21 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 			AlertSuppressed: inRange && !alertsActive,
 			Market:          marketPtr,
 			Calendar:        calByTicker[e.Ticker],
+			MarketStats:     marketStatsFor(e, statsByTicker),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"watchlist": out})
+}
+
+// marketStatsFor returns the SC-57 block for a row: stored values, or an all-null block saying why (never an error).
+func marketStatsFor(e *domain.WatchlistEntry, m map[string]*domain.MarketStatsInfo) *domain.MarketStatsInfo {
+	if e.Kind == "crypto" {
+		return &domain.MarketStatsInfo{Note: "crypto: not covered"}
+	}
+	if st, ok := m[e.Ticker]; ok {
+		return st
+	}
+	return &domain.MarketStatsInfo{Note: "not fetched yet"}
 }
 
 // isInEntryZone reports whether the entry's current price falls inside the

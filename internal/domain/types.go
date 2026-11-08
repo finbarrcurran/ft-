@@ -383,3 +383,31 @@ type CalendarInfo struct {
 	LastReportedDate *string `json:"lastReportedDate,omitempty"`
 	Note             string  `json:"note,omitempty"` // fetch error text or the not-applicable reason
 }
+
+// StatValue is one market statistic with where it came from and when it was read (SC-57).
+// Value is nil when the provider did not return it; Source and AsOf are then omitted.
+type StatValue struct {
+	Value  *float64 `json:"value"`
+	Source string   `json:"source,omitempty"`
+	AsOf   *int64   `json:"asOf,omitempty"` // unix seconds
+}
+
+// ATHStat is the all-time high taken ONLY from the history the provider returned. Date is the month holding it;
+// HistoryFrom/HistoryTo label the range the maximum was taken over (an IPO'd name has a short history).
+type ATHStat struct {
+	StatValue
+	Date        *string `json:"date,omitempty"`
+	HistoryFrom *string `json:"historyFrom,omitempty"`
+	HistoryTo   *string `json:"historyTo,omitempty"`
+}
+
+// MarketStatsInfo is the SC-57 block on /api/watchlist rows (and so on the MCP get_watchlist tool).
+// Always present on a row; every value is null when unavailable (non-US names are best effort).
+type MarketStatsInfo struct {
+	High52w   StatValue `json:"high52w"`
+	Low52w    StatValue `json:"low52w"`
+	ATH       ATHStat   `json:"ath"`
+	MarketCap StatValue `json:"marketCap"`
+	Currency  string    `json:"currency,omitempty"`
+	Note      string    `json:"note,omitempty"` // "not fetched yet", "crypto: not covered" or the last fetch error
+}
