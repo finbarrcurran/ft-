@@ -785,6 +785,17 @@ func runServe() {
 		}
 	})
 
+	// FT-079 — nightly circuit-breaker check at 04:30 UTC, after the 04:00 job has written the day's value row. It
+	// records the cash balance with that row (FT-110), reads the cash-inclusive drawdown and arms or clears the
+	// ADVISORY breaker, with one Telegram alert on a trip. Nothing in the trade flow reads the breaker.
+	scheduleAt(bgCtx, 4, 30, func() {
+		ctx, cancel := context.WithTimeout(bgCtx, 2*time.Minute)
+		defer cancel()
+		if err := srv.RunNightlyRiskCheck(ctx, time.Now(), &monitor.Telegram{}); err != nil {
+			slog.Error("risk: nightly check failed", "err", err)
+		}
+	})
+
 	// Spec 15 — Thesis Library sync. Periodically `git pull` the
 	// cross_sector_research clone and re-index. No-op if FT_GITHUB_TOKEN
 	// isn't set (graceful degradation in dev).

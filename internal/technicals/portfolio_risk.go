@@ -41,6 +41,9 @@ type PortfolioRiskCheck struct {
 	ThemeConcentration    map[string]float64 `json:"themeConcentration"` // theme → %
 	TotalActiveRiskPct    float64            `json:"totalActiveRiskPct"`
 	DrawdownPct           float64            `json:"drawdownPct"` // negative when underwater
+	DrawdownBasis         string             `json:"drawdownBasis,omitempty"` // FT-079: what the drawdown is measured on
+	CashUSD               float64            `json:"cashUsd"`                 // cash included in the drawdown basis
+	Advisory              bool               `json:"advisory"`                // FT-106: the breaker flags, it never blocks a trade
 	CircuitBreakerActive  bool               `json:"circuitBreakerActive"`
 	CircuitBreakerUntil   string             `json:"circuitBreakerUntil,omitempty"` // ISO date
 	Caps                  RiskCaps           `json:"caps"`

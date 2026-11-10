@@ -5697,9 +5697,15 @@ function renderPortfolioRiskSection(r) {
   const concRows = concEntries.map(([t, p]) => barRow(t, p, caps.concentrationPct || 15)).join('');
   const themeRows = themeEntries.map(([t, p]) => barRow(t, p, caps.themeConcentrationPct || 30)).join('');
 
+  const dd0 = (r.drawdownPct || 0);
+  const cap0 = (r.caps && r.caps.drawdownCircuitPct) || 10;
+  // FT-079/FT-106: the breaker is ADVISORY (it flags, it never blocks a trade). A breach that has not been armed yet
+  // (the nightly job arms it) shows as BREACH, not NORMAL.
   const cbStatus = r.circuitBreakerActive
-    ? `<span class="loss">🛑 ARMED${r.circuitBreakerUntil ? ` until ${escapeHTML(r.circuitBreakerUntil)}` : ''}</span>`
-    : '<span class="gain">🟢 NORMAL</span>';
+    ? `<span class="loss">🛑 ARMED${r.circuitBreakerUntil ? ` until ${escapeHTML(r.circuitBreakerUntil)}` : ''}</span> <span class="dim">(ADVISORY)</span>`
+    : (dd0 <= -cap0
+        ? '<span class="loss">⚠ BREACH, not yet armed</span> <span class="dim">(ADVISORY)</span>'
+        : '<span class="gain">🟢 NORMAL</span> <span class="dim">(ADVISORY)</span>');
 
   const dd = (r.drawdownPct || 0);
   const ddCap = caps.drawdownCircuitPct || 10;
@@ -5719,7 +5725,7 @@ function renderPortfolioRiskSection(r) {
         <div class="risk-stat">
           <div class="risk-stat-label">Drawdown from peak</div>
           <div class="risk-stat-value num ${dd <= -ddCap ? 'loss' : dd < -3 ? 'amber-text' : ''}">${dd.toFixed(2)}%</div>
-          <div class="risk-stat-sub dim">cap: -${ddCap}%</div>
+          <div class="risk-stat-sub dim">cap: -${ddCap}% · ${escapeHTML(r.drawdownBasis || '')}</div>
         </div>
         <div class="risk-stat">
           <div class="risk-stat-label">Total active risk</div>
