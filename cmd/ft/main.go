@@ -110,6 +110,8 @@ func main() {
 		runSectorBackfill(os.Args[2:])
 	case "sector-ingest":
 		runSectorIngest(os.Args[2:])
+	case "sector-repair":
+		runSectorRepair(os.Args[2:])
 	case "nexus-ingest":
 		runNexusIngest(os.Args[2:])
 	case "nexus-backfill":
@@ -322,6 +324,7 @@ USAGE
   ft market-stats-refresh                      SC-57: refresh 52-week range, all-time high and market cap for the stock watchlist
   ft calendar-report                           SC-56: print the report-date state of every ticker (reads the store only)
   ft sector-backfill [--months 14]             one-off Spec 9f 14-month ETF snapshot backfill
+  ft sector-repair [--apply]                   FT-081: find split steps in sector ETF closes; dry run unless --apply
   ft sector-ingest                             one Spec 9f daily sector ingest (manual trigger)
   ft nexus-ingest --dir DIR [--as-of DATE]     ingest AI-Nexus .xlsx snapshots (SC-36)
   ft nexus-backfill [--range 2y] [--gap-ms N]  fetch daily bars for the Nexus universe (SC-36)
@@ -1034,6 +1037,33 @@ func runSectorIngest(args []string) {
 	res := sector_rotation.IngestDaily(ctx, st, time.Now().UTC())
 	fmt.Printf("sector-ingest: sectors_ok=%d/%d errs=%d\n",
 		res.SectorsOK, res.SectorsTried, len(res.Errors))
+}
+
+// FT-081 — dry-run (default) or apply a split repair on sector_snapshots.
+func runSectorRepair(args []string) {
+	fs := flag.NewFlagSet("sector-repair", flag.ExitOnError)
+	apply := fs.Bool("apply", false, "write the corrected closes (default: dry run)")
+	_ = fs.Parse(args)
+
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	res := sector_rotation.RepairSplits(ctx, st, market.FetchYahooDailyCloses, *apply)
+	fmt.Printf("sector-repair: tickers_with_step=%v rows_to_change=%d applied=%v errs=%d\n",
+		res.TickersWithStep, len(res.Changes), res.Applied, len(res.Errors))
+	for _, c := range res.Changes {
+		fmt.Printf("  %s %s %s %.4f -> %.4f\n", c.Ticker, c.Code, c.Date, c.Old, c.New)
+	}
+	for _, e := range res.Errors {
+		fmt.Println("  err:", e)
+	}
+	sector_rotation.BustCache()
 }
 
 // runToken handles `ft token create` and `ft token list`.

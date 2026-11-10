@@ -68,7 +68,7 @@ func (s *Service) RefreshMarketStats(ctx context.Context) MarketStatsSummary {
 			st = &market.MarketStats{ChartErr: err, CapErr: err}
 		}
 		if st.ChartErr == nil {
-			w.ChartOK, w.Currency, w.High52w, w.Low52w, w.ATH = true, st.Currency, st.High52w, st.Low52w, st.ATH
+			w.ChartOK, w.Currency, w.High52w, w.Low52w, w.ATH, w.Price = true, st.Currency, st.High52w, st.Low52w, st.ATH, st.Price
 			w.ATHDate, w.HistFrom, w.HistTo, w.ChartAsOf = st.ATHDate, st.HistoryFrom, st.HistoryTo, st.ChartAsOf
 		}
 		if st.CapErr == nil {

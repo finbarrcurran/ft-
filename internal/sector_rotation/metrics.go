@@ -103,6 +103,11 @@ func ComputeAll(ctx context.Context, st *store.Store, userID int64) ([]SectorMet
 			dates = append(dates, sn.Date)
 			closes = append(closes, sn.ClosePrimary)
 		}
+		// FT-081: an unrepaired split step in the series would fake a -70% move; show no data instead of a false tag.
+		if _, _, stepped := FindStep(closes); stepped {
+			out = append(out, m)
+			continue
+		}
 		latestClose := closes[len(closes)-1]
 		latestDate := dates[len(dates)-1]
 
