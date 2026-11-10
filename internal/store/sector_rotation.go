@@ -129,6 +129,14 @@ func (s *Store) ListRecentSnapshots(ctx context.Context, sectorID int64, daysBac
 	return out, rows.Err()
 }
 
+// UpdateSectorPrimaryClose replaces one stored primary close (FT-081 split repair).
+func (s *Store) UpdateSectorPrimaryClose(ctx context.Context, sectorID int64, date string, closePrimary float64) error {
+	_, err := s.DB.ExecContext(ctx,
+		`UPDATE sector_snapshots SET close_primary = ? WHERE sector_universe_id = ? AND snapshot_date = ?`,
+		closePrimary, sectorID, date)
+	return err
+}
+
 // SectorSnapshot is the trimmed shape needed by metrics computation.
 type SectorSnapshot struct {
 	SectorID     int64

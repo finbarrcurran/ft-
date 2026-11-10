@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.110.0 · 2026-11-08** — latest change: Robotics & Embodiment routes to its own slug (§13).
+> **Current version: v1.111.0 · 2026-11-10** — latest change: Sector series split repair; watchlist price refresh; Robotics & Embodiment locked (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.110.0 2026-11-08 -->
+<!-- reference_reviewed: v1.111.0 2026-11-10 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -122,6 +122,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0069 | `ticker_calendar_digest` | SC-56 P4 — `ticker_calendar_digest_sent` (one row per UTC day the date-change digest went out) |
 | 0070 | `calendar_second_source_health` | SC-56 follow-ups — `ticker_calendar.second_error`, `second_error_count`, `quote_checked_at` |
 | 0071 | `ticker_market_stats` | SC-57 — `ticker_market_stats` (52-week range, all-time high + history range, market cap, as-of, last error) |
+| 0072 | `ticker_stats_price` | FT-082 — price columns |
 | 0063 | `crypto_index_members` | Jordi-46 Phase 1 — the 46 constituents of the Visser-Labs tokenized index (list_version 2026-09-21; 42 tokens with CoinGecko ids, 4 stocks COIN/HOOD/CRCL/FIGR; 10 verticals; soft `removed_at`); reference only, read by the screener and the list endpoint and by nothing else (no alert, gap-report, entry-zone, watchlist, holdings or thesis code) |
 | 0062 | `video_frame_reads` | SC-54 — `video_frame_reads` (what the vision model read off each chart frame: series, visible values, confidence, model, date; re-reads add rows) and `video_frame_runs` (one row per pass: status, reason, frames, calls, reads, cost) |
 | 0061 | `video_items` | SC-53 — `video_item_runs` (one per digest: model, chunks, tokens, cost, gate counts, status) and `video_items` (block, fields, cited span, gate class + issues, chart-unverified numbers, ticker resolution, direction verdict/speaker view/reason) |
@@ -152,7 +153,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Daily job | 04:00 | 365-day price history, calendar dates, beta, 12m vol, analyst forecasts, market stats (SC-57; a failed half keeps stored values; `ft market-stats-refresh`). CLI: `ft daily` |
 | Weekly FT snapshot (SC-46) | Sunday 18:00 UTC (Sunday evening Dublin) + Monday 07:00 UTC catch-up | `Server.RunScheduledSnapshot`: builds the deterministic weekly snapshot from the same in-process handlers the connector tools call (portfolio, YTD performance and trade statistics, thesis scores and locks, gap report, watchlist in-zone set, alerts raised in the last 7 days, regimes, crypto indicators with data dates, non-ok monitor entries, the latest week of video digests), compares it with the previous weeks (deltas, 4-week trend, text/set changes, a Top-changes block of at most 8 lines ranked by a fixed rule: regime changes and thesis-score changes, then set changes, then the largest relative movers), saves it to `ft_snapshots` and writes `/var/lib/ft/data/bridge/snapshot/ft-snapshot.md`; one Telegram note. The Monday run takes the week that just ended only if Sunday's did not run. A section whose source fails is omitted with a note, never invented; demo mode refuses to snapshot. **Snapshot v2 (v1.86.1):** each regime is shown with its set-at date, age and the 14-day stale flag, an unset/unclassified regime reads "unset since <date>" and is never a "changed from X to Y" or a Top change, and stale regimes are listed under Data health (which no longer says "all ok" for them); value changes carry an "of which" note from `holdings_audit` since the previous snapshot (removals, additions, invested-amount adjustments with invested USD; capital flows are not recorded in FT and are stated as not separable) plus the same for the three earlier weeks; the Watchlist section lists "In entry zone without a thesis" (entry-zone tickers also in the gap report), and a ticker entering that state is a Top change; header `ft_snapshot_version: 2`, marker `END ft-snapshot v2`. Weeks before the first stored snapshot are filled ONLY from existing history tables (portfolio value, alerts raised, regimes, thesis scores and lock dates); everything else starts at its first snapshot. Monitor `snapshot`: alert when the newest snapshot is older than 8 days, weekly reminders, quiet before the first one |
 | Video digest sweep | 09:15, plus ~2 min after boot | SC-43: ingests any complete package in `/var/lib/video_digest` not yet digested (one governor LLM call per new video) |
-| Sector rotation ingest | 22:00 | 34 sector ETFs + SPY + VWRL daily close. CLI: `ft sector-ingest` |
+| Sector rotation ingest | 22:00 | 34 sector ETFs + SPY + VWRL daily close. CLI: `ft sector-ingest`; FT-081: split steps repaired after each run (`ft sector-repair`) |
 | Weekly sector digest | Fri 22:00 | Top/bottom by RS, WoW movers → `sector_rotation_digests` |
 | AI Nexus daily | 22:30 | Universe + benchmark bars, Trend Score + Exhaustion |
 | AI Nexus weekly | Sun 22:45 | Forward PEG recompute |
@@ -206,7 +207,7 @@ Cookie auth unless marked **T** (cookie or bearer token). About 190 routes; grou
 
 **News + F&G:** `GET /api/news/{market,crypto}`, `GET /api/feargreed{,/stocks}`
 
-**Watchlist + frameworks (Spec 4):** `GET/POST /api/watchlist` (SC-57: rows and MCP `get_watchlist` carry `marketStats`: `high52w`, `low52w`, `ath` (+ `date`, `historyFrom`, `historyTo`), `marketCap`, each `{value, source, asOf}`, null when unavailable; `ath` = highest monthly high in Yahoo's returned history, never estimated), `PUT/DELETE/{id}`, `POST/{id}/promote`. `GET /api/frameworks{,/{id}}`. `GET/POST /api/scores`
+**Watchlist + frameworks (Spec 4):** `GET/POST /api/watchlist` (SC-57: rows and MCP `get_watchlist` carry `priceAsOf` (FT-082), `marketStats`: `high52w`, `low52w`, `ath` (+ `date`, `historyFrom`, `historyTo`), `marketCap`, each `{value, source, asOf}`, null when unavailable; `ath` = highest monthly high in Yahoo's returned history, never estimated), `PUT/DELETE/{id}`, `POST/{id}/promote`. `GET /api/frameworks{,/{id}}`. `GET/POST /api/scores`
 
 **Preferences (Spec 6):** `GET /api/preferences` **T**, `GET/PUT /api/preferences/{key}` **T**
 
@@ -409,23 +410,31 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.111.0 · 2026-11-10 · pass 126 · SC-58
+
+**Sector split repair; watchlist daily price; Robotics & Embodiment locked.** Sector ETF split steps (SOXX, ITA 3:1 on 2026-11-05) are repaired from adjusted history; the Watchlist shows the daily Yahoo price with an as-of; scorecard `robotics-embodiment` set to `locked` on 2026-11-10 (Fin, supplement v1.1), so the adapter is recorded as locked. Supersedes v1.110.0.
+
 ### v1.110.0 · 2026-11-08 · pass 125 · SC-57b
 
-**Robotics & Embodiment routes to its own slug.** The parser maps the adapter name variants to `robotics_embodiment` (scorecard code `robotics-embodiment`, still `needs-review`). Aliases only, no keyword route. Supersedes v1.109.0.
+**Robotics & Embodiment routes to its own slug.** Adapter name variants map to `robotics_embodiment` (scorecard `robotics-embodiment`; locked in v1.111.0). Aliases only. Supersedes v1.109.0.
+
 
 ### v1.109.0 · 2026-11-08 · pass 124 · SC-57
 
-**52-week range, all-time high and market cap on the watchlist.** Watchlist rows and MCP `get_watchlist` carry `marketStats` (source and as-of per value, null when unavailable; the all-time high is the highest monthly high in Yahoo's returned history, never estimated). Daily job and `ft market-stats-refresh`. Migration: 0071. Reference updated: §3-5, §11. Supersedes v1.108.0.
+**52-week range, all-time high and market cap on the watchlist.** Watchlist rows and MCP `get_watchlist` carry `marketStats` (source and as-of, null when unavailable; the all-time high is the highest monthly high in the returned history). `ft market-stats-refresh`. Migration: 0071. Supersedes v1.108.0.
+
 
 
 ### v1.108.0 · 2026-11-08 · pass 123 · SC-56b
 
-**One daily re-score summary.** Held theses with `revision_needed` are no longer a per-holding bot alert (the bot rendered them as empty messages, daily). One message at 07:35 UTC lists them with days since the report; silent when none. Last-reported dates are tested never to move backwards. Behaviour: bot alerts, monitor. Migrations: none. Reference updated: §5. Supersedes v1.107.0.
+**One daily re-score summary.** Held theses with `revision_needed` are no longer a per-holding bot alert (the bot rendered them as empty messages, daily). One message at 07:35 UTC lists them with days since the report; silent when none. Behaviour: bot alerts, monitor. Reference updated: §5. Supersedes v1.107.0.
+
 
 
 ### v1.107.0 · 2026-11-08 · pass 122 · SC-56 follow-ups
 
-**Last-reported backfill, second-source alert, demo masks.** A missing or stale (220+ days) last-reported date is backfilled daily from `v7/quote`; second-source failures are stored, counted in the hourly line and alert when 3+ tickers fail twice in a row. Demo mode masks the calendar fields. Behaviour: job, monitor, API. Migration: 0070. Reference updated: §3, §5. Supersedes v1.106.0.
+**Last-reported backfill, second-source alert, demo masks.** A missing or stale (220+ days) last-reported date is backfilled daily from `v7/quote`; second-source failures are stored, counted in the hourly line and alert when 3+ tickers fail twice in a row. Demo mode masks the calendar fields. Migration: 0070. Reference updated: §3, §5. Supersedes v1.106.0.
+
 
 
 ### v1.106.0 · 2026-11-07 · pass 121 · SC-56 P5
@@ -433,9 +442,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Report-date backfill and verification.** Next-date lookups take the page budget before history lookups; `ft calendar-refresh --second-per-run N` runs the backfill and `ft calendar-report` prints the table. A live run on a scratch copy covered 63 tickers with none missing, stale or failed. Migrations: none. Reference updated: §4. Supersedes v1.105.0.
 
 
+
 ### v1.105.0 · 2026-11-07 · pass 120 · SC-56 P4
 
 **Report-date alerts and daily digest.** A fetch fault (404 at once, others after 3 hourly runs), a missing date or a past date shown as next raises one Telegram message via the monitor (daily reminder, recovery, silent when clean). A 07:30 UTC digest lists date changes for owned and watchlist tickers, at most one a day. Migration: 0069. Supersedes v1.104.0.
+
 
 
 ### v1.104.0 · 2026-11-07 · pass 119 · SC-56 P1-P3
@@ -443,9 +454,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Report dates for every ticker, rolled forward, with visible state.** The hourly job covers holdings, watchlist and live theses (about 63 tickers) in `ticker_calendar`; passed dates become "reported" and the next date comes from a second Yahoo source; state, source and fetch time show in the UI. Migration: 0068. Supersedes v1.103.0.
 
 
+
 ### v1.103.1 · 2026-11-07 · pass 118 · SC-55
 
 **Missing-token alert; rejected token counts as a failed pass.** Monitor check `thesis_token` alerts when `FT_GITHUB_TOKEN` is absent on a server with the thesis clone (silent in dev and demo). An expired token (401/403) already fails the sync pass and counts toward the six; the fetch now fails at once. Supersedes v1.103.0.
+
 
 
 ### v1.103.0 · 2026-11-07 · pass 118 · SC-55 P4
@@ -453,13 +466,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 **Loud ingest failures.** A locked file that cannot be ingested is recorded, shown in a red box on the Theses tab (`GET /api/theses/health`) and alerted once; 6 failed sync passes in a row alert once; an upload whose sync failed says so. Supersedes v1.102.0.
 
 
-### v1.102.0 · 2026-11-07 · pass 117 · SC-55 P3
-
-**Gap report flags unindexed files.** A ticker with a valid locked file in the repo but no row is listed with `reason: file_not_indexed` (also in `get_gap_report`) and shown under "Not indexed" on the Theses tab. Supersedes v1.101.0.
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.110.0 -->
+<!-- END FT-master-spec v1.111.0 -->

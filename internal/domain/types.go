@@ -408,6 +408,7 @@ type MarketStatsInfo struct {
 	Low52w    StatValue `json:"low52w"`
 	ATH       ATHStat   `json:"ath"`
 	MarketCap StatValue `json:"marketCap"`
+	Price     StatValue `json:"price"` // FT-082: last price from the same chart call; the Watchlist shows this
 	Currency  string    `json:"currency,omitempty"`
 	Note      string    `json:"note,omitempty"` // "not fetched yet", "crypto: not covered" or the last fetch error
 }

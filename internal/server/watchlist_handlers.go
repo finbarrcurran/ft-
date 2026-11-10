@@ -91,6 +91,10 @@ type watchlistRow struct {
 	// SC-57 — 52-week high/low, all-time high (available history only) and market cap, each with source and
 	// as-of; null values when unavailable. Always present.
 	MarketStats *domain.MarketStatsInfo `json:"marketStats"`
+
+	// FT-082 — unix time of the price shown in currentPrice when it comes from the daily stats pass; omitted when
+	// the stored one-time quote is all there is.
+	PriceAsOf *int64 `json:"priceAsOf,omitempty"`
 }
 
 // GET /api/watchlist
@@ -129,6 +133,14 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	out := make([]watchlistRow, 0, len(entries))
 	for _, e := range entries {
+		// FT-082: watchlist.current_price is a one-time quote from the day the row was added. When the daily stats
+		// pass has a newer price for the ticker, show that (copy: never mutate the stored entry) and say when it is from.
+		var priceAsOf *int64
+		if st, ok := statsByTicker[e.Ticker]; ok && e.Kind == "stock" && st.Price.Value != nil {
+			cp := *e
+			cp.CurrentPrice = st.Price.Value
+			e, priceAsOf = &cp, st.Price.AsOf
+		}
 		inRange := isInEntryZone(e)
 		// v1.5: resolve per-row market for stock entries via ticker suffix.
 		// (Watchlist has no exchange_override column — suffix rule only.)
@@ -158,6 +170,7 @@ func (s *Server) handleListWatchlist(w http.ResponseWriter, r *http.Request) {
 			Market:          marketPtr,
 			Calendar:        calByTicker[e.Ticker],
 			MarketStats:     marketStatsFor(e, statsByTicker),
+			PriceAsOf:       priceAsOf,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"watchlist": out})

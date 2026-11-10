@@ -12,7 +12,7 @@ import (
 type MarketStatsWrite struct {
 	Ticker, ProviderSymbol, Currency string
 	ChartOK, CapOK                   bool
-	High52w, Low52w, ATH             *float64
+	High52w, Low52w, ATH, Price      *float64
 	ATHDate, HistFrom, HistTo        string
 	ChartAsOf                        int64
 	MarketCap                        *float64
@@ -32,8 +32,8 @@ func (s *Store) UpsertMarketStats(ctx context.Context, w MarketStatsWrite) error
 	if w.ChartOK {
 		if _, err := s.DB.ExecContext(ctx, `UPDATE ticker_market_stats SET currency = COALESCE(NULLIF(?, ''), currency),
 			high_52w = ?, low_52w = ?, ath = ?, ath_date = NULLIF(?, ''), hist_from = NULLIF(?, ''), hist_to = NULLIF(?, ''),
-			chart_source = ?, chart_as_of = ? WHERE ticker = ?`,
-			w.Currency, w.High52w, w.Low52w, w.ATH, w.ATHDate, w.HistFrom, w.HistTo, statsSource, w.ChartAsOf, w.Ticker); err != nil {
+			chart_source = ?, chart_as_of = ?, price = ?, price_as_of = ? WHERE ticker = ?`,
+			w.Currency, w.High52w, w.Low52w, w.ATH, w.ATHDate, w.HistFrom, w.HistTo, statsSource, w.ChartAsOf, w.Price, w.ChartAsOf, w.Ticker); err != nil {
 			return err
 		}
 	}
@@ -52,7 +52,7 @@ func (s *Store) UpsertMarketStats(ctx context.Context, w MarketStatsWrite) error
 // MarketStatsMap returns the API view of every stored row, keyed by ticker.
 func (s *Store) MarketStatsMap(ctx context.Context) map[string]*domain.MarketStatsInfo {
 	rows, err := s.DB.QueryContext(ctx, `SELECT ticker, currency, high_52w, low_52w, ath, ath_date, hist_from, hist_to,
-		chart_source, chart_as_of, market_cap, cap_source, cap_as_of, last_error FROM ticker_market_stats`)
+		chart_source, chart_as_of, market_cap, cap_source, cap_as_of, last_error, price FROM ticker_market_stats`)
 	if err != nil {
 		return nil
 	}
@@ -61,9 +61,9 @@ func (s *Store) MarketStatsMap(ctx context.Context) map[string]*domain.MarketSta
 	for rows.Next() {
 		var t string
 		var cur, athDate, hf, ht, cs, ks, le sql.NullString
-		var h, l, ath, mc sql.NullFloat64
+		var h, l, ath, mc, px sql.NullFloat64
 		var cAsOf, kAsOf sql.NullInt64
-		if err := rows.Scan(&t, &cur, &h, &l, &ath, &athDate, &hf, &ht, &cs, &cAsOf, &mc, &ks, &kAsOf, &le); err != nil {
+		if err := rows.Scan(&t, &cur, &h, &l, &ath, &athDate, &hf, &ht, &cs, &cAsOf, &mc, &ks, &kAsOf, &le, &px); err != nil {
 			return out
 		}
 		m := &domain.MarketStatsInfo{Currency: cur.String}
@@ -82,6 +82,7 @@ func (s *Store) MarketStatsMap(ctx context.Context) map[string]*domain.MarketSta
 		fill(&m.Low52w, l, cs, cAsOf)
 		fill(&m.ATH.StatValue, ath, cs, cAsOf)
 		fill(&m.MarketCap, mc, ks, kAsOf)
+		fill(&m.Price, px, cs, cAsOf)
 		if m.ATH.Value != nil {
 			m.ATH.Date, m.ATH.HistoryFrom, m.ATH.HistoryTo = nullStrPtr(athDate), nullStrPtr(hf), nullStrPtr(ht)
 		}

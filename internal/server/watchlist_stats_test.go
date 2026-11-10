@@ -58,3 +58,47 @@ func TestWatchlist_MarketStatsNullsAndValues(t *testing.T) {
 		}
 	}
 }
+
+// FT-082: the shown price and the in-range flag come from the daily stats pass when it has a price; the stored
+// one-time quote is the fallback; a row with neither stays priceless. The stored entry is never rewritten.
+func TestWatchlist_PriceFromStatsPass(t *testing.T) {
+	s, st := snapServer(t)
+	mustExec(t, st, `INSERT INTO watchlist (user_id, ticker, kind, current_price, target_entry_low, target_entry_high, added_at, updated_at)
+		VALUES (1, 'BE', 'stock', 281.76, 150, 200, 0, 0), (1, 'OLD', 'stock', 50, 40, 60, 0, 0), (1, 'NEW', 'stock', NULL, NULL, NULL, 0, 0)`)
+	mustExec(t, st, `INSERT INTO ticker_market_stats (ticker, chart_source, chart_as_of, price, price_as_of, updated_at)
+		VALUES ('BE', 'yahoo', 1793000000, 173.24, 1793000000, 0), ('NEW', 'yahoo', 1793000000, 12.5, 1793000000, 0)`)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/watchlist", nil).WithContext(context.WithValue(context.Background(), ctxUserID, int64(1)))
+	s.handleListWatchlist(rec, req)
+	var out struct {
+		Watchlist []struct {
+			Ticker       string   `json:"ticker"`
+			CurrentPrice *float64 `json:"currentPrice"`
+			PriceAsOf    *int64   `json:"priceAsOf"`
+			InRange      bool     `json:"inRange"`
+		} `json:"watchlist"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range out.Watchlist {
+		switch r.Ticker {
+		case "BE":
+			if r.CurrentPrice == nil || *r.CurrentPrice != 173.24 || r.PriceAsOf == nil || !r.InRange {
+				t.Fatalf("BE must use the fresh 173.24 (in 150-200): %+v", r)
+			}
+		case "OLD":
+			if r.CurrentPrice == nil || *r.CurrentPrice != 50 || r.PriceAsOf != nil {
+				t.Fatalf("OLD keeps its stored price with no as-of: %+v", r)
+			}
+		case "NEW":
+			if r.CurrentPrice == nil || *r.CurrentPrice != 12.5 {
+				t.Fatalf("NEW had no price and must get the stats one: %+v", r)
+			}
+		}
+	}
+	var stored float64
+	if err := st.DB.QueryRow(`SELECT current_price FROM watchlist WHERE ticker='BE'`).Scan(&stored); err != nil || stored != 281.76 {
+		t.Fatalf("stored quote must be untouched: %v %v", stored, err)
+	}
+}

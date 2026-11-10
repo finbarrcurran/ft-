@@ -74,6 +74,10 @@ func IngestDaily(ctx context.Context, st *store.Store, today time.Time) *IngestR
 		}
 		r.SectorsOK++
 	}
+	// FT-081: fix any split step in the stored series (no-op when none; reads only the local DB).
+	if rep := RepairSplits(ctx, st, market.FetchYahooDailyCloses, true); len(rep.Errors) > 0 {
+		r.Errors = append(r.Errors, rep.Errors...)
+	}
 	slog.Info("sector_rotation daily ingest",
 		"date", dateISO,
 		"ok", r.SectorsOK,

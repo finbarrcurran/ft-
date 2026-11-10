@@ -22,6 +22,7 @@ type MarketStats struct {
 	ATHDate     string // first day of the month holding the highest high
 	HistoryFrom string // first and last bar of the history ATH was taken from
 	HistoryTo   string
+	Price       *float64 // last regular-market price in the chart meta (FT-082); read at ChartAsOf
 	ChartAsOf   int64 // the provider's own quote time (unix); the fetch time when it gave none
 	MarketCap   *float64
 	CapAsOf     int64 // when the market cap was read (Yahoo gives no timestamp for it)
@@ -37,6 +38,7 @@ func ParseChartRange(raw []byte, fetched time.Time) (*MarketStats, error) {
 				Meta struct {
 					Currency          string   `json:"currency"`
 					RegularMarketTime int64    `json:"regularMarketTime"`
+					RegularMarketPrice *float64 `json:"regularMarketPrice"`
 					FiftyTwoWeekHigh  *float64 `json:"fiftyTwoWeekHigh"`
 					FiftyTwoWeekLow   *float64 `json:"fiftyTwoWeekLow"`
 				} `json:"meta"`
@@ -59,6 +61,9 @@ func ParseChartRange(raw []byte, fetched time.Time) (*MarketStats, error) {
 	out := &MarketStats{Currency: res.Meta.Currency, ChartAsOf: res.Meta.RegularMarketTime}
 	if out.ChartAsOf == 0 {
 		out.ChartAsOf = fetched.Unix()
+	}
+	if v := res.Meta.RegularMarketPrice; v != nil && *v > 0 {
+		out.Price = v
 	}
 	if v := res.Meta.FiftyTwoWeekHigh; v != nil && *v > 0 {
 		out.High52w = v
