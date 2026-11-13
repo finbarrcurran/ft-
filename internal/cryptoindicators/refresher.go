@@ -83,7 +83,9 @@ func (r *Refresher) RefreshAll(ctx context.Context) error {
 	// Each provider call wrapped to also include the indicator id.
 	calls := []func() result{
 		// FRED (Pal bucket)
-		func() result { return result{"pal_dxy", fred.FetchSeries(ctx, "DTWEXBGS")} },
+		// FT-084: the ICE US Dollar Index (Yahoo DX-Y.NYB), the scale the 100/105 thresholds are written for. FRED's
+		// DTWEXBGS is the broad trade-weighted index (~121) and never matched them.
+		func() result { return result{"pal_dxy", yh.FetchICEDXY(ctx)} },
 		func() result { return result{"pal_us2y", fred.FetchSeries(ctx, "DGS2")} },
 		// v1.9.1: CFNAI from FRED replaces the manual-JSON pal_ism upload.
 		// Same monthly cadence + same business-cycle pulse signal.

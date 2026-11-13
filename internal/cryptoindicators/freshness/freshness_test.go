@@ -39,13 +39,12 @@ func TestCFNAIBoundaries(t *testing.T) {
 	}
 }
 
-func TestDXYAndStablecoinBoundaries(t *testing.T) {
+func TestStablecoinBoundaries(t *testing.T) {
 	for _, c := range []struct {
 		id   string
 		age  int
 		want string
 	}{
-		{"pal_dxy", 11, ""}, {"pal_dxy", 13, ""}, {"pal_dxy", 14, "amber"}, {"pal_dxy", 20, "amber"}, {"pal_dxy", 21, "red"},
 		{"universal_stablecoin_supply", 0, ""}, {"universal_stablecoin_supply", 2, ""}, {"universal_stablecoin_supply", 3, "amber"},
 		{"universal_stablecoin_supply", 4, "amber"}, {"universal_stablecoin_supply", 5, "red"},
 	} {
@@ -53,6 +52,23 @@ func TestDXYAndStablecoinBoundaries(t *testing.T) {
 		now := asOf.AddDate(0, 0, c.age).Format("2006-01-02")
 		if age, lvl := level(t, c.id, "2026-10-01", now); age != c.age || lvl != c.want {
 			t.Fatalf("%s age %d: got %d %q, want %q", c.id, c.age, age, lvl, c.want)
+		}
+	}
+}
+
+// FT-084: pal_dxy is the ICE US Dollar Index from Yahoo, a trading-day series: amber at 3 trading days, red at 5.
+func TestDXYTradingDayBoundaries(t *testing.T) {
+	if err := marketdata.LoadHolidays(); err != nil {
+		t.Fatal(err)
+	}
+	// Data dated Fri 2026-10-02.
+	for _, c := range []struct {
+		now  string
+		age  int
+		want string
+	}{{"2026-10-06", 2, ""}, {"2026-10-07", 3, "amber"}, {"2026-10-08", 4, "amber"}, {"2026-10-09", 5, "red"}} {
+		if age, lvl := level(t, "pal_dxy", "2026-10-02", c.now); age != c.age || lvl != c.want {
+			t.Fatalf("%s: got %d %q, want %d %q", c.now, age, lvl, c.age, c.want)
 		}
 	}
 }
@@ -82,7 +98,7 @@ func TestLiveDataIsFreshToday(t *testing.T) {
 	if err := marketdata.LoadHolidays(); err != nil {
 		t.Fatal(err)
 	}
-	for id, asOf := range map[string]string{"pal_cfnai": "2026-08-01", "pal_dxy": "2026-10-02", "pal_us2y": "2026-10-08", "universal_stablecoin_supply": "2026-10-13"} {
+	for id, asOf := range map[string]string{"pal_cfnai": "2026-08-01", "pal_dxy": "2026-10-12", "pal_us2y": "2026-10-08", "universal_stablecoin_supply": "2026-10-13"} {
 		if age, lvl := level(t, id, asOf, "2026-10-13"); lvl != "" {
 			t.Fatalf("%s as of %s must not be flagged today (age %d, %q)", id, asOf, age, lvl)
 		}
