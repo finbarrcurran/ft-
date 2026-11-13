@@ -199,10 +199,20 @@ func (s *Service) SearchTranscripts(ctx context.Context, q string, o SearchOptio
 		}
 		h.Snippet = strings.Join(strings.Fields(markerRe.ReplaceAllString(snip, " ")), " ")
 		h.TsSec = hitTs(text, snip)
-		h.Link = fmt.Sprintf("https://youtu.be/%s?t=%d", h.VideoID, h.TsSec)
+		h.Link = transcriptLink(h.URL, h.VideoID, h.TsSec)
 		out = append(out, h)
 	}
 	return out, rows.Err()
+}
+
+// transcriptLink is the link a search hit carries: a YouTube video gets a youtu.be link at the
+// hit's second; any other URL (the 22v pages, SC-67) is returned as-is, since there is no
+// timestamp to jump to.
+func transcriptLink(url, videoID string, ts int) string {
+	if url != "" && !strings.Contains(url, "youtu.be/") && !strings.Contains(url, "youtube.com/") {
+		return url
+	}
+	return fmt.Sprintf("https://youtu.be/%s?t=%d", videoID, ts)
 }
 
 // hitTs finds where the highlighted passage sits in the full text and returns the nearest
@@ -262,4 +272,87 @@ func (s *Service) TranscriptStats(ctx context.Context) (TranscriptCounts, error)
 		}
 	}
 	return out, rows.Err()
+}
+
+var v22Re = regexp.MustCompile(`/video-stream/(\d+)`)
+
+// ParseTextTranscript reads one plain-text transcript in the 22v layout (SC-67):
+//
+//	Title: ...
+//	Date: YYYY-MM-DD
+//	Source: https://ai.22vresearch.com/video-stream/<n>/
+//	Whisper small auto-transcript
+//	<blank line>
+//	words ...
+//
+// The row has video id "22v-<n>", the page as its URL and method "whisper". The body carries no
+// [NNNs] markers, so a hit on it has no timestamp.
+func ParseTextTranscript(raw, source string) (TranscriptRow, error) {
+	var r TranscriptRow
+	head, body, ok := strings.Cut(raw, "Whisper small auto-transcript")
+	if !ok {
+		return r, fmt.Errorf("no whisper header line")
+	}
+	for _, ln := range strings.Split(head, "\n") {
+		k, v, found := strings.Cut(strings.TrimSpace(ln), ":")
+		if !found {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		switch strings.ToLower(k) {
+		case "title":
+			r.Title = v
+		case "date":
+			r.PublishedAt = v
+		case "source":
+			r.URL = v
+		}
+	}
+	m := v22Re.FindStringSubmatch(r.URL)
+	if m == nil || r.PublishedAt == "" {
+		return r, fmt.Errorf("missing source url or date")
+	}
+	r.VideoID = "22v-" + m[1]
+	r.Source, r.Channel, r.Method = source, sources[source], "whisper"
+	r.Text = strings.Join(strings.Fields(body), " ")
+	if r.Text == "" {
+		return r, fmt.Errorf("empty transcript body")
+	}
+	return r, nil
+}
+
+// ImportTextTranscripts stores the plain-text transcripts in dir whose 22v video number is in
+// only (every file when only is empty). Idempotent: an unchanged file writes nothing.
+func (s *Service) ImportTextTranscripts(ctx context.Context, dir, source string, only map[string]bool) (SyncResult, error) {
+	var out SyncResult
+	files, err := filepath.Glob(filepath.Join(dir, "*.txt"))
+	if err != nil {
+		return out, err
+	}
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			out.Failed++
+			continue
+		}
+		r, err := ParseTextTranscript(string(raw), source)
+		if err != nil {
+			out.Failed++
+			continue
+		}
+		if len(only) > 0 && !only[strings.TrimPrefix(r.VideoID, "22v-")] {
+			continue
+		}
+		out.Packages++
+		wrote, err := s.StoreTranscript(ctx, r)
+		switch {
+		case err != nil:
+			out.Failed++
+		case wrote:
+			out.Written++
+		default:
+			out.Unchanged++
+		}
+	}
+	return out, nil
 }

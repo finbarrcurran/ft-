@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.119.0 · 2026-11-13** — latest change: DXY gap rows; -1.0 rows reachable (§13).
+> **Current version: v1.120.0 · 2026-11-13** — latest change: 22v transcripts in the store (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.119.0 2026-11-13 -->
+<!-- reference_reviewed: v1.120.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -255,7 +255,7 @@ ft video-digest-preview --video-id ID [--prior with|without|both]` runs an extra
   **v5 items (SC-53, v1.95.0):** after each ingest (and its vote) the sweep makes a separate Haiku 5.5 call (thinking off, no regime block, feature `video_items`, output cap 8,000; transcripts over 60 min are read in 60-min chunks with a 60 s overlap) that extracts EVERY causal claim, analogue, seasonality pattern, key level, indicator, named ticker/company/token, prediction and self-correction, each with a 15 to 30 s cited span and no quote field. The **grounding gate** (`internal/videoitems`) checks every ticker, number and year against the passage 15 s before to 45 s after the cited span (at most 200 words): `grounded`, `wrong_place` (in the transcript within 120 s), `far`, `invented` or `name_mapping`. Failing items are stored and shown with their flag, never deleted; only `invented` and `name_mapping` stay out of signals. Numbers only a chart can show are marked "from chart, unverified". Named companies are resolved after extraction (alias file `internal/videoitems/ticker_aliases.tsv`, then edit-distance-2 match for ASR spellings, then Yahoo symbol search); unresolved names stay shown as unresolved. A second cheap call (`video_direction`) flags causal claims, predictions and ticker stances whose direction contradicts the speaker's net view, showing that view beside the flag. `GET /api/video-digest/{id}/items`; `ft video-digest-items --video-id ID[,ID] [--force] [--dry-run] [--show]`; the Video Digest tab shows an "Items (v5)" section per card. Items are re-extracted when a digest is re-ingested.
   **Majority vote for the newest Jordi digest (SC-52, v1.94.0):** the regime state of one extraction is not perfectly stable, so the sweep extracts the newest Jordi digest (the one behind the login card) three times (the stored run plus two that are not stored) and keeps the majority state; a split (2 of 3, or three different states, where the more cautious state wins) forces confidence to `low` and the card shows "2 OF 3 RUNS"; a unanimous result shows "3 OF 3 RUNS". Never applied to the backfill or to `ft video-digest-extract` (about $0.06 extra per new video). `ft video-digest-vote --video-id ID [--runs 3]` does it by hand. **Backfill (SC-52 P3, v1.93.0):** `ops/video_digest/video_digest.py` gained a range mode (`--from/--to`, `--no-frames`, `--transcripts-only`, `--captions-only`, `--max-videos`, `--sleep`; metadata cache; stops and reports on a YouTube rate limit). A transcript-only package carries `meta.extract = false`: the daily sweep stores and indexes its transcript but never sends it to the LLM. `ft video-digest-extract --source jordi|cowen [--flagship-only] [--newest-first] [--from D] [--to D] [--max-videos N] [--max-cost USD] [--daily-cap USD] [--dry-run]` digests packages that have no digest, newest or oldest first, never twice, stops at the ceiling (a margin of one more video under it), and with `--daily-cap` lifts `llm_budget_daily_usd` for the run and always restores the previous value (also on Ctrl-C or SIGTERM); the monthly cap is never touched.
   **Login regime proposal (SC-52 P1, v1.92.0, Jordi only):** `GET /api/regime/proposal` returns whether to show a card and what it holds; `POST /api/regime/proposal/{approve,set,dismiss}`. The card shows when the newest Jordi digest (extraction v3) has a proposed state that Fin has not approved, set, dismissed or superseded (a manual regime set after the digest was ingested supersedes it), or when the Jordi regime is past the 14-day stale flag and the newest digest has not been handled. It shows the 2-3 line narrative, the proposed state with the confidence prominently, the evidence passage (labelled "closest passage" when snapped) with the video title, date and a timestamped link, the current state with its set date and age, FT's own macro suggestion (Spec 9p) beside it (a disagreement is stated, neither is preferred), a consequence preview computed at read time from the live alert logic (effective regime, alert margin, entry-zone alerts on/off and the watchlist tickers in the entry zone whose alert would switch), the stance and tilt as context only, and the named catalysts. Buttons: Approve the proposed state (the server applies the digest's own state; the client cannot name another), Set a different state (stable / shifting / defensive, each with its consequence on hover), Dismiss until the next video (snooze), or the corner x (decide later: hidden for the session). An approval or a different set writes through the manual regime path: preferences `regime_jordi*` with source `video-suggestion` and a `regime_history` row (source `manual`, because the table is CHECKed to manual|auto_cowen_form) whose note and `inputs_json` name the digest, video, quote, match type, confidence and the prior state. No LLM call at login; nothing is applied automatically; no Cowen card (Cowen stays manual); hidden in demo mode.
-ft transcripts [sync|search|stats]   SC-52 P2: store every on-disk package transcript (free, idempotent) / full-text search / corpus size (flags may follow the query; every CLI command except serve/seed refuses to create a missing database, FT_ALLOW_NEW_DB=1 overrides)
+ft transcripts [sync|import|search|stats]   SC-52 P2: store every on-disk package transcript (free, idempotent) / SC-67: import plain-text 22v transcripts (--only N,N DIR) / full-text search / corpus size (flags may follow the query; every CLI command except serve/seed refuses to create a missing database, FT_ALLOW_NEW_DB=1 overrides)
 ft video-digest-preview --video-id ID [--prior with|without|both]` runs an extraction without storing it.
 
 **Bot:** `GET /api/bot/{alerts,holdings/summary,holdings/movers,refresh-status}` **T**, `POST /api/bot/{alerts/ack,refresh}` **T**
@@ -412,13 +412,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.120.0 · 2026-11-13 · pass 135 · SC-67
+
+**22v transcripts in the store.** `ft transcripts import` loads plain-text Whisper transcripts (id `22v-<n>`, method `whisper`); a hit on a non-YouTube URL links to that URL, with no timestamp. Six intraweek Jordi videos imported, five duplicates of stored YouTube captions skipped, no digest. Supersedes v1.119.0.
+
 ### v1.119.0 · 2026-11-13 · pass 134 · SC-66
 
 **DXY gap rows; -1.0 rows reachable.** DXY now scores under 100 rising 0.0, over 105 falling -0.25, over 105 flat -0.5. In the DXY and US 2Y tables the narrower rising rows (DXY over 105, US 2Y 5%+) now come before the broader ones, so -1.0 is reachable. `pal_dxy` history was rescored from ICE DX-Y.NYB (892 days; composites not recomputed). Supersedes v1.118.0.
 
+
 ### v1.118.0 · 2026-11-13 · pass 133 · SC-65
 
 **Risk check moved to 09:00 UTC; US 2Y gap rows added.** The daily breaker check and its one Telegram alert now run at 09:00 UTC (was 04:30, so the alert does not wake Fin). The US 2Y table has the five approved rows: 4-5% falling +0.25, over 5% falling or flat -0.5, under 3% flat +0.5, under 4% rising -0.25 (3-4% flat was already 0.0). Supersedes v1.117.0.
+
 
 
 ### v1.117.0 · 2026-11-13 · pass 132 · SC-64
@@ -427,16 +433,19 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.116.0 · 2026-11-13 · pass 131 · SC-63
 
-**Screener market caps: real where known, labelled approximate where not.** `/api/screener` rows use the Yahoo market cap from the daily stats pass (watchlist tickers) with its source and as-of; every other name keeps the seeded S&P sample figure, marked `marketCapApprox` and shown with "~". Cap filters use the effective cap. Demo mode uses sample figures only. Supersedes v1.115.0.
+**Screener market caps.** `/api/screener` uses the Yahoo market cap (watchlist tickers) with source and as-of; other names keep the seeded sample figure, marked `marketCapApprox` ("~"). Demo mode uses sample figures only. Supersedes v1.115.0.
+
 
 
 
 
 ### v1.115.0 · 2026-11-13 · pass 130 · SC-62 (SC-57 v1.110.1)
 
-**All-time-high date is the trading day; short-history note fixed.** The history bars are weeks or months, so the date was the start of a bar (AUR showed 2021-11-15; the high of 17.77 was on 2021-11-19). One daily call now resolves the day (empty if it fails). The "history shorter than 52 weeks" note fires only when the all-time high is more than 0.5% below the 52-week high. Supersedes v1.114.0.
+**ATH date is the trading day; short-history note fixed.** One daily call resolves the actual high day (was a bar start). The "history shorter than 52 weeks" note fires only when ATH is >0.5% below the 52-week high. Supersedes v1.114.0.
+
 
 
 
@@ -445,6 +454,7 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 ### v1.114.0 · 2026-11-13 · pass 129 · SC-61
 
 **Demo-mode leaks closed.** Real cash no longer reaches Summary or Preferences; deleted-holdings lists are empty; `POST /api/risk/snapshot` is refused and the nightly risk check skips. Supersedes v1.113.0.
+
 
 
 
@@ -461,9 +471,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.112.0 · 2026-11-10 · pass 127 · SC-59
 
 **Circuit breaker armed nightly, advisory, cash-inclusive.** A 04:30 UTC job reads the drawdown incl. cash, arms the breaker with one Telegram alert, and stores cash with each day's row (0073). Card says ADVISORY. Supersedes v1.111.0.
+
 
 
 
@@ -484,21 +496,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.110.0 · 2026-11-08 · pass 125 · SC-57b
-
-**Robotics & Embodiment routes to its own slug.** Adapter name variants map to `robotics_embodiment` (scorecard `robotics-embodiment`; locked in v1.111.0). Aliases only. Supersedes v1.109.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.119.0 -->
+<!-- END FT-master-spec v1.120.0 -->
