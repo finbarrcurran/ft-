@@ -452,3 +452,137 @@ func (s *Service) fillItemRuns(ctx context.Context, ds []Digest) {
 		ds[i].Items = byID[ds[i].ID]
 	}
 }
+
+// RegateResult summarises a RegateItems pass.
+type RegateResult struct {
+	Items, Changed int
+	Before, After  map[string]int
+	Moved          map[string]int // "wrong_place->grounded": n
+	Remaining      []RegateRemaining
+}
+
+// RegateRemaining is one item still classed wrong_place after the pass.
+type RegateRemaining struct {
+	ItemID           int64
+	Source, VideoID  string
+	Published, Block string
+	Start, End       int
+	Fields           string
+	Issues           []videoitems.Issue
+}
+
+// RegateItems re-runs the grounding gate over every stored item against its stored transcript (no LLM
+// call; the Cowen 180 s and Jordi 120 s windows as at extraction) and, when apply is set, writes the new
+// class, issues and signal flag and refreshes each run's counts. SC-69 (FT-125).
+func (s *Service) RegateItems(ctx context.Context, apply bool) (RegateResult, error) {
+	out := RegateResult{Before: map[string]int{}, After: map[string]int{}, Moved: map[string]int{}}
+	type dg struct {
+		id            int64
+		source, video string
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT d.id, d.source, d.video_id FROM video_digests d JOIN video_items i ON i.digest_id = d.id ORDER BY d.id`)
+	if err != nil {
+		return out, err
+	}
+	var ds []dg
+	for rows.Next() {
+		var d dg
+		if err := rows.Scan(&d.id, &d.source, &d.video); err != nil {
+			rows.Close()
+			return out, err
+		}
+		ds = append(ds, d)
+	}
+	rows.Close()
+	for _, d := range ds {
+		var compact, published string
+		if err := s.DB.QueryRowContext(ctx, `SELECT t.text, t.published_at FROM video_transcripts t WHERE t.video_id = ?`, d.video).Scan(&compact, &published); err != nil {
+			return out, fmt.Errorf("digest %d (%s): no stored transcript: %w", d.id, d.video, err)
+		}
+		gate := videoitems.NewGate(videoitems.Default, videoitems.WordsFromCompact(compact))
+		if d.source == "cowen" {
+			gate.NearSec = 180
+		}
+		irows, err := s.DB.QueryContext(ctx, `SELECT id, block, fields_json, ref_start, ref_end, gate_class FROM video_items WHERE digest_id = ? ORDER BY id`, d.id)
+		if err != nil {
+			return out, err
+		}
+		type upd struct {
+			id            int64
+			class, issues string
+			chart         any
+			signal        int
+		}
+		var ups []upd
+		for irows.Next() {
+			var id int64
+			var block, fields, oldClass string
+			var rs, re sql.NullInt64
+			if err := irows.Scan(&id, &block, &fields, &rs, &re, &oldClass); err != nil {
+				irows.Close()
+				return out, err
+			}
+			it := videoitems.Item{Block: block}
+			_ = json.Unmarshal([]byte(fields), &it.Fields)
+			if rs.Valid && re.Valid {
+				it.Ref = &videoitems.Ref{Start: int(rs.Int64), End: int(re.Int64)}
+			}
+			v := gate.Check(it)
+			out.Items++
+			out.Before[oldClass]++
+			out.After[v.Class]++
+			if v.Class != oldClass {
+				out.Changed++
+				out.Moved[oldClass+"->"+v.Class]++
+			}
+			if v.Class == videoitems.ClassWrongPlace {
+				r := RegateRemaining{ItemID: id, Source: d.source, VideoID: d.video, Published: published, Block: block, Fields: fields, Issues: v.Issues}
+				if it.Ref != nil {
+					r.Start, r.End = it.Ref.Start, it.Ref.End
+				}
+				out.Remaining = append(out.Remaining, r)
+			}
+			ib, _ := json.Marshal(v.Issues)
+			var chart any
+			if len(v.ChartUnverified) > 0 {
+				b, _ := json.Marshal(v.ChartUnverified)
+				chart = string(b)
+			}
+			issues := string(ib)
+			if len(v.Issues) == 0 {
+				issues = ""
+			}
+			ups = append(ups, upd{id, v.Class, issues, chart, boolInt(v.SignalOK)})
+		}
+		irows.Close()
+		if !apply {
+			continue
+		}
+		tx, err := s.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return out, err
+		}
+		counts := map[string]int{}
+		for _, u := range ups {
+			var iss any
+			if u.issues != "" {
+				iss = u.issues
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE video_items SET gate_class = ?, gate_issues_json = ?, chart_unverified_json = ?, signal_ok = ? WHERE id = ?`,
+				u.class, iss, u.chart, u.signal, u.id); err != nil {
+				tx.Rollback()
+				return out, err
+			}
+			counts[u.class]++
+		}
+		cb, _ := json.Marshal(counts)
+		if _, err := tx.ExecContext(ctx, `UPDATE video_item_runs SET counts_json = ? WHERE digest_id = ?`, string(cb), d.id); err != nil {
+			tx.Rollback()
+			return out, err
+		}
+		if err := tx.Commit(); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}

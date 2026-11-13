@@ -8,7 +8,7 @@ import (
 )
 
 // The gate (SC-53 B): every ticker, number and year in an item must appear in the passage attached
-// to it (15 s before the cited start to 45 s after the cited end, at most 200 words). A value that is
+// to it (30 s before the cited start to 45 s after the cited end, at most 200 words). A value that is
 // missing is classed by where the transcript does have it:
 //
 //	grounded      every value is in the passage
@@ -286,7 +286,7 @@ func (g *Gate) Check(it Item) Verdict {
 	if name, _ := it.Fields["name"].(string); it.Block == "tickers_named" && strings.TrimSpace(name) != "" {
 		nn, nw := normSpoken(name), normSpoken(win)
 		if nn != "" && !strings.Contains(" "+nw+" ", " "+nn+" ") && !strings.Contains(" "+nw+" ", " "+nn+"s ") &&
-			!fuzzyIn(nn, nw) && !compactIn(nn, nw) && !g.A.aliasSpoken(name, win) {
+			!fuzzyIn(nn, nw) && !compactIn(nn, nw) && !g.A.aliasSpoken(name, win) && !tickerSpokenAs(fieldTk, hits) {
 			// invented only if absent from the whole transcript; present anywhere it is near or far
 			times := g.nameTimes(nn, name)
 			for _, tok := range strings.Fields(nn) {
@@ -409,6 +409,18 @@ func nameSpoken(it Item, win string) bool {
 		return false
 	}
 	return strings.Contains(" "+w+" ", " "+nn+" ") || strings.Contains(" "+w+" ", " "+nn+"s ") || fuzzyIn(nn, w) || compactIn(nn, w) || Default.aliasSpoken(name, win)
+}
+
+// tickerSpokenAs is the reverse alias check (SC-69, FT-125): the model's name for the company may differ
+// from the spoken one ("Chinese markets", "Alphabet" for Google), but when the ticker it gave is known to
+// the alias file and one of that ticker's spoken names is in the passage, the item is grounded.
+func tickerSpokenAs(tickers []string, hits map[string]bool) bool {
+	for _, t := range tickers {
+		if hits[t] {
+			return true
+		}
+	}
+	return false
 }
 
 // aliasSpoken reports whether the name maps (alias file) to a ticker whose spoken form is in the passage.

@@ -33,17 +33,22 @@ func WordsFromCompact(compact string) []Word {
 	return out
 }
 
-// Window returns the passage the gate checks an item against: from 15 s before the cited start to
-// 45 s after the cited end (a cited span longer than 45 s is clamped), at most 200 words.
+// WindowLead is how many seconds before the cited start the passage begins (SC-69, FT-125: widened from
+// 15 s; most "wrong place" items had the value said 16 to 30 s before the cited start).
+const WindowLead = 30
+
+// Window returns the passage the gate checks an item against: from 30 s before the cited start to
+// 45 s after the cited end (a cited span longer than 45 s is clamped), at most 300 words (it was 200 with
+// a 15 s lead; the longer lead pushed words off the end of a fast speaker's window).
 func Window(words []Word, start, end int) string {
 	if end-start > 45 {
 		end = start + 45
 	}
 	var b []string
 	for _, w := range words {
-		if w.T >= start-15 && w.T < end+45 {
+		if w.T >= start-WindowLead && w.T < end+45 {
 			b = append(b, w.W)
-			if len(b) == 200 {
+			if len(b) == 300 {
 				break
 			}
 		}
