@@ -560,6 +560,25 @@ func runServe() {
 		}
 	}()
 
+	// FT-142 — the eToro Money cash account, one read-only balances call a day at 03:40 UTC (before the 04:00
+	// value-history job and the 09:00 risk check), and once shortly after boot so a deploy fills it at once.
+	// The Trading cash is stored by every eToro sync. No-op until the eToro key pair is set.
+	go func() {
+		pull := func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 2*time.Minute)
+			defer cancel()
+			if err := srv.PullEtoroMoneyCash(ctx); err != nil {
+				slog.Warn("etoro money cash pull failed", "err", err)
+			}
+		}
+		go scheduleAt(bgCtx, 3, 40, pull)
+		select {
+		case <-bgCtx.Done():
+		case <-time.After(2 * time.Minute):
+			pull()
+		}
+	}()
+
 	// Spec 9f D2 — daily sector ETF ingest at 22:00 UTC (after US close,
 	// before APAC open). Independent of the 04:00 UTC job so a stalled
 	// Yahoo call in one path can't block the other.

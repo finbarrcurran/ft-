@@ -121,9 +121,7 @@ func (s *Server) riskCashUSD(ctx context.Context) float64 {
 	if s.demoModeOn(ctx) {
 		return 0
 	}
-	v, _ := s.store.GetPreference(ctx, "cash_balance_usd")
-	f, _ := strconv.ParseFloat(v, 64)
-	return f
+	return s.effectiveCash(ctx, time.Now()).USD // FT-142: eToro cash while fresh, else the manual entry
 }
 
 // dashboardCheck wraps PortfolioRiskCheck with private snapshot fields the
