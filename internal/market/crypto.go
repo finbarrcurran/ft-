@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -43,7 +44,7 @@ func cgGetJSON(ctx context.Context, rawURL string, keyed bool, retries int, out 
 	}
 	var err error
 	for attempt := 0; ; attempt++ {
-		err = httpGetJSONHeaders(ctx, rawURL, hdr, out)
+		err = redactQuery(httpGetJSONHeaders(ctx, rawURL, hdr, out))
 		health.Record(ctx, provider, err)
 		if err == nil || attempt >= retries || !strings.Contains(err.Error(), "http 429") {
 			return err
@@ -54,6 +55,31 @@ func cgGetJSON(ctx context.Context, rawURL string, keyed bool, retries int, out 
 		case <-time.After(time.Duration(attempt+1) * cgBackoffUnit):
 		}
 	}
+}
+
+// redactedErr is an error whose text has its URL query strings removed; it still unwraps to the original
+// (so errors.Is for a timeout or cancellation keeps working).
+type redactedErr struct {
+	msg string
+	err error
+}
+
+func (e *redactedErr) Error() string { return e.msg }
+func (e *redactedErr) Unwrap() error { return e.err }
+
+var queryRe = regexp.MustCompile(`\?[^"\s)]*`)
+
+// redactQuery removes the query string of any URL from an error's text (SC-70, FT-127): a failed
+// /coins/markets call otherwise puts the whole list of held coin ids in the Diagnostics provider error.
+func redactQuery(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if red := queryRe.ReplaceAllString(msg, "?<redacted>"); red != msg {
+		return &redactedErr{msg: red, err: err}
+	}
+	return err
 }
 
 // 7d / 30d changes: one keyed /coins/markets call for every held coin, at most once an hour. The
