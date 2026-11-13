@@ -134,6 +134,8 @@ func main() {
 		runVideoDigestItems(os.Args[2:])
 	case "video-digest-extract":
 		runVideoDigestExtract(os.Args[2:])
+	case "video-items-regate":
+		runVideoItemsRegate(os.Args[2:])
 	case "video-digest-stored":
 		runVideoDigestStored(os.Args[2:])
 	case "regime-history":
@@ -332,6 +334,7 @@ USAGE
   ft nexus-backfill [--range 2y] [--gap-ms N]  fetch daily bars for the Nexus universe (SC-36)
   ft nexus-compute [--as-of DATE]              compute Nexus Trend + Exhaustion (SC-36)
   ft nexus-fundamentals [--as-of DATE]         snapshot Nexus Forward PEG fundamentals (SC-36)
+  ft video-items-regate [--apply] [--list]     SC-69: re-run the grounding gate over stored v5 items (no LLM); dry run unless --apply
   ft video-digest-stored 22v-N [22v-N ...]     SC-68: digest 22v transcripts held only in the store (context only; is_flagship=0)
   ft video-digest-reground                     re-ground video-digest quotes against transcripts (SC-43)
   ft token revoke --id N [--user-id N]         revoke a service token
@@ -1564,6 +1567,30 @@ func runVideoDigestItems(args []string) {
 				}
 				fmt.Printf("  %-16s %-13s %.70s%s %v\n", it.Block, it.Class, name, extra, it.Issues)
 			}
+		}
+	}
+}
+
+// runVideoItemsRegate: SC-69 (FT-125). Dry run unless --apply.
+func runVideoItemsRegate(args []string) {
+	fs := flag.NewFlagSet("video-items-regate", flag.ExitOnError)
+	apply := fs.Bool("apply", false, "write the new classes (default: dry run)")
+	list := fs.Bool("list", false, "list the items still wrong_place")
+	_ = fs.Parse(args)
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	svc := videodigest.New(st.DB, nil, os.Getenv("FT_VIDEO_DIGEST_ROOT"))
+	r, err := svc.RegateItems(context.Background(), *apply)
+	must("regate", err)
+	fmt.Printf("items %d | changed %d | applied=%v\nbefore %v\nafter  %v\nmoved  %v\n", r.Items, r.Changed, *apply, r.Before, r.After, r.Moved)
+	if *list {
+		for _, x := range r.Remaining {
+			is, _ := json.Marshal(x.Issues)
+			fmt.Printf("%d\t%s\t%s\t%s\t%s\t%d-%d\t%s\t%s\n", x.ItemID, x.Source, x.VideoID, x.Published, x.Block, x.Start, x.End, x.Fields, is)
 		}
 	}
 }
