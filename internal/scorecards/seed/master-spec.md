@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.124.0 · 2026-11-13** — latest change: Quarter labels are not tickers (§13).
+> **Current version: v1.125.0 · 2026-11-13** — latest change: Video-brain status table corrected (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.124.0 2026-11-13 -->
+<!-- reference_reviewed: v1.125.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -390,10 +390,10 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 | Item | Purpose | Status |
 |------|---------|--------|
 | P5 — FT snapshot report | Weekly snapshot persisted in the DB with deltas and 4-week trends, rendered to `FT-Bridge/reports/ft-snapshot.md` | **Built (SC-46, v1.86.0).** Phase 2 (P5b: read-only connector tools `get_snapshot` / `get_trends`) is a proposal only, awaiting Fin |
-| SC-43 P2 | OCR of Cowen chart frames to fill the snapshot columns left NULL in P1 (200WMA, log band, dominance, ETH/BTC) | Not built |
-| SC-52 P2 transcripts | Full transcripts stored and searchable | **Built (v1.88.0).** Every complete package is stored by the daily sweep (and by `ft transcripts sync`), digested or not; ~1 MB for the 33 stored so far, an estimated 8-10 MB for the full backfill. FTS5 works in the Go driver (tested). Not yet in the P3 backfill: fetching transcripts for videos with no package |
+| SC-43 P2 / SC-54 frame reads | Vision read of chart frames; fill the Cowen snapshot columns left NULL in P1 (200WMA, log band, dominance, ETH/BTC) | **Partly built (SC-54).** `video_frame_reads` holds what the vision model read off chart frames (a handful of digests so far, about $0.02). Nothing feeds `cowen_weekly_snapshot` from it: those four columns are still NULL. No wider vision run is planned; one frame read (FT-141) is the proof of concept. |
+| SC-52 P2 transcripts | Full transcripts stored and searchable | **Built (v1.88.0).** Every complete package is stored by the daily sweep (and `ft transcripts sync`), digested or not; plain-text 22v Whisper transcripts load with `ft transcripts import` (SC-67, id `22v-<n>`, no timestamps). Keyword and phrase search only (FTS5): CLI, `GET /api/transcripts/search` and the `search_transcripts` connector tool; there is no search box in the web UI. |
 | SC-52 P1 login regime card | Jordi regime proposal on login | **Built (v1.92.0).** Cowen has no card (manual). |
-| SC-43 P3 / P4 | Regime read surfaced in the UI; digest query tool | Not built — `suggested_regime` / `regime_read` are stored but not exposed. **SC-52 (2026-10-19) re-plans this:** P0 extraction v2 (built, v1.87.0), P1 login regime proposal for Jordi (held for ai's review of P0), P2 transcript store + search, P3 backfill, P4 capital flows from statements, P5 Bargo replaces Capitol Trades, P6 housekeeping |
+| SC-43 P3 / P4 | Mention-to-holdings/watchlist/universe linking (P3); digest query tool (P4) | **Not built.** `video_mentions.held` and `watchlist` exist (and are stripped in demo mode) but no code fills them; v5 `tickers_named` items resolve a name to a ticker only. No Q&A, semantic search, or connector tool for digests, items or regime reads. The login regime card (SC-52 P1) and the v5 items view are built. |
 | SC-04 batch automation | Thesis updates at scale | Parked pending Fin's decisions on model / scope / sourcing |
 | Cron scrapers (Farside) | Restore on the Lenovo, or replace | **Farside: fixed 2026-10-11** — three post-migration causes: cron logs pointed at `/var/log` (now `~curran/logs`); `curran` could not write `/var/lib/ft/data/{farside,capitol-trades}` (joined group `ft`, dirs `curran:ft` 2775; `/var/lib/ft` stays 750); Playwright and Chromium were missing (installed v1.60; all in `ops/scrapers/install.sh`, logrotate keeps 8 weekly logs). **Capitol Trades: replaced by Bargo (SC-47, 2026-10-11)** — the cron was removed. Farside: the ETF-flow **card** stays live regardless (FT ignores a cache file older than 36 h and fetches directly), but the **chart** reads the cache file with no freshness check, so a stale file shows silently |
 | Manual eToro statement fallback | Retire or keep as break-glass | Kept (permanent break-glass). Fixed 2026-10-11: wallet scoping, live units, SU/SU.PA matching, audit rows (see §5). Remaining limit: a statement can't see partial closes (when live data exists it no longer proposes updates from the statement). Still open: the performance importer's handling of multi-year statements (whole statement attributed to the End-Date year), "Income from Refunds" in the Financial Summary, and its €-only reconciliation warning — ai to spec |
@@ -413,18 +413,25 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.125.0 · 2026-11-13 · pass 140 · SC-72
+
+**Video-brain status table corrected.** SC-43 P2 is partly built (SC-54 frame reads, nothing feeds the snapshot columns); P3 mention linking and the P4 query tool are not built; transcript search is keyword-only, no web box. Documentation only. Supersedes v1.124.0.
+
 ### v1.124.0 · 2026-11-13 · pass 139 · SC-71
 
 **Quarter labels are not tickers.** The gate no longer reads Q1 to Q4 or H1/H2 as ticker symbols. Supersedes v1.123.0.
+
 
 ### v1.123.0 · 2026-11-13 · pass 138 · SC-70
 
 **CoinGecko error text redacted.** The Diagnostics provider error for a failed CoinGecko call no longer lists the requested coin ids (query string replaced by `?<redacted>`). Supersedes v1.122.0.
 
 
+
 ### v1.122.0 · 2026-11-13 · pass 137 · SC-69
 
 **Gate lead window 30 s; reverse alias check.** The grounding passage starts 30 s before the cited span (word cap 300), and a name the model wrote differently from the spoken one is grounded when its ticker's spoken name is in the passage. `ft video-items-regate` re-grounds stored items with no LLM call; applied once: wrong_place 45 to 17, none worse. Supersedes v1.121.0.
+
 
 
 
@@ -434,15 +441,18 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.120.0 · 2026-11-13 · pass 135 · SC-67
 
-**22v transcripts in the store.** `ft transcripts import` loads plain-text Whisper transcripts (id `22v-<n>`, method `whisper`); a hit on a non-YouTube URL links to that URL, with no timestamp. Six intraweek Jordi videos imported, five duplicates of stored YouTube captions skipped, no digest. Supersedes v1.119.0.
+**22v transcripts in the store.** `ft transcripts import` loads plain-text Whisper transcripts (id `22v-<n>`, method `whisper`); a non-YouTube hit links to its URL, with no timestamp. Supersedes v1.119.0.
+
 
 
 
 ### v1.119.0 · 2026-11-13 · pass 134 · SC-66
 
-**DXY gap rows; -1.0 rows reachable.** DXY now scores under 100 rising 0.0, over 105 falling -0.25, over 105 flat -0.5. In the DXY and US 2Y tables the narrower rising rows (DXY over 105, US 2Y 5%+) now come before the broader ones, so -1.0 is reachable. `pal_dxy` history was rescored from ICE DX-Y.NYB (892 days; composites not recomputed). Supersedes v1.118.0.
+**DXY gap rows; -1.0 rows reachable.** DXY gains under 100 rising 0.0, over 105 falling -0.25, flat -0.5; the narrower rising rows (DXY over 105, US 2Y 5%+) now come first so -1.0 is reachable; `pal_dxy` history rescored from ICE. Supersedes v1.118.0.
+
 
 
 
@@ -452,21 +462,18 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.117.0 · 2026-11-13 · pass 132 · SC-64
 
-**ICE DXY, stablecoin card, ROC by date.** `pal_dxy` reads the ICE index (Yahoo DX-Y.NYB, ~103; trading-day freshness), not FRED broad (~121). The stablecoin card shows USD bn; the 4-week ROC is picked by date and rejected beyond ±60%. Supersedes v1.116.0.
+**ICE DXY, stablecoin card, ROC by date.** `pal_dxy` reads the ICE index (Yahoo DX-Y.NYB, ~103), not FRED broad (~121). The stablecoin card shows USD bn; its 4-week ROC is picked by date. Supersedes v1.116.0.
+
 
 
 
 ### v1.116.0 · 2026-11-13 · pass 131 · SC-63
 
-**Screener market caps.** `/api/screener` uses the Yahoo market cap (watchlist tickers) with source and as-of; other names keep the seeded sample figure, marked `marketCapApprox` ("~"). Demo mode uses sample figures only. Supersedes v1.115.0.
+**Screener market caps.** Yahoo caps for watchlist tickers, sample figures (`marketCapApprox`, "~") elsewhere. Supersedes v1.115.0.
 
-
-
-### v1.115.0 · 2026-11-13 · pass 130 · SC-62 (SC-57 v1.110.1)
-
-**ATH date is the trading day; short-history note fixed.** One daily call resolves the actual high day (was a bar start). The "history shorter than 52 weeks" note fires only when ATH is >0.5% below the 52-week high. Supersedes v1.114.0.
 
 
 
@@ -474,4 +481,4 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.124.0 -->
+<!-- END FT-master-spec v1.125.0 -->
