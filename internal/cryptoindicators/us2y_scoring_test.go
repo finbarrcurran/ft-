@@ -24,6 +24,8 @@ func TestUS2YScoring_ApprovedRows(t *testing.T) {
 		{"4.5 rising (existing)", 4.5, 2, -0.5},
 		{"2.5 falling (existing)", 2.5, -2, 1.0},
 		{"3.5 falling (existing)", 3.5, -2, 0.5},
+		{"5.2 rising reaches the -1.0 row (FT-114 reorder)", 5.2, 2, -1.0},
+		{"5.0 rising", 5.0, 2, -1.0},
 	} {
 		got, ok := def.Score(ScoringInputs{Value: f(c.level), Trend4w: f(c.trend)})
 		if !ok || got != c.want {
