@@ -102,3 +102,34 @@ func TestWatchlist_PriceFromStatsPass(t *testing.T) {
 		t.Fatalf("stored quote must be untouched: %v %v", stored, err)
 	}
 }
+
+// SC-57 v1.110.1: the "history shorter than 52 weeks" note must not fire on a rounding difference (TSLA: all-time
+// high 498.8299865 against a 52-week high of 498.83) but must fire when the all-time high is really lower.
+func TestWatchlist_ShortHistoryNoteTolerance(t *testing.T) {
+	s, st := snapServer(t)
+	mustExec(t, st, `DELETE FROM watchlist`) // migrations seed a few rows
+	mustExec(t, st, `INSERT INTO watchlist (user_id, ticker, kind, added_at, updated_at) VALUES (1, 'TSLA', 'stock', 0, 0), (1, 'DJTWW', 'stock', 0, 0)`)
+	mustExec(t, st, `INSERT INTO ticker_market_stats (ticker, high_52w, ath, chart_source, chart_as_of, updated_at) VALUES ('TSLA', 498.83, 498.8299865, 'yahoo', 1, 0), ('DJTWW', 31.99, 2.59, 'yahoo', 1, 0)`)
+	rec := httptest.NewRecorder()
+	s.handleListWatchlist(rec, httptest.NewRequest("GET", "/api/watchlist", nil).WithContext(context.WithValue(context.Background(), ctxUserID, int64(1))))
+	var out struct {
+		Watchlist []struct {
+			Ticker      string `json:"ticker"`
+			MarketStats struct {
+				Note string `json:"note"`
+			} `json:"marketStats"`
+		} `json:"watchlist"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range out.Watchlist {
+		hasNote := r.MarketStats.Note != ""
+		if r.Ticker == "TSLA" && hasNote {
+			t.Fatalf("TSLA must have no short-history note: %q", r.MarketStats.Note)
+		}
+		if r.Ticker == "DJTWW" && !hasNote {
+			t.Fatal("DJTWW (ATH far below the 52-week high) must keep the note")
+		}
+	}
+}

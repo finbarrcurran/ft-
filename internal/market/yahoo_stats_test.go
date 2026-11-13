@@ -46,3 +46,28 @@ func TestParseChartRange_MissingValuesAreNil(t *testing.T) {
 		t.Fatal("empty result must be an error")
 	}
 }
+
+// SC-57 v1.110.1: the all-time-high DAY comes from daily bars (AUR: the weekly bar starting 2021-11-15 holds the high,
+// which fell on 2021-11-19), and the history bar start is kept separately.
+const dailyFixture = `{"chart":{"result":[{"timestamp":[1636934400,1637020800,1637107200,1637193600,1637280000,1637539200],
+"indicators":{"quote":[{"high":[10.04,9.94,10.55,11.83,17.77,15.69]}]}}]}}`
+
+func TestParseDailyHighDay(t *testing.T) {
+	day, high, ok := ParseDailyHighDay([]byte(dailyFixture))
+	if !ok || day != "2021-11-19" || high != 17.77 {
+		t.Fatalf("got %q %v %v", day, high, ok)
+	}
+	if _, _, ok := ParseDailyHighDay([]byte(`{"chart":{"result":[]}}`)); ok {
+		t.Fatal("an empty response must not resolve a day")
+	}
+}
+
+func TestParseChartRange_KeepsBarStart(t *testing.T) {
+	s, err := ParseChartRange([]byte(chartFixture), time.Unix(1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ATHBarStart != 1633046400 {
+		t.Fatalf("bar start %d", s.ATHBarStart)
+	}
+}

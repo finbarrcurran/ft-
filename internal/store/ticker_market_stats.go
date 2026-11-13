@@ -86,7 +86,7 @@ func (s *Store) MarketStatsMap(ctx context.Context) map[string]*domain.MarketSta
 		if m.ATH.Value != nil {
 			m.ATH.Date, m.ATH.HistoryFrom, m.ATH.HistoryTo = nullStrPtr(athDate), nullStrPtr(hf), nullStrPtr(ht)
 		}
-		if m.ATH.Value != nil && m.High52w.Value != nil && *m.ATH.Value < *m.High52w.Value {
+		if m.ATH.Value != nil && m.High52w.Value != nil && *m.ATH.Value < *m.High52w.Value*0.995 { // SC-57 v1.110.1: tolerance for rounding (498.8299865 vs 498.83)
 			m.Note = "all-time high comes from a history shorter than 52 weeks (below the 52-week high)"
 		}
 		if le.Valid {
