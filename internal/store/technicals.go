@@ -1,6 +1,9 @@
 package store
 
-import "context"
+import (
+	"context"
+	"database/sql"
+)
 
 // Spec 9c — store-layer helpers for technicals data that the refresh /
 // daily cron writes (not the user). Kept separate from the main holdings
@@ -356,6 +359,13 @@ type PortfolioValuePoint struct {
 	Total  float64
 	Stocks float64
 	Crypto float64
+	Cash   *float64 // FT-110: cash balance recorded with the row; nil for rows from before it was recorded
+}
+
+// SetPortfolioCash stores the cash balance on a day's value row (FT-110). No-op when the row does not exist.
+func (s *Store) SetPortfolioCash(ctx context.Context, date string, cashUSD float64) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE portfolio_value_history SET cash_value_usd = ? WHERE date = ?`, cashUSD, date)
+	return err
 }
 
 // GetPortfolioValueHistory returns rows in ASC order by date.
@@ -364,7 +374,7 @@ func (s *Store) GetPortfolioValueHistory(ctx context.Context, limit int) ([]Port
 		limit = 365
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT date, total_value_usd, stocks_value_usd, crypto_value_usd
+		SELECT date, total_value_usd, stocks_value_usd, crypto_value_usd, cash_value_usd
 		  FROM portfolio_value_history
 		  ORDER BY date DESC
 		  LIMIT ?`, limit)
@@ -375,8 +385,13 @@ func (s *Store) GetPortfolioValueHistory(ctx context.Context, limit int) ([]Port
 	var out []PortfolioValuePoint
 	for rows.Next() {
 		var p PortfolioValuePoint
-		if err := rows.Scan(&p.Date, &p.Total, &p.Stocks, &p.Crypto); err != nil {
+		var cash sql.NullFloat64
+		if err := rows.Scan(&p.Date, &p.Total, &p.Stocks, &p.Crypto, &cash); err != nil {
 			return nil, err
+		}
+		if cash.Valid {
+			v := cash.Float64
+			p.Cash = &v
 		}
 		out = append(out, p)
 	}

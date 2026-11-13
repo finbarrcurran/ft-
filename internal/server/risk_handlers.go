@@ -14,8 +14,11 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"ft/internal/domain"
 	"ft/internal/metrics"
+	"ft/internal/monitor"
 	"ft/internal/technicals"
 	"net/http"
 	"strconv"
@@ -51,27 +54,70 @@ func (s *Server) handleRiskSnapshot(w http.ResponseWriter, r *http.Request) {
 		mapStoreError(w, err)
 		return
 	}
-	// Circuit-breaker auto-arm: drawdown <= -10% AND breaker not yet active.
+	_ = s.store.SetPortfolioCash(r.Context(), date, check.CashUSD)
+	s.applyBreaker(r.Context(), &check.PortfolioRiskCheck, &monitor.Telegram{})
+	writeJSON(w, http.StatusOK, check)
+}
+
+// applyBreaker arms or clears the circuit breaker from the check (FT-079). It is ADVISORY (FT-106): it sets the
+// flag and sends one Telegram alert on the transition to armed; nothing in the trade flow reads it. Used by the
+// nightly job and the manual "Run snapshot now" route.
+func (s *Server) applyBreaker(ctx context.Context, check *technicals.PortfolioRiskCheck, notify monitor.Notifier) {
+	today := time.Now().UTC()
+	// Auto-arm: drawdown at or beyond the cap and not already armed.
 	if check.DrawdownPct <= -check.Caps.DrawdownCircuitPct && !check.CircuitBreakerActive {
-		_ = s.store.SetPreference(r.Context(), "risk_circuit_breaker_active", "true")
-		until := time.Now().UTC().AddDate(0, 0, 14).Format("2006-01-02")
-		_ = s.store.SetPreference(r.Context(), "risk_circuit_breaker_until", until)
+		until := today.AddDate(0, 0, 14).Format("2006-01-02")
+		_ = s.store.SetPreference(ctx, "risk_circuit_breaker_active", "true")
+		_ = s.store.SetPreference(ctx, "risk_circuit_breaker_until", until)
 		check.CircuitBreakerActive = true
 		check.CircuitBreakerUntil = until
-		check.Warnings = append(check.Warnings, "circuit breaker armed (drawdown >= cap)")
+		check.Warnings = append(check.Warnings, "circuit breaker armed (drawdown >= cap) - advisory only")
+		if notify != nil {
+			msg := fmt.Sprintf("FT risk (ADVISORY): drawdown %.1f%% (%s) is beyond the -%.0f%% cap. Circuit breaker flagged until %s. Advisory only: no trade is blocked.",
+				check.DrawdownPct, check.DrawdownBasis, check.Caps.DrawdownCircuitPct, until)
+			if err := notify.Send(ctx, msg); err != nil && err != monitor.ErrNotConfigured {
+				slog.Warn("risk: breaker alert not sent", "err", err)
+			}
+		}
 	}
-	// Circuit-breaker auto-clear: drawdown < 5% AND until has passed.
+	// Auto-clear: drawdown back above -5% and the flag period has passed.
 	if check.CircuitBreakerActive && check.DrawdownPct > -5 && check.CircuitBreakerUntil != "" {
 		untilT, err := time.Parse("2006-01-02", check.CircuitBreakerUntil)
-		if err == nil && time.Now().UTC().After(untilT) {
-			_ = s.store.SetPreference(r.Context(), "risk_circuit_breaker_active", "false")
-			_ = s.store.SetPreference(r.Context(), "risk_circuit_breaker_until", "")
+		if err == nil && today.After(untilT) {
+			_ = s.store.SetPreference(ctx, "risk_circuit_breaker_active", "false")
+			_ = s.store.SetPreference(ctx, "risk_circuit_breaker_until", "")
 			check.CircuitBreakerActive = false
 			check.CircuitBreakerUntil = ""
 			check.Warnings = append(check.Warnings, "circuit breaker auto-cleared")
 		}
 	}
-	writeJSON(w, http.StatusOK, check)
+}
+
+// RunNightlyRiskCheck is the scheduled arm/clear (FT-079): it records today's cash with the day's value row
+// (FT-110), reads the cash-inclusive drawdown and applies the breaker. It runs after the nightly value snapshot.
+func (s *Server) RunNightlyRiskCheck(ctx context.Context, now time.Time, notify monitor.Notifier) error {
+	var uid int64
+	if err := s.store.DB.QueryRowContext(ctx, `SELECT id FROM users ORDER BY id LIMIT 1`).Scan(&uid); err != nil {
+		return err
+	}
+	check, err := s.computeRiskCheck(ctx, uid)
+	if err != nil {
+		return err
+	}
+	_ = s.store.SetPortfolioCash(ctx, now.UTC().Format("2006-01-02"), check.CashUSD)
+	s.applyBreaker(ctx, &check.PortfolioRiskCheck, notify)
+	return nil
+}
+
+// riskCashUSD is the cash balance used on the cash-inclusive basis. Demo mode excludes it (the real balance
+// must not reach a demo view).
+func (s *Server) riskCashUSD(ctx context.Context) float64 {
+	if s.demoModeOn(ctx) {
+		return 0
+	}
+	v, _ := s.store.GetPreference(ctx, "cash_balance_usd")
+	f, _ := strconv.ParseFloat(v, 64)
+	return f
 }
 
 // dashboardCheck wraps PortfolioRiskCheck with private snapshot fields the
@@ -113,11 +159,18 @@ func (s *Server) computeRiskCheck(ctx context.Context, userID int64) (*dashboard
 
 	// Drawdown — pull last 365 daily snapshots.
 	history, _ := s.store.GetPortfolioValueHistory(ctx, 365)
+	// FT-079: the drawdown is measured on the value INCLUDING cash (as the Summary donut is). Days recorded before
+	// the cash column existed use today's cash balance (cash history was not kept).
+	cash := s.riskCashUSD(ctx)
 	values := make([]float64, 0, len(history)+1)
 	for _, p := range history {
-		values = append(values, p.Total)
+		c := cash
+		if p.Cash != nil {
+			c = *p.Cash
+		}
+		values = append(values, p.Total+c)
 	}
-	values = append(values, portfolioValue) // include current
+	values = append(values, portfolioValue+cash) // include current
 	drawdownPct, _ := technicals.ComputeDrawdownPct(values)
 
 	// Circuit-breaker state from prefs.
@@ -125,6 +178,12 @@ func (s *Server) computeRiskCheck(ctx context.Context, userID int64) (*dashboard
 	cbUntil, _ := s.store.GetPreference(ctx, "risk_circuit_breaker_until")
 
 	check := technicals.Compute(positions, portfolioValue, drawdownPct, caps, cbActive == "true", cbUntil)
+	check.CashUSD = cash
+	check.Advisory = true
+	check.DrawdownBasis = "incl. cash; days before cash was recorded use today's balance"
+	if cash == 0 {
+		check.DrawdownBasis = "excl. cash"
+	}
 	return &dashboardCheck{
 		PortfolioRiskCheck: check,
 		stocksUSD:          stockUSD,
