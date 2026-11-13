@@ -92,8 +92,13 @@
       "thresholds": [
         {"level_max": 3.0, "trend_4w": "negative", "score":  1.0},
         {"level_max": 4.0, "trend_4w": "negative", "score":  0.5},
+        {"level_min": 4.0, "level_max": 5.0, "trend_4w": "negative", "score":  0.25},
+        {"level_min": 5.0, "trend_4w": "negative", "score": -0.5},
+        {"level_max": 3.0, "trend_4w": "flat",     "score":  0.5},
         {"level_max": 5.0, "trend_4w": "flat",     "score":  0.0},
+        {"level_min": 5.0, "trend_4w": "flat",     "score": -0.5},
         {"level_min": 4.0, "trend_4w": "positive", "score": -0.5},
+        {"level_max": 4.0, "trend_4w": "positive", "score": -0.25},
         {"level_min": 5.0, "trend_4w": "positive", "score": -1.0}
       ]
     },

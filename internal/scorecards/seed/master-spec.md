@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.117.0 · 2026-11-13** — latest change: Crypto indicators: ICE DXY, stablecoin card, ROC by date (§13).
+> **Current version: v1.118.0 · 2026-11-13** — latest change: Risk check moved to 09:00 UTC; US 2Y gap rows added (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.117.0 2026-11-13 -->
+<!-- reference_reviewed: v1.118.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -154,7 +154,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Daily job | 04:00 | 365-day price history, calendar dates, beta, 12m vol, analyst forecasts, market stats (SC-57; a failed half keeps stored values; `ft market-stats-refresh`). CLI: `ft daily` |
 | Weekly FT snapshot (SC-46) | Sunday 18:00 UTC (Sunday evening Dublin) + Monday 07:00 UTC catch-up | `Server.RunScheduledSnapshot`: builds the deterministic weekly snapshot from the same in-process handlers the connector tools call (portfolio, YTD performance and trade statistics, thesis scores and locks, gap report, watchlist in-zone set, alerts raised in the last 7 days, regimes, crypto indicators with data dates, non-ok monitor entries, the latest week of video digests), compares it with the previous weeks (deltas, 4-week trend, text/set changes, a Top-changes block of at most 8 lines ranked by a fixed rule: regime changes and thesis-score changes, then set changes, then the largest relative movers), saves it to `ft_snapshots` and writes `/var/lib/ft/data/bridge/snapshot/ft-snapshot.md`; one Telegram note. The Monday run takes the week that just ended only if Sunday's did not run. A section whose source fails is omitted with a note, never invented; demo mode refuses to snapshot. **Snapshot v2 (v1.86.1):** each regime is shown with its set-at date, age and the 14-day stale flag, an unset/unclassified regime reads "unset since <date>" and is never a "changed from X to Y" or a Top change, and stale regimes are listed under Data health (which no longer says "all ok" for them); value changes carry an "of which" note from `holdings_audit` since the previous snapshot (removals, additions, invested-amount adjustments with invested USD; capital flows are not recorded in FT and are stated as not separable) plus the same for the three earlier weeks; the Watchlist section lists "In entry zone without a thesis" (entry-zone tickers also in the gap report), and a ticker entering that state is a Top change; header `ft_snapshot_version: 2`, marker `END ft-snapshot v2`. Weeks before the first stored snapshot are filled ONLY from existing history tables (portfolio value, alerts raised, regimes, thesis scores and lock dates); everything else starts at its first snapshot. Monitor `snapshot`: alert when the newest snapshot is older than 8 days, weekly reminders, quiet before the first one |
 | Video digest sweep | 09:15, plus ~2 min after boot | SC-43: ingests any complete package in `/var/lib/video_digest` not yet digested (one governor LLM call per new video) |
-| Risk check (SC-59) | 04:30 | cash-inclusive drawdown; arms the ADVISORY breaker + one Telegram alert |
+| Risk check (SC-59) | 09:00 | cash-inclusive drawdown; arms the ADVISORY breaker + one Telegram alert |
 | Sector rotation ingest | 22:00 | 34 sector ETFs + SPY + VWRL daily close. CLI: `ft sector-ingest`; FT-081: split steps repaired after each run (`ft sector-repair`) |
 | Weekly sector digest | Fri 22:00 | Top/bottom by RS, WoW movers → `sector_rotation_digests` |
 | AI Nexus daily | 22:30 | Universe + benchmark bars, Trend Score + Exhaustion |
@@ -412,13 +412,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.118.0 · 2026-11-13 · pass 133 · SC-65
+
+**Risk check moved to 09:00 UTC; US 2Y gap rows added.** The daily breaker check and its one Telegram alert now run at 09:00 UTC (was 04:30, so the alert does not wake Fin). The US 2Y table has the five approved rows: 4-5% falling +0.25, over 5% falling or flat -0.5, under 3% flat +0.5, under 4% rising -0.25 (3-4% flat was already 0.0). Supersedes v1.117.0.
+
 ### v1.117.0 · 2026-11-13 · pass 132 · SC-64
 
 **Crypto indicators: ICE DXY, stablecoin card, ROC by date.** `pal_dxy` reads the ICE US Dollar Index (Yahoo DX-Y.NYB, ~103) instead of FRED's broad index (~121), so the 100/105 thresholds apply; freshness is trading days. The stablecoin card shows supply in USD bn (it read "293.24 %" because the unit said ROC %); the 4-week ROC is picked by date and rejected beyond ±60%. Supersedes v1.116.0.
 
+
 ### v1.116.0 · 2026-11-13 · pass 131 · SC-63
 
 **Screener market caps: real where known, labelled approximate where not.** `/api/screener` rows use the Yahoo market cap from the daily stats pass (watchlist tickers) with its source and as-of; every other name keeps the seeded S&P sample figure, marked `marketCapApprox` and shown with "~". Cap filters use the effective cap. Demo mode uses sample figures only. Supersedes v1.115.0.
+
 
 
 ### v1.115.0 · 2026-11-13 · pass 130 · SC-62 (SC-57 v1.110.1)
@@ -427,9 +433,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.114.0 · 2026-11-13 · pass 129 · SC-61
 
 **Demo-mode leaks closed.** Real cash no longer reaches Summary or Preferences; deleted-holdings lists are empty; `POST /api/risk/snapshot` is refused and the nightly risk check skips. Supersedes v1.113.0.
+
 
 
 
@@ -442,9 +450,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.112.0 · 2026-11-10 · pass 127 · SC-59
 
 **Circuit breaker armed nightly, advisory, cash-inclusive.** A 04:30 UTC job reads the drawdown incl. cash, arms the breaker with one Telegram alert, and stores cash with each day's row (0073). Card says ADVISORY. Supersedes v1.111.0.
+
 
 
 
@@ -461,9 +471,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.110.0 · 2026-11-08 · pass 125 · SC-57b
 
 **Robotics & Embodiment routes to its own slug.** Adapter name variants map to `robotics_embodiment` (scorecard `robotics-embodiment`; locked in v1.111.0). Aliases only. Supersedes v1.109.0.
+
 
 
 
@@ -484,20 +496,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.108.0 · 2026-11-08 · pass 123 · SC-56b
-
-**One daily re-score summary.** Held `revision_needed` theses are one 07:35 UTC message, not a per-holding bot alert. Reference updated: §5. Supersedes v1.107.0.
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.117.0 -->
+<!-- END FT-master-spec v1.118.0 -->
