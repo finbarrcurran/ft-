@@ -6866,7 +6866,7 @@ async function renderEquitiesScreener() {
         <td class="dim">${escapeHTML(r.sector)}</td>
         <td class="num">${r.price ? fmtNum2.format(r.price) : '<span class="dim">—</span>'}</td>
         <td class="num ${changeCls}">${r.changePct >= 0 ? '+' : ''}${fmtNum2.format(r.changePct)}%</td>
-        <td class="num">${fmtNum2.format(r.marketCapB)}B</td>
+        <td class="num" title="${r.marketCapApprox ? 'Approximate: seeded S&P sample figure, not refreshed' : 'Yahoo market cap' + (r.marketCapAsOf ? ', as of ' + new Date(r.marketCapAsOf * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : '')}">${r.marketCapApprox ? '~' : ''}${fmtNum2.format(r.marketCapB)}B</td>
         <td>${r.onWatchlist
           ? '<span class="dim">on watchlist</span>'
           : '<button class="btn-ghost" data-add="' + escapeHTML(r.ticker) + '">+ watchlist</button>'}</td>

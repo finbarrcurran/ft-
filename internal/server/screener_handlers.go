@@ -13,6 +13,7 @@
 package server
 
 import (
+	"ft/internal/domain"
 	"ft/internal/heatmap"
 	"net/http"
 	"strconv"
@@ -26,6 +27,11 @@ type screenerRow struct {
 	Price      float64 `json:"price"`
 	ChangePct  float64 `json:"changePct"`
 	MarketCapB float64 `json:"marketCapB"`
+	// FT-091: where the cap comes from. "yahoo" = the daily stats pass (marketStats), with its as-of; "sample" = the
+	// seeded S&P sample figure, approximate (round numbers, not refreshed).
+	MarketCapSource string `json:"marketCapSource"`
+	MarketCapApprox bool   `json:"marketCapApprox"`
+	MarketCapAsOf   *int64 `json:"marketCapAsOf,omitempty"`
 	Beta       float64 `json:"beta,omitempty"` // not in seed; reserved for future
 	Held       bool    `json:"held"`
 	OnWatchlist bool   `json:"onWatchlist"`
@@ -64,6 +70,12 @@ func (s *Server) handleScreener(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// FT-091: real market caps where the daily stats pass has them (watchlist tickers). Skipped in demo mode, where
+	// watchlist membership must not show. Everything else keeps the sample figure, labelled approximate.
+	var stats map[string]*domain.MarketStatsInfo
+	if !s.demoModeOn(r.Context()) {
+		stats = s.store.MarketStatsMap(r.Context())
+	}
 	tiles := heatmap.AllTilesWithLive()
 	out := make([]screenerRow, 0, len(tiles))
 	for _, t := range tiles {
@@ -82,10 +94,15 @@ func (s *Server) handleScreener(w http.ResponseWriter, r *http.Request) {
 		if len(sectorsFilter) > 0 && !sectorsFilter[t.Sector] {
 			continue
 		}
-		if mcapMin > 0 && t.MarketCapB < mcapMin {
+		capB, capSrc, capApprox := t.MarketCapB, "sample", true
+		var capAsOf *int64
+		if st, ok := stats[tickerU]; ok && st != nil && st.MarketCap.Value != nil && *st.MarketCap.Value > 0 {
+			capB, capSrc, capApprox, capAsOf = *st.MarketCap.Value/1e9, "yahoo", false, st.MarketCap.AsOf
+		}
+		if mcapMin > 0 && capB < mcapMin {
 			continue
 		}
-		if mcapMax > 0 && t.MarketCapB > mcapMax {
+		if mcapMax > 0 && capB > mcapMax {
 			continue
 		}
 		if t.ChangePct < changeMin || t.ChangePct > changeMax {
@@ -97,7 +114,10 @@ func (s *Server) handleScreener(w http.ResponseWriter, r *http.Request) {
 			Sector:      t.Sector,
 			Price:       t.Price,
 			ChangePct:   t.ChangePct,
-			MarketCapB:  t.MarketCapB,
+			MarketCapB:  capB,
+			MarketCapSource: capSrc,
+			MarketCapApprox: capApprox,
+			MarketCapAsOf:   capAsOf,
 			Held:        isHeld,
 			OnWatchlist: onWatch[tickerU],
 		})
