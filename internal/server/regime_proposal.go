@@ -51,7 +51,7 @@ func (s *Server) newestJordiDigest(ctx context.Context) (*proposalDigest, error)
 		SELECT id, video_id, title, published_at, ingested_at, regime_narrative, catalysts, proposed_regime, proposed_confidence,
 		       proposed_quote, proposed_quote_ts, proposed_quote_match, cross_asset_tilt, cross_asset_quote,
 		       accumulation_stance, accumulation_quote, extraction_version, proposal_runs, proposal_agree
-		  FROM video_digests WHERE source = 'jordi' ORDER BY published_at DESC, id DESC LIMIT 1`).
+		  FROM video_digests WHERE source = 'jordi' AND is_flagship = 1 ORDER BY published_at DESC, id DESC LIMIT 1`).
 		Scan(&d.ID, &d.VideoID, &d.Title, &d.PublishedAt, &d.IngestedAt, &d.Narrative, &d.Catalysts, &d.State, &d.Confidence,
 			&d.Quote, &d.QuoteTs, &d.Match, &d.Tilt, &d.TiltQuote, &d.Stance, &d.StanceQuote, &d.Version, &d.Runs, &d.Agree)
 	if errors.Is(err, sql.ErrNoRows) {

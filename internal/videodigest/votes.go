@@ -126,6 +126,6 @@ func nullable(s string) any {
 // isNewestJordi reports whether videoID's digest is the newest Jordi digest by publication date.
 func (s *Service) isNewestJordi(ctx context.Context, videoID string) bool {
 	var vid string
-	err := s.DB.QueryRowContext(ctx, `SELECT video_id FROM video_digests WHERE source = 'jordi' ORDER BY published_at DESC, id DESC LIMIT 1`).Scan(&vid)
+	err := s.DB.QueryRowContext(ctx, `SELECT video_id FROM video_digests WHERE source = 'jordi' AND is_flagship = 1 ORDER BY published_at DESC, id DESC LIMIT 1`).Scan(&vid)
 	return err == nil && vid == videoID
 }
