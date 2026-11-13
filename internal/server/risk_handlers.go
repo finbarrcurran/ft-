@@ -77,6 +77,8 @@ func (s *Server) applyBreaker(ctx context.Context, check *technicals.PortfolioRi
 				check.DrawdownPct, check.DrawdownBasis, check.Caps.DrawdownCircuitPct, until)
 			if err := notify.Send(ctx, msg); err != nil && err != monitor.ErrNotConfigured {
 				slog.Warn("risk: breaker alert not sent", "err", err)
+			} else if err == nil {
+				slog.Info("risk: breaker alert sent", "drawdownPct", check.DrawdownPct, "until", until)
 			}
 		}
 	}
@@ -112,6 +114,9 @@ func (s *Server) RunNightlyRiskCheck(ctx context.Context, now time.Time, notify 
 	}
 	s.recordHistoryCash(ctx, now.UTC().Format("2006-01-02"), check.CashUSD)
 	s.applyBreaker(ctx, &check.PortfolioRiskCheck, notify)
+	// FT-144: one line a night with what the check saw, so the run can be read back from the journal.
+	slog.Info("risk: nightly check", "drawdownPct", check.DrawdownPct, "basis", check.DrawdownBasis, "cashUSD", check.CashUSD,
+		"cashSource", s.effectiveCash(ctx, now).Source, "breakerActive", check.CircuitBreakerActive, "advisory", check.Advisory)
 	return nil
 }
 

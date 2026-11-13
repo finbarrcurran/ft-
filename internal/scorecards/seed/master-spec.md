@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.127.0 · 2026-11-13** — latest change: Cash source labels, pull log, history backfill (§13).
+> **Current version: v1.128.0 · 2026-11-13** — latest change: Nightly risk check logs its result (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.127.0 2026-11-13 -->
+<!-- reference_reviewed: v1.128.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -417,13 +417,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.128.0 · 2026-11-13 · pass 143 · SC-75
+
+**Nightly risk check logs its result.** One `risk: nightly check` line a night and a `risk: breaker alert sent` line when the arming alert goes out. No behaviour change. Supersedes v1.127.0.
+
 ### v1.127.0 · 2026-11-13 · pass 142 · SC-74
 
 **Cash source labels, pull log, history backfill.** Each history cash value carries a source label; every eToro cash pull is logged; `ft cash-backfill` fills the cash column from eToro end-of-day balances (dry run unless --apply). Supersedes v1.126.0.
 
+
 ### v1.126.0 · 2026-11-13 · pass 141 · SC-73
 
 **Summary cash is eToro cash, two components.** Trading available (every sync) plus the eToro Money cash account (daily 03:40 UTC), stored in `etoro_cash`; the manual entry is the fallback after 48 h. The nightly history cash column uses the same figure. Supersedes v1.125.0.
+
 
 
 ### v1.125.0 · 2026-11-13 · pass 140 · SC-72
@@ -432,9 +438,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.124.0 · 2026-11-13 · pass 139 · SC-71
 
 **Quarter labels are not tickers.** The gate no longer reads Q1 to Q4 or H1/H2 as ticker symbols. Supersedes v1.123.0.
+
 
 
 
@@ -447,9 +455,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.122.0 · 2026-11-13 · pass 137 · SC-69
 
 **Gate lead 30 s; reverse alias check.** The grounding passage starts 30 s before the cited span; `ft video-items-regate` re-grounds stored items (no LLM). Supersedes v1.121.0.
+
 
 
 
@@ -465,9 +475,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.120.0 · 2026-11-13 · pass 135 · SC-67
 
 **22v transcripts in the store.** `ft transcripts import` (id `22v-<n>`, method `whisper`). Supersedes v1.119.0.
+
 
 
 
@@ -483,17 +495,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.118.0 · 2026-11-13 · pass 133 · SC-65
-
-**Risk check at 09:00 UTC; US 2Y gap rows.** Breaker check and its one alert at 09:00 UTC. Supersedes v1.117.0.
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.127.0 -->
+<!-- END FT-master-spec v1.128.0 -->
