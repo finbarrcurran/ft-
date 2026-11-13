@@ -96,8 +96,24 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 
 	totalInvestedCost := stocksInvested + cryptoCostUSD
 	totalValue := stocksValue + cryptoValueUSD
+	// FT-142: the cash is eToro cash (Trading available + eToro Money) while fresh; the manual entry is the fallback.
+	cashSource, cashAsOf := "manual", ""
+	var cashParts []cashComponent
+	if !s.demoModeOn(r.Context()) {
+		ec := s.effectiveCash(r.Context(), time.Now())
+		cashSource = ec.Source
+		if ec.Source == "etoro" {
+			cashDisplayUSD, cashParts = ec.USD, ec.Components
+			cashAsOf = time.Unix(ec.AsOf, 0).UTC().Format(time.RFC3339)
+			if fx > 0 {
+				cashEUR = ec.USD / fx
+			}
+			cashUSD = ec.USD
+		}
+	}
 	// FT-107: in demo mode the real cash balance must not show; use a synthetic 10% of the (masked) book.
 	if s.demoModeOn(r.Context()) {
+		cashSource, cashAsOf, cashParts = "demo", "", nil
 		cashDisplayUSD = float64(int64(totalValue*0.10*100+0.5)) / 100
 		cashUSD = cashDisplayUSD // the KPI block also returns the raw stored balances (edit-modal prefill)
 		if fx > 0 {
@@ -251,6 +267,9 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			"cash":           cashDisplayUSD,
 			"cashUsd":        cashUSD,
 			"cashEur":        cashEUR,
+			"cashSource":     cashSource, // FT-142: etoro | manual | demo
+			"cashAsOf":       cashAsOf,
+			"cashComponents": cashParts,
 			"valued":         stocksValued || cryptoValued,
 		},
 		"donuts": map[string]any{

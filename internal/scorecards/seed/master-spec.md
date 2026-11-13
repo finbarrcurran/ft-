@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.125.0 · 2026-11-13** — latest change: Video-brain status table corrected (§13).
+> **Current version: v1.126.0 · 2026-11-13** — latest change: Summary cash is eToro cash, two components (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.125.0 2026-11-13 -->
+<!-- reference_reviewed: v1.126.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -124,6 +124,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0071 | `ticker_market_stats` | SC-57 — `ticker_market_stats` (52-week range, all-time high + history range, market cap, as-of, last error) |
 | 0072 | `ticker_stats_price` | FT-082 — price columns |
 | 0073 | `portfolio_cash` | FT-110 — `cash_value_usd` on `portfolio_value_history` |
+| 0074 | `etoro_cash` | FT-142 — `etoro_cash` (latest value of two components: `trading_available`, `money_cash`; native amount, currency, USD, rate, source, as-of) |
 | 0063 | `crypto_index_members` | Jordi-46 Phase 1 — the 46 constituents of the Visser-Labs tokenized index (list_version 2026-09-21; 42 tokens with CoinGecko ids, 4 stocks COIN/HOOD/CRCL/FIGR; 10 verticals; soft `removed_at`); reference only, read by the screener and the list endpoint and by nothing else (no alert, gap-report, entry-zone, watchlist, holdings or thesis code) |
 | 0062 | `video_frame_reads` | SC-54 — `video_frame_reads` (what the vision model read off each chart frame: series, visible values, confidence, model, date; re-reads add rows) and `video_frame_runs` (one row per pass: status, reason, frames, calls, reads, cost) |
 | 0061 | `video_items` | SC-53 — `video_item_runs` (one per digest: model, chunks, tokens, cost, gate counts, status) and `video_items` (block, fields, cited span, gate class + issues, chart-unverified numbers, ticker resolution, direction verdict/speaker view/reason) |
@@ -154,6 +155,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Daily job | 04:00 | 365-day price history, calendar dates, beta, 12m vol, analyst forecasts, market stats (SC-57; a failed half keeps stored values; `ft market-stats-refresh`). CLI: `ft daily` |
 | Weekly FT snapshot (SC-46) | Sunday 18:00 UTC (Sunday evening Dublin) + Monday 07:00 UTC catch-up | `Server.RunScheduledSnapshot`: builds the deterministic weekly snapshot from the same in-process handlers the connector tools call (portfolio, YTD performance and trade statistics, thesis scores and locks, gap report, watchlist in-zone set, alerts raised in the last 7 days, regimes, crypto indicators with data dates, non-ok monitor entries, the latest week of video digests), compares it with the previous weeks (deltas, 4-week trend, text/set changes, a Top-changes block of at most 8 lines ranked by a fixed rule: regime changes and thesis-score changes, then set changes, then the largest relative movers), saves it to `ft_snapshots` and writes `/var/lib/ft/data/bridge/snapshot/ft-snapshot.md`; one Telegram note. The Monday run takes the week that just ended only if Sunday's did not run. A section whose source fails is omitted with a note, never invented; demo mode refuses to snapshot. **Snapshot v2 (v1.86.1):** each regime is shown with its set-at date, age and the 14-day stale flag, an unset/unclassified regime reads "unset since <date>" and is never a "changed from X to Y" or a Top change, and stale regimes are listed under Data health (which no longer says "all ok" for them); value changes carry an "of which" note from `holdings_audit` since the previous snapshot (removals, additions, invested-amount adjustments with invested USD; capital flows are not recorded in FT and are stated as not separable) plus the same for the three earlier weeks; the Watchlist section lists "In entry zone without a thesis" (entry-zone tickers also in the gap report), and a ticker entering that state is a Top change; header `ft_snapshot_version: 2`, marker `END ft-snapshot v2`. Weeks before the first stored snapshot are filled ONLY from existing history tables (portfolio value, alerts raised, regimes, thesis scores and lock dates); everything else starts at its first snapshot. Monitor `snapshot`: alert when the newest snapshot is older than 8 days, weekly reminders, quiet before the first one |
 | Video digest sweep | 09:15, plus ~2 min after boot | SC-43: ingests any complete package in `/var/lib/video_digest` not yet digested (one governor LLM call per new video) |
+| eToro Money cash (FT-142) | 03:40 (+2 min after boot) | one read-only `GET /api/v1/balances` (Cash accounts); the Trading cash is stored by every 30-min sync |
 | Risk check (SC-59) | 09:00 | cash-inclusive drawdown; arms the ADVISORY breaker + one Telegram alert |
 | Sector rotation ingest | 22:00 | 34 sector ETFs + SPY + VWRL daily close. CLI: `ft sector-ingest`; FT-081: split steps repaired after each run (`ft sector-repair`) |
 | Weekly sector digest | Fri 22:00 | Top/bottom by RS, WoW movers → `sector_rotation_digests` |
@@ -413,13 +415,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.126.0 · 2026-11-13 · pass 141 · SC-73
+
+**Summary cash is eToro cash, two components.** Trading available (every sync) plus the eToro Money cash account (daily 03:40 UTC), stored in `etoro_cash`; the manual entry is the fallback after 48 h. The nightly history cash column uses the same figure. Supersedes v1.125.0.
+
 ### v1.125.0 · 2026-11-13 · pass 140 · SC-72
 
 **Video-brain status table corrected.** SC-43 P2 is partly built (SC-54 frame reads, nothing feeds the snapshot columns); P3 mention linking and the P4 query tool are not built; transcript search is keyword-only, no web box. Documentation only. Supersedes v1.124.0.
 
+
 ### v1.124.0 · 2026-11-13 · pass 139 · SC-71
 
 **Quarter labels are not tickers.** The gate no longer reads Q1 to Q4 or H1/H2 as ticker symbols. Supersedes v1.123.0.
+
 
 
 ### v1.123.0 · 2026-11-13 · pass 138 · SC-70
@@ -428,37 +436,43 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.122.0 · 2026-11-13 · pass 137 · SC-69
 
-**Gate lead window 30 s; reverse alias check.** The grounding passage starts 30 s before the cited span (word cap 300), and a name the model wrote differently from the spoken one is grounded when its ticker's spoken name is in the passage. `ft video-items-regate` re-grounds stored items with no LLM call; applied once: wrong_place 45 to 17, none worse. Supersedes v1.121.0.
+**Gate lead 30 s; reverse alias check.** The grounding passage starts 30 s before the cited span (cap 300 words); `ft video-items-regate` re-grounds stored items with no LLM call. Supersedes v1.121.0.
+
 
 
 
 
 ### v1.121.0 · 2026-11-13 · pass 136 · SC-68
 
-**Context-only digests for 22v transcripts.** `ft video-digest-stored` digests a stored 22v Jordi transcript (summary, themes, mentions; no regime proposal, quotes, items or timestamps) as is_flagship=0. The regime card, vote and prior-week lookup only consider flagship digests, so an intraweek video never replaces the weekly. Supersedes v1.120.0.
+**Context-only 22v digests.** `ft video-digest-stored` digests a stored 22v Jordi transcript (summary, themes, mentions only) as is_flagship=0; the card, vote and prior lookup consider flagship digests only. Supersedes v1.120.0.
+
 
 
 
 
 ### v1.120.0 · 2026-11-13 · pass 135 · SC-67
 
-**22v transcripts in the store.** `ft transcripts import` loads plain-text Whisper transcripts (id `22v-<n>`, method `whisper`); a non-YouTube hit links to its URL, with no timestamp. Supersedes v1.119.0.
+**22v transcripts in the store.** `ft transcripts import` (id `22v-<n>`, method `whisper`); non-YouTube hits link to the URL. Supersedes v1.119.0.
+
 
 
 
 
 ### v1.119.0 · 2026-11-13 · pass 134 · SC-66
 
-**DXY gap rows; -1.0 rows reachable.** DXY gains under 100 rising 0.0, over 105 falling -0.25, flat -0.5; the narrower rising rows (DXY over 105, US 2Y 5%+) now come first so -1.0 is reachable; `pal_dxy` history rescored from ICE. Supersedes v1.118.0.
+**DXY gap rows; -1.0 rows reachable.** DXY gains under 100 rising 0.0, over 105 falling -0.25, flat -0.5; narrower rising rows now come first so -1.0 is reachable. Supersedes v1.118.0.
+
 
 
 
 
 ### v1.118.0 · 2026-11-13 · pass 133 · SC-65
 
-**Risk check at 09:00 UTC; US 2Y gap rows.** The daily breaker check and its one Telegram alert run at 09:00 UTC (was 04:30). The US 2Y table gained five approved gap rows. Supersedes v1.117.0.
+**Risk check at 09:00 UTC; US 2Y gap rows.** The breaker check and its one alert run at 09:00 UTC; five US 2Y gap rows. Supersedes v1.117.0.
+
 
 
 
@@ -470,15 +484,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.116.0 · 2026-11-13 · pass 131 · SC-63
-
-**Screener market caps.** Yahoo caps for watchlist tickers, sample figures (`marketCapApprox`, "~") elsewhere. Supersedes v1.115.0.
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.125.0 -->
+<!-- END FT-master-spec v1.126.0 -->

@@ -2597,11 +2597,22 @@ async function renderSummary() {
   // (already currency-adjusted server-side).
   const cashValue = k.cash != null ? Number(k.cash) : 0;
   const cashStr = cashValue > 0 ? formatMoney(cashValue) : '—';
-  const cashSub = cashValue > 0
+  // FT-142 — the cash is eToro cash (Trading available + eToro Money) while it is fresh; the manual entry is the fallback.
+  const cashFromEtoro = k.cashSource === 'etoro';
+  let cashSub = cashValue > 0
     ? '<span class="dim">click to edit</span>'
     : '<span class="dim">click to set</span>';
+  let cashTitle = 'Click to edit cash balance';
+  if (cashFromEtoro) {
+    const asOf = k.cashAsOf ? new Date(k.cashAsOf).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    const parts = (k.cashComponents || []).map((c) => (c.name === 'money_cash' ? 'eToro Money' : 'Trading') + ' ' + formatMoney(c.usd) + (c.stale ? ' (stale, not counted)' : ''));
+    cashSub = `<span class="dim">eToro cash${asOf ? ' · ' + escapeHTML(asOf) : ''}${k.cashComponents && k.cashComponents.length === 1 ? ' · Trading only' : ''}</span>`;
+    cashTitle = parts.join(' + ') + ' — the manual balance is only a fallback. Click to edit it.';
+  } else if (k.cashSource === 'manual' && cashValue > 0) {
+    cashSub = '<span class="dim">manual · click to edit</span>';
+  }
   const cashCard = `
-    <div class="kpi-card kpi-cash-clickable" id="kpi-cash" role="button" tabindex="0" title="Click to edit cash balance">
+    <div class="kpi-card kpi-cash-clickable" id="kpi-cash" role="button" tabindex="0" title="${escapeHTML(cashTitle)}">
       <div class="kpi-label">Cash</div>
       <div class="kpi-value num">${cashStr}</div>
       <div class="kpi-sub">${cashSub}</div>

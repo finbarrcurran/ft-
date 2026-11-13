@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"sort"
@@ -84,6 +85,9 @@ type position struct {
 
 type portfolioResp struct {
 	ClientPortfolio struct {
+		// Credit is the Trading account's available cash in USD (FT-142): it excludes open-trade margin and
+		// unrealised P&L. A pointer, so an absent field is not stored as zero cash.
+		Credit    *float64   `json:"credit"`
 		Positions []position `json:"positions"`
 		Mirrors   []struct {
 			MirrorID  int64      `json:"mirrorID"`
@@ -352,6 +356,12 @@ func (s *Service) Sync(ctx context.Context) Result {
 	var pf portfolioResp
 	if err := s.get(ctx, "/api/v1/trading/info/portfolio", &pf); err != nil {
 		return fail(err)
+	}
+	if c := pf.ClientPortfolio.Credit; c != nil && s.Store != nil { // FT-142: the available cash, with every sync
+		if err := s.Store.SetEtoroCash(ctx, store.EtoroCash{Component: CashTrading, AmountNative: *c, Currency: "USD", USD: *c,
+			FxToUSD: 1, Source: "etoro_api:portfolio.credit", AsOf: s.Now().Unix()}); err != nil {
+			slog.Warn("etoro sync: cash not stored", "err", err)
+		}
 	}
 	type raw struct {
 		p      position
@@ -675,4 +685,63 @@ func ni(n sql.NullInt64) *int64 {
 		return nil
 	}
 	return &n.Int64
+}
+
+// Cash component names (FT-142).
+const (
+	CashTrading = "trading_available"
+	CashMoney   = "money_cash"
+)
+
+type balancesResp struct {
+	Balances []struct {
+		AccountType    string  `json:"accountType"`
+		Balance        float64 `json:"balance"`
+		Currency       string  `json:"currency"`
+		DisplayBalance float64 `json:"displayBalance"`
+		ExchangeRate   float64 `json:"exchangeRate"`
+		EquityDetails  *struct {
+			Available *float64 `json:"available"`
+		} `json:"equityDetails"`
+	} `json:"balances"`
+}
+
+// PullMoneyCash reads the eToro Money cash account(s) from the balances route (read-only GET, scope
+// money.balance:read) and stores the sum as the money_cash component: the native amount and currency, and the
+// USD equivalent at eToro's own rate. No cash account is stored as zero (the answer is known).
+func (s *Service) PullMoneyCash(ctx context.Context) error {
+	if !s.Configured() {
+		return ErrNotConfigured
+	}
+	var br balancesResp
+	if err := s.get(ctx, "/api/v1/balances?accountTypes=Cash&expand=equityDetails&displayCurrency=USD", &br); err != nil {
+		return err
+	}
+	var native, usd, rate float64
+	ccy := ""
+	for _, b := range br.Balances {
+		if !strings.EqualFold(b.AccountType, "Cash") {
+			continue
+		}
+		amt := b.Balance // for a Cash account the balance is the available cash
+		if b.EquityDetails != nil && b.EquityDetails.Available != nil {
+			amt = *b.EquityDetails.Available
+		}
+		r := b.ExchangeRate
+		if r <= 0 {
+			r = 1
+		}
+		native += amt
+		usd += amt * r
+		if ccy == "" {
+			ccy, rate = b.Currency, r
+		} else if ccy != b.Currency {
+			ccy = "MIXED"
+		}
+	}
+	if ccy == "" {
+		ccy, rate = "USD", 1
+	}
+	return s.Store.SetEtoroCash(ctx, store.EtoroCash{Component: CashMoney, AmountNative: native, Currency: ccy,
+		USD: math.Round(usd*100) / 100, FxToUSD: rate, Source: "etoro_api:balances", AsOf: s.Now().Unix()})
 }
