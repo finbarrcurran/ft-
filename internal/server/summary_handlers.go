@@ -96,6 +96,16 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 
 	totalInvestedCost := stocksInvested + cryptoCostUSD
 	totalValue := stocksValue + cryptoValueUSD
+	// FT-107: in demo mode the real cash balance must not show; use a synthetic 10% of the (masked) book.
+	if s.demoModeOn(r.Context()) {
+		cashDisplayUSD = float64(int64(totalValue*0.10*100+0.5)) / 100
+		cashUSD = cashDisplayUSD // the KPI block also returns the raw stored balances (edit-modal prefill)
+		if fx > 0 {
+			cashEUR = cashDisplayUSD / fx
+		} else {
+			cashEUR = 0
+		}
+	}
 	totalPnl := totalValue - totalInvestedCost
 	var totalPnlPct *float64
 	if totalInvestedCost > 0 {

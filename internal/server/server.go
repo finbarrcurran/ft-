@@ -209,7 +209,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/holdings/crypto/{id}/autoscore", s.requireUser(s.handleCryptoAutoscore))
 	// Spec 9c D12/D13/D16: portfolio risk dashboard + daily snapshot.
 	s.mux.HandleFunc("GET /api/risk/dashboard", s.requireUserOrToken(s.handleRiskDashboard))
-	s.mux.HandleFunc("POST /api/risk/snapshot", s.requireUserOrToken(s.handleRiskSnapshot))
+	s.mux.HandleFunc("POST /api/risk/snapshot", s.requireUserOrToken(s.denyInDemo(s.handleRiskSnapshot)))
 
 	// Spec 9c.1: LLM cost-discipline endpoints. Token-or-cookie so the bot's
 	// /llm command can read state and (optionally) toggle pause from the phone.

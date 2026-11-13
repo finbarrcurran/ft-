@@ -345,6 +345,11 @@ func (s *Server) handleRestoreStock(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/holdings/stocks/deleted
 func (s *Server) handleListDeletedStocks(w http.ResponseWriter, r *http.Request) {
+	// FT-108: deleted holdings are real rows with real cost basis; the masking only covers the live book.
+	if s.demoModeOn(r.Context()) {
+		writeJSON(w, http.StatusOK, map[string]any{"holdings": []any{}, "demo": true})
+		return
+	}
 	userID, _ := userIDFromContext(r.Context())
 	rows, err := s.store.ListDeletedStockHoldings(r.Context(), userID)
 	if err != nil {
@@ -566,6 +571,10 @@ func (s *Server) handleRestoreCrypto(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/holdings/crypto/deleted
 func (s *Server) handleListDeletedCrypto(w http.ResponseWriter, r *http.Request) {
+	if s.demoModeOn(r.Context()) { // FT-108
+		writeJSON(w, http.StatusOK, map[string]any{"holdings": []any{}, "demo": true})
+		return
+	}
 	userID, _ := userIDFromContext(r.Context())
 	rows, err := s.store.ListDeletedCryptoHoldings(r.Context(), userID)
 	if err != nil {
