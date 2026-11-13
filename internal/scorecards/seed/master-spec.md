@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.128.0 · 2026-11-13** — latest change: Nightly risk check logs its result (§13).
+> **Current version: v1.129.0 · 2026-11-13** — latest change: Risk check names its "today" value (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.128.0 2026-11-13 -->
+<!-- reference_reviewed: v1.129.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -417,13 +417,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.129.0 · 2026-11-13 · pass 144 · SC-76
+
+**Risk check names its "today" value.** `valueSource` and `valueAsOf` (last price refresh) on the check and in the nightly log; the live holdings value, never the snapshot. Supersedes v1.128.0.
+
 ### v1.128.0 · 2026-11-13 · pass 143 · SC-75
 
 **Nightly risk check logs its result.** One `risk: nightly check` line a night and a `risk: breaker alert sent` line when the arming alert goes out. No behaviour change. Supersedes v1.127.0.
 
+
 ### v1.127.0 · 2026-11-13 · pass 142 · SC-74
 
 **Cash source labels, pull log, history backfill.** Each history cash value carries a source label; every eToro cash pull is logged; `ft cash-backfill` fills the cash column from eToro end-of-day balances (dry run unless --apply). Supersedes v1.126.0.
+
 
 
 ### v1.126.0 · 2026-11-13 · pass 141 · SC-73
@@ -432,16 +438,19 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.125.0 · 2026-11-13 · pass 140 · SC-72
 
-**Video-brain status table corrected.** SC-43 P2 partly built (SC-54); P3 linking and the P4 query tool not built; search is keyword-only. Documentation only. Supersedes v1.124.0.
+**Video-brain status table corrected.** SC-43 P2 partly built (SC-54); P3 and P4 not built. Documentation only. Supersedes v1.124.0.
+
 
 
 
 
 ### v1.124.0 · 2026-11-13 · pass 139 · SC-71
 
-**Quarter labels are not tickers.** The gate no longer reads Q1 to Q4 or H1/H2 as ticker symbols. Supersedes v1.123.0.
+**Quarter labels are not tickers.** The gate no longer reads Q1 to Q4 or H1/H2 as tickers. Supersedes v1.123.0.
+
 
 
 
@@ -449,7 +458,8 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 ### v1.123.0 · 2026-11-13 · pass 138 · SC-70
 
-**CoinGecko error text redacted.** Failed CoinGecko calls no longer list the coin ids in Diagnostics. Supersedes v1.122.0.
+**CoinGecko error text redacted.** Failed calls no longer list coin ids in Diagnostics. Supersedes v1.122.0.
+
 
 
 
@@ -459,6 +469,7 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 ### v1.122.0 · 2026-11-13 · pass 137 · SC-69
 
 **Gate lead 30 s; reverse alias check.** The grounding passage starts 30 s before the cited span; `ft video-items-regate` re-grounds stored items (no LLM). Supersedes v1.121.0.
+
 
 
 
@@ -476,19 +487,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.120.0 · 2026-11-13 · pass 135 · SC-67
 
 **22v transcripts in the store.** `ft transcripts import` (id `22v-<n>`, method `whisper`). Supersedes v1.119.0.
 
-
-
-
-
-
-
-### v1.119.0 · 2026-11-13 · pass 134 · SC-66
-
-**DXY gap rows; -1.0 rows reachable.** Three DXY gap rows; narrower rising rows first. Supersedes v1.118.0.
 
 
 
@@ -500,4 +503,4 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.128.0 -->
+<!-- END FT-master-spec v1.129.0 -->

@@ -115,7 +115,7 @@ func (s *Server) RunNightlyRiskCheck(ctx context.Context, now time.Time, notify 
 	s.recordHistoryCash(ctx, now.UTC().Format("2006-01-02"), check.CashUSD)
 	s.applyBreaker(ctx, &check.PortfolioRiskCheck, notify)
 	// FT-144: one line a night with what the check saw, so the run can be read back from the journal.
-	slog.Info("risk: nightly check", "drawdownPct", check.DrawdownPct, "basis", check.DrawdownBasis, "cashUSD", check.CashUSD,
+	slog.Info("risk: nightly check", "portfolioValueUSD", check.PortfolioValue, "valueAsOf", check.ValueAsOf, "valueSource", check.ValueSource, "drawdownPct", check.DrawdownPct, "basis", check.DrawdownBasis, "cashUSD", check.CashUSD,
 		"cashSource", s.effectiveCash(ctx, now).Source, "breakerActive", check.CircuitBreakerActive, "advisory", check.Advisory)
 	return nil
 }
@@ -188,6 +188,14 @@ func (s *Server) computeRiskCheck(ctx context.Context, userID int64) (*dashboard
 
 	check := technicals.Compute(positions, portfolioValue, drawdownPct, caps, cbActive == "true", cbUntil)
 	check.CashUSD = cash
+	// FT-144: "today" in the drawdown is the LIVE holdings value (current stored prices, refreshed every 15 minutes),
+	// never the last nightly snapshot; the snapshots are only the history it is compared with.
+	check.ValueSource = "live holdings at stored prices (not the nightly snapshot)"
+	if v, err := s.store.GetMeta(ctx, "last_refreshed_at"); err == nil && v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			check.ValueAsOf = time.Unix(n, 0).UTC().Format(time.RFC3339)
+		}
+	}
 	check.Advisory = true
 	check.DrawdownBasis = "incl. cash; days before cash was recorded use today's balance"
 	if cash == 0 {
