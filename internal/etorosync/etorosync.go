@@ -357,10 +357,18 @@ func (s *Service) Sync(ctx context.Context) Result {
 	if err := s.get(ctx, "/api/v1/trading/info/portfolio", &pf); err != nil {
 		return fail(err)
 	}
-	if c := pf.ClientPortfolio.Credit; c != nil && s.Store != nil { // FT-142: the available cash, with every sync
-		if err := s.Store.SetEtoroCash(ctx, store.EtoroCash{Component: CashTrading, AmountNative: *c, Currency: "USD", USD: *c,
-			FxToUSD: 1, Source: "etoro_api:portfolio.credit", AsOf: s.Now().Unix()}); err != nil {
-			slog.Warn("etoro sync: cash not stored", "err", err)
+	if s.Store != nil { // FT-142: the available cash, with every sync
+		const src = "etoro_api:portfolio.credit"
+		if c := pf.ClientPortfolio.Credit; c != nil {
+			if err := s.Store.SetEtoroCash(ctx, store.EtoroCash{Component: CashTrading, AmountNative: *c, Currency: "USD", USD: *c,
+				FxToUSD: 1, Source: src, AsOf: s.Now().Unix()}); err != nil {
+				slog.Warn("etoro sync: cash not stored", "err", err)
+				s.Store.LogEtoroCashPull(ctx, CashTrading, src, "failed", nil, err.Error())
+			} else {
+				s.Store.LogEtoroCashPull(ctx, CashTrading, src, "ok", c, "")
+			}
+		} else {
+			s.Store.LogEtoroCashPull(ctx, CashTrading, src, "missing", nil, "no credit field in the portfolio response")
 		}
 	}
 	type raw struct {
@@ -713,8 +721,10 @@ func (s *Service) PullMoneyCash(ctx context.Context) error {
 	if !s.Configured() {
 		return ErrNotConfigured
 	}
+	const src = "etoro_api:balances"
 	var br balancesResp
 	if err := s.get(ctx, "/api/v1/balances?accountTypes=Cash&expand=equityDetails&displayCurrency=USD", &br); err != nil {
+		s.Store.LogEtoroCashPull(ctx, CashMoney, src, "failed", nil, err.Error())
 		return err
 	}
 	var native, usd, rate float64
@@ -742,6 +752,41 @@ func (s *Service) PullMoneyCash(ctx context.Context) error {
 	if ccy == "" {
 		ccy, rate = "USD", 1
 	}
-	return s.Store.SetEtoroCash(ctx, store.EtoroCash{Component: CashMoney, AmountNative: native, Currency: ccy,
-		USD: math.Round(usd*100) / 100, FxToUSD: rate, Source: "etoro_api:balances", AsOf: s.Now().Unix()})
+	usd = math.Round(usd*100) / 100
+	if err := s.Store.SetEtoroCash(ctx, store.EtoroCash{Component: CashMoney, AmountNative: native, Currency: ccy,
+		USD: usd, FxToUSD: rate, Source: src, AsOf: s.Now().Unix()}); err != nil {
+		s.Store.LogEtoroCashPull(ctx, CashMoney, src, "failed", nil, err.Error())
+		return err
+	}
+	s.Store.LogEtoroCashPull(ctx, CashMoney, src, "ok", &usd, "")
+	return nil
+}
+
+type balancesHistResp struct {
+	Snapshots []struct {
+		Date             string  `json:"date"`
+		DisplayTotalCash float64 `json:"displayTotalCash"`
+	} `json:"snapshots"`
+}
+
+// FetchCashHistory reads eToro's end-of-day cash across all accounts, in USD (read-only GET of
+// /api/v1/balances/history; 12 months are available, at most 365 days per call).
+func (s *Service) FetchCashHistory(ctx context.Context, from, to string) (map[string]float64, error) {
+	if !s.Configured() {
+		return nil, ErrNotConfigured
+	}
+	var h balancesHistResp
+	path := "/api/v1/balances/history?displayCurrency=USD&fromDate=" + from + "&toDate=" + to
+	if err := s.get(ctx, path, &h); err != nil {
+		return nil, err
+	}
+	out := make(map[string]float64, len(h.Snapshots))
+	for _, sn := range h.Snapshots {
+		d := sn.Date
+		if len(d) > 10 {
+			d = d[:10]
+		}
+		out[d] = math.Round(sn.DisplayTotalCash*100) / 100
+	}
+	return out, nil
 }
