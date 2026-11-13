@@ -31,7 +31,7 @@ var Rules = map[string]Rule{
 	"universal_etf_flow_7d": {Unit: Trading, Amber: 3, Red: 5, Every: 24 * time.Hour, Note: "Farside publishes every US trading day"},
 	// SC-49b.
 	"pal_us2y": {Unit: Trading, Amber: 5, Red: 8, Every: 24 * time.Hour, Note: "FRED DGS2, business days, 1-5 day lag"},
-	"pal_dxy":  {Unit: Calendar, Amber: 14, Red: 21, Every: 24 * time.Hour, Note: "FRED DTWEXBGS, daily series published weekly, 6-11 day lag"},
+	"pal_dxy":  {Unit: Trading, Amber: 3, Red: 5, Every: 24 * time.Hour, Note: "Yahoo DX-Y.NYB (ICE US Dollar Index), daily on trading days (FT-084)"},
 	// CFNAI is dated the 1st of the month and released ~3-4 weeks after month end (2025-2026 FRED
 	// release dates: the longest wait for the next value is ~87 days from the observation date).
 	"pal_cfnai":                   {Unit: Calendar, Amber: 95, Red: 120, Every: 7 * 24 * time.Hour, Note: "FRED CFNAI, monthly; normal maximum age just before a release is ~87 days"},

@@ -76,13 +76,27 @@ func (c *DefiLlamaClient) FetchStablecoinSupply(ctx context.Context) Reading {
 		out.AsOf = time.Unix(secs, 0).UTC().Format("2006-01-02")
 	}
 
-	// 4-week ROC.
-	if len(data) > 29 {
-		prior := data[len(data)-29]
-		priorUSD := prior.TotalCirculatingUSD.PeggedUSD
-		if priorUSD > 0 {
-			roc := (latestUSD - priorUSD) / priorUSD * 100
-			out.Trend4w = &roc
+	// 4-week ROC. FT-084: the prior point is chosen by DATE (the newest entry on or before 28 days before the latest),
+	// not by array position, so a gap or a duplicated day in the source cannot shift the window; a result beyond
+	// +-60% is rejected, since total stablecoin supply does not move that much in four weeks.
+	if secs, err := strconv.ParseInt(latest.Date, 10, 64); err == nil {
+		target := secs - 28*86400
+		for i := len(data) - 1; i >= 0; i-- {
+			ds, err := strconv.ParseInt(data[i].Date, 10, 64)
+			if err != nil || ds > target {
+				continue
+			}
+			if secs-ds > 35*86400 { // the source has no point near 28 days back
+				break
+			}
+			if priorUSD := data[i].TotalCirculatingUSD.PeggedUSD; priorUSD > 0 {
+				roc := (latestUSD - priorUSD) / priorUSD * 100
+				if roc > 60 || roc < -60 {
+					return Reading{Err: fmt.Sprintf("defillama: 4-week change of %.1f%% is implausible; input rejected", roc)}
+				}
+				out.Trend4w = &roc
+			}
+			break
 		}
 	}
 	return out

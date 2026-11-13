@@ -17,7 +17,7 @@ const fetchQuiet = 30 * time.Hour
 
 var indicatorChecks = []struct{ ID, Label string }{
 	{"pal_us2y", "US 2-year yield data (FRED DGS2)"},
-	{"pal_dxy", "Dollar index data (FRED DTWEXBGS)"},
+	{"pal_dxy", "Dollar index data (ICE DXY, Yahoo)"},
 	{"pal_cfnai", "Chicago Fed activity index data (FRED CFNAI)"},
 	{"universal_stablecoin_supply", "Stablecoin supply data (DefiLlama)"},
 }

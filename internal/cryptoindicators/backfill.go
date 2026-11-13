@@ -28,7 +28,7 @@ type BackfillResult struct {
 //
 // Sources used:
 //
-//	FRED — DXY (DTWEXBGS) / US 2Y (DGS2) / CFNAI
+//	Yahoo — ICE DXY (DX-Y.NYB); FRED — US 2Y (DGS2) / CFNAI
 //	alternative.me — Fear & Greed Index full history
 //	Local btc_price_history — Cowen indicators (log-band, 200wma, risk)
 //	Local Playwright Farside JSON — universal_etf_flow_7d
@@ -59,9 +59,10 @@ func (s *Service) Backfill(ctx context.Context, days int, fredKey string) (*Back
 
 	// FRED
 	fred := providers.NewFREDClient(fredKey)
-	dxy, err := fred.FetchHistoricalSeries(ctx, "DTWEXBGS", start)
+	// FT-084: DXY is the ICE US Dollar Index (Yahoo DX-Y.NYB), not FRED's broad index, so history and live agree.
+	dxy, err := providers.NewYahooClient().FetchICEDXYHistory(ctx, start)
 	if err != nil {
-		res.Warnings = append(res.Warnings, "DXY FRED: "+err.Error())
+		res.Warnings = append(res.Warnings, "DXY ICE (Yahoo): "+err.Error())
 	}
 	us2y, err := fred.FetchHistoricalSeries(ctx, "DGS2", start)
 	if err != nil {

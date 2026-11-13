@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.116.0 · 2026-11-13** — latest change: Screener market caps: real where known, labelled approximate where not (§13).
+> **Current version: v1.117.0 · 2026-11-13** — latest change: Crypto indicators: ICE DXY, stablecoin card, ROC by date (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.116.0 2026-11-13 -->
+<!-- reference_reviewed: v1.117.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -412,13 +412,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.117.0 · 2026-11-13 · pass 132 · SC-64
+
+**Crypto indicators: ICE DXY, stablecoin card, ROC by date.** `pal_dxy` reads the ICE US Dollar Index (Yahoo DX-Y.NYB, ~103) instead of FRED's broad index (~121), so the 100/105 thresholds apply; freshness is trading days. The stablecoin card shows supply in USD bn (it read "293.24 %" because the unit said ROC %); the 4-week ROC is picked by date and rejected beyond ±60%. Supersedes v1.116.0.
+
 ### v1.116.0 · 2026-11-13 · pass 131 · SC-63
 
 **Screener market caps: real where known, labelled approximate where not.** `/api/screener` rows use the Yahoo market cap from the daily stats pass (watchlist tickers) with its source and as-of; every other name keeps the seeded S&P sample figure, marked `marketCapApprox` and shown with "~". Cap filters use the effective cap. Demo mode uses sample figures only. Supersedes v1.115.0.
 
+
 ### v1.115.0 · 2026-11-13 · pass 130 · SC-62 (SC-57 v1.110.1)
 
 **All-time-high date is the trading day; short-history note fixed.** The history bars are weeks or months, so the date was the start of a bar (AUR showed 2021-11-15; the high of 17.77 was on 2021-11-19). One daily call now resolves the day (empty if it fails). The "history shorter than 52 weeks" note fires only when the all-time high is more than 0.5% below the 52-week high. Supersedes v1.114.0.
+
 
 
 ### v1.114.0 · 2026-11-13 · pass 129 · SC-61
@@ -427,9 +433,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.113.0 · 2026-11-13 · pass 128 · SC-60
 
 **Stock tax lots from the eToro lots, by ticker.** Lots no longer read the synthetic `opening_position` rows (keyed by holding id); crypto lots match id and symbol. Nothing deleted. Supersedes v1.112.0.
+
 
 
 
@@ -442,9 +450,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.111.0 · 2026-11-10 · pass 126 · SC-58
 
 **Sector split repair; watchlist daily price; Robotics & Embodiment locked.** Split steps in sector ETF series are repaired; Watchlist shows the daily Yahoo price with as-of; `robotics-embodiment` scorecard locked 2026-11-10. Supersedes v1.110.0.
+
 
 
 
@@ -461,9 +471,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.109.0 · 2026-11-08 · pass 124 · SC-57
 
 **52-week range, all-time high and market cap on the watchlist.** Watchlist rows and MCP `get_watchlist` carry `marketStats` (source and as-of, null when unavailable; the all-time high is the highest monthly high in the returned history). `ft market-stats-refresh`. Migration: 0071. Supersedes v1.108.0.
+
 
 
 
@@ -483,19 +495,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.107.0 · 2026-11-08 · pass 122 · SC-56 follow-ups
-
-**Last-reported backfill, second-source alert, demo masks.** Stale last-reported dates backfill from `v7/quote`; second-source failures alert. Migration: 0070. Supersedes v1.106.0.
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.116.0 -->
+<!-- END FT-master-spec v1.117.0 -->

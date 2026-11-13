@@ -72,7 +72,7 @@
     {
       "id": "pal_dxy",
       "bucket": "pal",
-      "display_name": "DXY (Dollar Index)",
+      "display_name": "DXY (ICE Dollar Index)",
       "unit": "index",
       "scoring_fn": "level_and_trend",
       "thresholds": [
@@ -129,8 +129,8 @@
     {
       "id": "universal_stablecoin_supply",
       "bucket": "universal",
-      "display_name": "Stablecoin Total Supply (4-wk ROC)",
-      "unit": "USD bn (4w ROC %)",
+      "display_name": "Stablecoin Total Supply (scored on 4-wk ROC)",
+      "unit": "USD bn",
       "scoring_fn": "trend_only",
       "thresholds": [
         {"trend_4w_min":    2.0, "score":  1.0},
