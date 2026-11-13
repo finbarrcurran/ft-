@@ -35,7 +35,7 @@ func TestIndicatorCardsCarryTheirOwnFreshness(t *testing.T) {
 	svc := cryptoindicators.New(st.DB)
 	ctx := context.Background()
 	daysAgo := func(n int) string { return time.Now().UTC().AddDate(0, 0, -n).Format("2006-01-02") }
-	// CFNAI 121 days (red), DXY 15 days (amber), stablecoin today (fresh), US2Y left empty,
+	// CFNAI 121 days (red), DXY 15 days (red, trading-day series), stablecoin today (fresh), US2Y left empty,
 	// and an indicator with no rule (fear & greed) given an old date: it must carry no badge.
 	for id, d := range map[string]string{"pal_cfnai": daysAgo(121), "pal_dxy": daysAgo(15), "universal_stablecoin_supply": daysAgo(0), "sentiment_fear_greed": daysAgo(90)} {
 		if err := svc.SetIndicatorAsOf(ctx, id, d); err != nil {
@@ -61,9 +61,9 @@ func TestIndicatorCardsCarryTheirOwnFreshness(t *testing.T) {
 	for id, want := range map[string]struct {
 		level, unit string
 		age         int
-	}{"pal_cfnai": {"red", "calendar", 121}, "pal_dxy": {"amber", "calendar", 15}, "universal_stablecoin_supply": {"", "calendar", 0}} {
+	}{"pal_cfnai": {"red", "calendar", 121}, "pal_dxy": {"red", "trading", -1}, "universal_stablecoin_supply": {"", "calendar", 0}} {
 		c := by[id]
-		if c.StaleLevel != want.level || c.DataAgeUnit != want.unit || c.DataAge == nil || *c.DataAge != want.age {
+		if c.StaleLevel != want.level || c.DataAgeUnit != want.unit || c.DataAge == nil || (want.age >= 0 && *c.DataAge != want.age) {
 			t.Fatalf("%s: %+v (want %+v)", id, c, want)
 		}
 	}
