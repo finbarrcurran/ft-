@@ -20,10 +20,10 @@ func insertJordiDigest(t *testing.T, st *store.Store, videoID, published, state,
 	if state != "" {
 		stateArg, confArg = state, conf
 	}
-	r, err := st.DB.Exec(`INSERT INTO video_digests (source, video_id, title, published_at, package_path, ingested_at, extraction_version,
+	r, err := st.DB.Exec(`INSERT INTO video_digests (source, is_flagship, video_id, title, published_at, package_path, ingested_at, extraction_version,
 		regime_narrative, catalysts, proposed_regime, proposed_confidence, proposed_quote, proposed_quote_ts, proposed_quote_match,
 		cross_asset_tilt, cross_asset_quote, accumulation_stance, accumulation_quote)
-		VALUES ('jordi', ?, ?, ?, '/x', ?, 3, 'He is cautious about adding.', '[{"event":"midterms","date":"2026-11"}]', ?, ?, 'wait for the hedge funds to be done', 1231, ?,
+		VALUES ('jordi', 1, ?, ?, ?, '/x', ?, 3, 'He is cautious about adding.', '[{"event":"midterms","date":"2026-11"}]', ?, ?, 'wait for the hedge funds to be done', 1231, ?,
 		'crypto', 'majority of my portfolio moved into crypto', 'waiting', 'wait another month')`,
 		videoID, "Video "+videoID, published, ingestedAt, stateArg, confArg, match)
 	if err != nil {

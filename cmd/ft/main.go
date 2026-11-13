@@ -134,6 +134,8 @@ func main() {
 		runVideoDigestItems(os.Args[2:])
 	case "video-digest-extract":
 		runVideoDigestExtract(os.Args[2:])
+	case "video-digest-stored":
+		runVideoDigestStored(os.Args[2:])
 	case "regime-history":
 		runRegimeHistory(os.Args[2:])
 	case "transcripts":
@@ -330,6 +332,7 @@ USAGE
   ft nexus-backfill [--range 2y] [--gap-ms N]  fetch daily bars for the Nexus universe (SC-36)
   ft nexus-compute [--as-of DATE]              compute Nexus Trend + Exhaustion (SC-36)
   ft nexus-fundamentals [--as-of DATE]         snapshot Nexus Forward PEG fundamentals (SC-36)
+  ft video-digest-stored 22v-N [22v-N ...]     SC-68: digest 22v transcripts held only in the store (context only; is_flagship=0)
   ft video-digest-reground                     re-ground video-digest quotes against transcripts (SC-43)
   ft token revoke --id N [--user-id N]         revoke a service token
   ft oauth status | revoke-all | revoke-client --id ID | create-client --name N --redirect URI [--secret]
@@ -1563,6 +1566,28 @@ func runVideoDigestItems(args []string) {
 			}
 		}
 	}
+}
+
+// runVideoDigestStored: SC-68. Digests the named 22v transcripts from video_transcripts.
+func runVideoDigestStored(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: ft video-digest-stored 22v-N [22v-N ...]")
+		os.Exit(2)
+	}
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	svc := videodigest.New(st.DB, llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY")), os.Getenv("FT_VIDEO_DIGEST_ROOT"))
+	var cost float64
+	for _, id := range args {
+		r := svc.IngestStored(context.Background(), id, false)
+		cost += r.CostUSD
+		fmt.Printf("%-10s %-9s mentions=%d cost=$%.4f %s\n", id, r.Status, r.Mentions, r.CostUSD, r.Error)
+	}
+	fmt.Printf("total cost $%.4f\n", cost)
 }
 
 // runVideoDigestExtract: SC-52 P3. Digests stored packages that have no digest yet, with a hard

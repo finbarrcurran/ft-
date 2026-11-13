@@ -112,6 +112,10 @@ type packageMeta struct {
 type pkg struct {
 	Dir  string
 	Meta packageMeta
+	// Stored marks a digest of a transcript held only in video_transcripts (SC-68: the 22v
+	// intraweek videos). Compact is its text, which has no [NNNs] markers.
+	Stored  bool
+	Compact string
 }
 
 func readPackage(dir string) (pkg, error) {
@@ -994,7 +998,7 @@ func (s *Service) priorFor(ctx context.Context, m packageMeta) (*prior, error) {
 	var summary sql.NullString
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT id, published_at, title, executive_summary, themes FROM video_digests
-		 WHERE source = ? AND published_at < ? ORDER BY published_at DESC, id DESC LIMIT 1`,
+		 WHERE source = ? AND is_flagship = 1 AND published_at < ? ORDER BY published_at DESC, id DESC LIMIT 1`,
 		m.Source, m.PublishedAt).Scan(&p.ID, &p.PublishedAt, &p.Title, &summary, &themes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -1119,18 +1123,20 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 		res.Status, res.DigestID = "skipped", oldID
 		return res
 	}
-	vtt, err := os.ReadFile(filepath.Join(p.Dir, "transcript.vtt"))
-	if err != nil {
-		return fail(err)
-	}
-	compact := CompactTranscript(string(vtt))
-	if compact == "" {
-		return fail(fmt.Errorf("transcript.vtt produced no text"))
-	}
-
-	// SC-52 P2: keep the full transcript, searchable, whether or not extraction succeeds.
-	if _, err := s.StoreTranscript(ctx, rowFromPackage(p, compact)); err != nil {
-		slog.Warn("videodigest: transcript not stored", "video", m.VideoID, "err", err)
+	compact := p.Compact
+	if !p.Stored {
+		vtt, err := os.ReadFile(filepath.Join(p.Dir, "transcript.vtt"))
+		if err != nil {
+			return fail(err)
+		}
+		compact = CompactTranscript(string(vtt))
+		if compact == "" {
+			return fail(fmt.Errorf("transcript.vtt produced no text"))
+		}
+		// SC-52 P2: keep the full transcript, searchable, whether or not extraction succeeds.
+		if _, err := s.StoreTranscript(ctx, rowFromPackage(p, compact)); err != nil {
+			slog.Warn("videodigest: transcript not stored", "video", m.VideoID, "err", err)
+		}
 	}
 
 	var pr *prior
@@ -1158,7 +1164,7 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 		FeatureID:       FeatureID,
 		FeatureContext:  m.Source + ":" + m.VideoID + " " + m.PublishedAt,
 		SystemPrompt:    systemPrompt(m.Source),
-		UserPrompt:      userPrompt(m, compact, pr),
+		UserPrompt:      userPromptFor(p, m, compact, pr),
 		MaxOutputTokens: maxOut,
 	})
 	if err != nil {
@@ -1172,10 +1178,13 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 	if err != nil {
 		return fail(err)
 	}
+	if p.Stored {
+		contextOnly(&ex)
+	}
 
 	// Jordi counts every weekly upload (select: all_new), so each is its own
 	// flagship per the P1 handover; Cowen keeps the pipeline's flagship rule.
-	isFlagship := m.IsFlagship || m.Source == "jordi"
+	isFlagship := (m.IsFlagship || m.Source == "jordi") && !p.Stored
 	var priorID any
 	if pr != nil {
 		priorID = pr.ID
@@ -1258,6 +1267,9 @@ func (s *Service) ingest(ctx context.Context, p pkg, force bool) Result {
 		}
 	}
 	var params any
+	if p.Stored {
+		m.FrameParams = nil
+	}
 	if len(m.FrameParams) > 0 && string(m.FrameParams) != "null" {
 		params = string(m.FrameParams)
 	}
@@ -1299,7 +1311,7 @@ type ReGroundResult struct {
 // call. Used once for digests ingested before grounding existed; idempotent.
 func (s *Service) Reground(ctx context.Context) (ReGroundResult, error) {
 	var out ReGroundResult
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, package_path FROM video_digests`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, package_path FROM video_digests WHERE package_path <> ''`)
 	if err != nil {
 		return out, err
 	}
@@ -1642,4 +1654,47 @@ func (s *Service) fillChildren(ctx context.Context, d *Digest) error {
 	sn.MacroCPIPrint, sn.MacroFedPosture, sn.MacroRecessionFlag, sn.Confidence = nullStr(cpi), nullStr(fed), nullBool(rec), nullStr(conf)
 	d.Snapshot = &sn
 	return nil
+}
+
+// userPromptFor is the user prompt; a stored-only transcript (SC-68) carries no time markers, so the
+// model is told to leave every time field empty and return no quotes.
+func userPromptFor(p pkg, m packageMeta, transcript string, pr *prior) string {
+	base := userPrompt(m, transcript, pr)
+	if !p.Stored {
+		return base
+	}
+	return "NOTE: this transcript has NO time markers. Set every ts_sec, start_sec and end_sec to null, cite no segments, and return an empty notable_quotes list.\n\n" + base
+}
+
+// contextOnly strips everything a stored-only (22v) digest must not carry: it is context for the
+// reader, never a regime proposal or a scoring input (D6). Summary, themes and mentions stay.
+func contextOnly(ex *Extraction) {
+	ex.ProposedRegime, ex.ProposedConfidence, ex.ProposedQuote, ex.ProposedQuoteTs, ex.ProposedQuoteMatch = nil, nil, nil, nil, nil
+	ex.ProposalRejected = ""
+	ex.Tilt, ex.TiltQuote, ex.AccumStance, ex.AccumQuote = nil, nil, nil, nil
+	ex.NotableQuotes, ex.QuotesRejected, ex.RejectedQuotes = nil, 0, nil
+	for i := range ex.Mentions {
+		ex.Mentions[i].TsSec = nil
+	}
+	ex.MentionsUngrounded = 0
+}
+
+// IngestStored digests a 22v transcript that exists only in video_transcripts (SC-68). The digest is
+// stored with is_flagship=0 and an empty package path, so it can never be the newest-Jordi digest
+// behind the regime card, the vote or a prior-week lookup, and it has no quotes, items or frames.
+func (s *Service) IngestStored(ctx context.Context, videoID string, force bool) Result {
+	var m packageMeta
+	var text string
+	var dur sql.NullInt64
+	err := s.DB.QueryRowContext(ctx, `SELECT source, video_id, title, url, published_at, duration_sec, method, text FROM video_transcripts WHERE video_id = ?`, videoID).
+		Scan(&m.Source, &m.VideoID, &m.Title, &m.URL, &m.PublishedAt, &dur, &m.TranscriptMethod, &text)
+	if err != nil {
+		return Result{VideoID: videoID, Status: "failed", Error: fmt.Sprintf("no stored transcript: %v", err)}
+	}
+	if !strings.HasPrefix(videoID, "22v-") || m.Source != "jordi" {
+		return Result{VideoID: videoID, Status: "failed", Error: "IngestStored is for 22v Jordi transcripts only"}
+	}
+	m.DurationSec = int(dur.Int64)
+	m.Status = "complete"
+	return s.ingest(ctx, pkg{Meta: m, Stored: true, Compact: text}, force)
 }

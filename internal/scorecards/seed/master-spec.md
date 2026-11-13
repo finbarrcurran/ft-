@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.120.0 · 2026-11-13** — latest change: 22v transcripts in the store (§13).
+> **Current version: v1.121.0 · 2026-11-13** — latest change: Context-only digests for 22v transcripts (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.120.0 2026-11-13 -->
+<!-- reference_reviewed: v1.121.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -412,13 +412,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.121.0 · 2026-11-13 · pass 136 · SC-68
+
+**Context-only digests for 22v transcripts.** `ft video-digest-stored` digests a stored 22v Jordi transcript (summary, themes, mentions; no regime proposal, quotes, items or timestamps) as is_flagship=0. The regime card, vote and prior-week lookup only consider flagship digests, so an intraweek video never replaces the weekly. Supersedes v1.120.0.
+
 ### v1.120.0 · 2026-11-13 · pass 135 · SC-67
 
 **22v transcripts in the store.** `ft transcripts import` loads plain-text Whisper transcripts (id `22v-<n>`, method `whisper`); a hit on a non-YouTube URL links to that URL, with no timestamp. Six intraweek Jordi videos imported, five duplicates of stored YouTube captions skipped, no digest. Supersedes v1.119.0.
 
+
 ### v1.119.0 · 2026-11-13 · pass 134 · SC-66
 
 **DXY gap rows; -1.0 rows reachable.** DXY now scores under 100 rising 0.0, over 105 falling -0.25, over 105 flat -0.5. In the DXY and US 2Y tables the narrower rising rows (DXY over 105, US 2Y 5%+) now come before the broader ones, so -1.0 is reachable. `pal_dxy` history was rescored from ICE DX-Y.NYB (892 days; composites not recomputed). Supersedes v1.118.0.
+
 
 
 ### v1.118.0 · 2026-11-13 · pass 133 · SC-65
@@ -427,9 +433,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.117.0 · 2026-11-13 · pass 132 · SC-64
 
 **Crypto indicators: ICE DXY, stablecoin card, ROC by date.** `pal_dxy` reads the ICE US Dollar Index (Yahoo DX-Y.NYB, ~103) instead of FRED's broad index (~121), so the 100/105 thresholds apply; freshness is trading days. The stablecoin card shows supply in USD bn (it read "293.24 %" because the unit said ROC %); the 4-week ROC is picked by date and rejected beyond ±60%. Supersedes v1.116.0.
+
 
 
 
@@ -442,9 +450,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.115.0 · 2026-11-13 · pass 130 · SC-62 (SC-57 v1.110.1)
 
 **ATH date is the trading day; short-history note fixed.** One daily call resolves the actual high day (was a bar start). The "history shorter than 52 weeks" note fires only when ATH is >0.5% below the 52-week high. Supersedes v1.114.0.
+
 
 
 
@@ -461,9 +471,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.113.0 · 2026-11-13 · pass 128 · SC-60
 
 **Stock tax lots from the eToro lots, by ticker.** Lots no longer read the synthetic `opening_position` rows (keyed by holding id); crypto lots match id and symbol. Nothing deleted. Supersedes v1.112.0.
+
 
 
 
@@ -484,21 +496,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.111.0 · 2026-11-10 · pass 126 · SC-58
-
-**Sector split repair; watchlist daily price; Robotics & Embodiment locked.** Split steps in sector ETF series are repaired; Watchlist shows the daily Yahoo price with as-of; `robotics-embodiment` scorecard locked 2026-11-10. Supersedes v1.110.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.120.0 -->
+<!-- END FT-master-spec v1.121.0 -->
