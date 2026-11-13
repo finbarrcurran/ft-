@@ -1712,6 +1712,7 @@ func runTranscripts(args []string) {
 	from := fs.String("from", "", "published on/after YYYY-MM-DD")
 	to := fs.String("to", "", "published on/before YYYY-MM-DD")
 	limit := fs.Int("limit", 10, "max videos")
+	onlyIDs := fs.String("only", "", "import: comma-separated 22v video numbers (default: every file)")
 	query := parseInterleaved(fs, args)
 	cfg, err := config.Load()
 	must("load config", err)
@@ -1726,6 +1727,24 @@ func runTranscripts(args []string) {
 		r, err := svc.SyncTranscripts(ctx)
 		must("sync", err)
 		fmt.Printf("packages %d | written %d | unchanged %d | failed %d\n", r.Packages, r.Written, r.Unchanged, r.Failed)
+	case "import":
+		// SC-67: plain-text Whisper transcripts from the 22v library. `ft transcripts import --source jordi --only 2538,2504 DIR`
+		if len(query) != 1 {
+			fmt.Fprintln(os.Stderr, "usage: ft transcripts import --source jordi [--only N,N,...] DIR")
+			os.Exit(2)
+		}
+		if *src == "" {
+			*src = "jordi"
+		}
+		only := map[string]bool{}
+		for _, n := range strings.Split(*onlyIDs, ",") {
+			if n = strings.TrimSpace(n); n != "" {
+				only[n] = true
+			}
+		}
+		r, err := svc.ImportTextTranscripts(ctx, query[0], *src, only)
+		must("import", err)
+		fmt.Printf("selected %d | written %d | unchanged %d | failed %d\n", r.Packages, r.Written, r.Unchanged, r.Failed)
 	case "search":
 		hits, err := svc.SearchTranscripts(ctx, strings.Join(query, " "), videodigest.SearchOptions{Source: *src, From: *from, To: *to, Limit: *limit})
 		must("search", err)
