@@ -96,6 +96,12 @@ func (s *Server) applyBreaker(ctx context.Context, check *technicals.PortfolioRi
 // RunNightlyRiskCheck is the scheduled arm/clear (FT-079): it records today's cash with the day's value row
 // (FT-110), reads the cash-inclusive drawdown and applies the breaker. It runs after the nightly value snapshot.
 func (s *Server) RunNightlyRiskCheck(ctx context.Context, now time.Time, notify monitor.Notifier) error {
+	// FT-109: in demo mode the book is masked, so a check now would arm the breaker and store cash on synthetic
+	// numbers. Skip it; the next night's run covers it.
+	if s.demoModeOn(ctx) {
+		slog.Info("risk: nightly check skipped (demo mode on)")
+		return nil
+	}
 	var uid int64
 	if err := s.store.DB.QueryRowContext(ctx, `SELECT id FROM users ORDER BY id LIMIT 1`).Scan(&uid); err != nil {
 		return err

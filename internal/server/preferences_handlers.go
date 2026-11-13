@@ -24,6 +24,14 @@ func (s *Server) handleListPreferences(w http.ResponseWriter, r *http.Request) {
 	if mapStoreError(w, err) {
 		return
 	}
+	// FT-107: the real cash balance never leaves the server in demo mode.
+	if s.demoModeOn(r.Context()) {
+		for k := range prefs {
+			if strings.HasPrefix(k, "cash_balance_") {
+				delete(prefs, k)
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"preferences": prefs})
 }
 
@@ -31,6 +39,10 @@ func (s *Server) handleGetPreference(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.PathValue("key"))
 	if key == "" {
 		writeError(w, http.StatusBadRequest, "missing key")
+		return
+	}
+	if strings.HasPrefix(key, "cash_balance_") && s.demoModeOn(r.Context()) { // FT-107
+		writeJSON(w, http.StatusOK, map[string]any{"key": key, "value": nil})
 		return
 	}
 	v, err := s.store.GetPreference(r.Context(), key)

@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.113.0 · 2026-11-13** — latest change: Stock tax lots read from the eToro lots, by ticker (§13).
+> **Current version: v1.114.0 · 2026-11-13** — latest change: Demo-mode leaks closed: cash, deleted holdings, snapshot (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.113.0 2026-11-13 -->
+<!-- reference_reviewed: v1.114.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -412,18 +412,25 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.114.0 · 2026-11-13 · pass 129 · SC-61
+
+**Demo-mode leaks closed: cash, deleted holdings, snapshot.** In demo mode the real cash balance no longer reaches Summary or Preferences (a synthetic 10% of the masked book shows), the deleted-holdings lists are empty, `POST /api/risk/snapshot` is refused and the nightly risk check skips. Supersedes v1.113.0.
+
 ### v1.113.0 · 2026-11-13 · pass 128 · SC-60
 
 **Stock tax lots read from the eToro lots, by ticker.** The Settings tax-lot view no longer reads the synthetic 2026-05-17 `opening_position` rows (keyed by holding id, so PAAS showed 4063.T's price); lots come from `etoro_holdings_lots` and add up to the Stocks row. Crypto lots are matched by id and symbol. Nothing deleted. Supersedes v1.112.0.
+
 
 ### v1.112.0 · 2026-11-10 · pass 127 · SC-59
 
 **Circuit breaker armed nightly, advisory, cash-inclusive.** A 04:30 UTC job reads the drawdown on value incl. cash, arms the breaker with one Telegram alert on a trip, and records cash with each day's value row (migration 0073). The Settings card says ADVISORY and shows BREACH when not yet armed. Nothing in the trade flow reads it. Supersedes v1.111.0.
 
 
+
 ### v1.111.0 · 2026-11-10 · pass 126 · SC-58
 
 **Sector split repair; watchlist daily price; Robotics & Embodiment locked.** Sector ETF split steps (SOXX, ITA 3:1 on 2026-11-05) are repaired from adjusted history; the Watchlist shows the daily Yahoo price with an as-of; scorecard `robotics-embodiment` set to `locked` on 2026-11-10 (Fin, supplement v1.1), so the adapter is recorded as locked. Supersedes v1.110.0.
+
 
 
 
@@ -434,9 +441,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.109.0 · 2026-11-08 · pass 124 · SC-57
 
 **52-week range, all-time high and market cap on the watchlist.** Watchlist rows and MCP `get_watchlist` carry `marketStats` (source and as-of, null when unavailable; the all-time high is the highest monthly high in the returned history). `ft market-stats-refresh`. Migration: 0071. Supersedes v1.108.0.
+
 
 
 
@@ -450,9 +459,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.107.0 · 2026-11-08 · pass 122 · SC-56 follow-ups
 
 **Last-reported backfill, second-source alert, demo masks.** Stale last-reported dates backfill from `v7/quote`; second-source failures alert. Migration: 0070. Supersedes v1.106.0.
+
 
 
 
@@ -466,17 +477,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.105.0 · 2026-11-07 · pass 120 · SC-56 P4
 
 **Report-date alerts and daily digest.** Fetch faults, missing or stale dates raise one Telegram message; a 07:30 UTC digest lists date changes. Migration: 0069. Supersedes v1.104.0.
 
-
-
-
-
-### v1.104.0 · 2026-11-07 · pass 119 · SC-56 P1-P3
-
-**Report dates for every ticker.** `ticker_calendar` covers holdings, watchlist and live theses (~63 tickers) with state, source and fetch time. Migration: 0068. Supersedes v1.103.0.
 
 
 
@@ -486,4 +491,4 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.113.0 -->
+<!-- END FT-master-spec v1.114.0 -->
