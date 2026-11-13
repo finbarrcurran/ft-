@@ -194,12 +194,32 @@ func (s *Server) handleTaxLots(w http.ResponseWriter, r *http.Request, kind stri
 		})
 		return
 	}
-	txns, err := s.store.ListTransactions(r.Context(), kind, id)
+	currentPrice, _ := s.currentPriceForHolding(r.Context(), userID, kind, id)
+	symbol, err := s.tickerForHolding(r.Context(), userID, kind, id)
 	if mapStoreError(w, err) {
 		return
 	}
-	currentPrice, _ := s.currentPriceForHolding(r.Context(), userID, kind, id)
-	pos := store.ComputeFIFOPosition(txns, currentPrice)
+	var pos store.DerivedPosition
+	if kind == "stock" {
+		// FT-080: stock lots come from the eToro sync, matched by ticker. The synthetic opening_position rows in
+		// `transactions` are keyed by holding id and no longer line up, so they are not read here (and not deleted).
+		lots, err := s.store.ListEtoroOpenLots(r.Context(), symbol)
+		if mapStoreError(w, err) {
+			return
+		}
+		var realized float64
+		if h, herr := s.store.GetStockHolding(r.Context(), userID, id); herr == nil && h != nil {
+			realized = h.RealizedPnLUSD
+		}
+		pos = store.DerivedFromEtoroLots(lots, currentPrice, realized)
+	} else {
+		txns, err := s.store.ListTransactions(r.Context(), kind, id)
+		if mapStoreError(w, err) {
+			return
+		}
+		// Crypto lots: by id AND symbol, so a row left over from a re-keyed holding can never be attributed here.
+		pos = store.ComputeFIFOPosition(filterTxnsBySymbol(txns, symbol), currentPrice)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"position": pos,
 		"currentPrice": currentPrice,
@@ -311,14 +331,31 @@ func (s *Server) currentPriceForHolding(ctx context.Context, userID int64, kind 
 // updates the holding row's cached quantity/cost/realized_pnl. Called
 // after every transaction mutation.
 func (s *Server) recomputeAndCachePosition(ctx context.Context, userID int64, kind string, holdingID int64) error {
+	// FT-080: a stock position is owned by the eToro sync (cost basis, average price), so a manual transaction no
+	// longer rewrites it from the transaction log (which still holds the synthetic 2026-05-17 opening rows).
+	if kind == "stock" {
+		return nil
+	}
 	txns, err := s.store.ListTransactions(ctx, kind, holdingID)
 	if err != nil {
 		return err
 	}
-	currentPrice, _ := s.currentPriceForHolding(ctx, userID, kind, holdingID)
-	pos := store.ComputeFIFOPosition(txns, currentPrice)
-	if kind == "stock" {
-		return s.store.CacheDerivedStockPosition(ctx, holdingID, pos)
+	symbol, err := s.tickerForHolding(ctx, userID, kind, holdingID)
+	if err != nil {
+		return err
 	}
+	currentPrice, _ := s.currentPriceForHolding(ctx, userID, kind, holdingID)
+	pos := store.ComputeFIFOPosition(filterTxnsBySymbol(txns, symbol), currentPrice)
 	return s.store.CacheDerivedCryptoPosition(ctx, holdingID, pos)
+}
+
+// filterTxnsBySymbol keeps only the transactions whose ticker is the holding's own (FT-080 guard).
+func filterTxnsBySymbol(txns []store.TransactionRow, symbol string) []store.TransactionRow {
+	out := make([]store.TransactionRow, 0, len(txns))
+	for _, t := range txns {
+		if strings.EqualFold(t.Ticker, symbol) {
+			out = append(out, t)
+		}
+	}
+	return out
 }
