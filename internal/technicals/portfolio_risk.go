@@ -37,6 +37,8 @@ type RiskCaps struct {
 // PortfolioRiskCheck is what the handler returns + the dashboard reads.
 type PortfolioRiskCheck struct {
 	PortfolioValue        float64            `json:"portfolioValue"`
+	ValueSource           string             `json:"valueSource,omitempty"` // FT-144: where PortfolioValue comes from
+	ValueAsOf             string             `json:"valueAsOf,omitempty"`   // RFC3339 UTC: the last price refresh it was valued at
 	Concentration         map[string]float64 `json:"concentration"`    // ticker → %
 	ThemeConcentration    map[string]float64 `json:"themeConcentration"` // theme → %
 	TotalActiveRiskPct    float64            `json:"totalActiveRiskPct"`
