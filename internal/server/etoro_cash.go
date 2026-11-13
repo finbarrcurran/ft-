@@ -82,3 +82,13 @@ func (s *Server) PullEtoroMoneyCash(ctx context.Context) error {
 	}
 	return s.etoroSync.PullMoneyCash(ctx)
 }
+
+// recordHistoryCash stores the day's cash on the value-history row with its source label (FT-142): "etoro_api:nightly"
+// when the figure is eToro cash, "manual" when it is the manual entry.
+func (s *Server) recordHistoryCash(ctx context.Context, date string, cashUSD float64) {
+	src := "manual"
+	if s.effectiveCash(ctx, time.Now()).Source == "etoro" {
+		src = "etoro_api:nightly"
+	}
+	_ = s.store.SetPortfolioCashSource(ctx, date, cashUSD, src)
+}

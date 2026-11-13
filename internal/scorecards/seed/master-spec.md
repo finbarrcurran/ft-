@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.126.0 · 2026-11-13** — latest change: Summary cash is eToro cash, two components (§13).
+> **Current version: v1.127.0 · 2026-11-13** — latest change: Cash source labels, pull log, history backfill (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.126.0 2026-11-13 -->
+<!-- reference_reviewed: v1.127.0 2026-11-13 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -124,6 +124,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0071 | `ticker_market_stats` | SC-57 — `ticker_market_stats` (52-week range, all-time high + history range, market cap, as-of, last error) |
 | 0072 | `ticker_stats_price` | FT-082 — price columns |
 | 0073 | `portfolio_cash` | FT-110 — `cash_value_usd` on `portfolio_value_history` |
+| 0075 | `cash_source_pulls` | FT-142 — `portfolio_value_history.cash_source` (etoro_api:nightly, etoro_api:balances/history, manual) and `etoro_cash_pulls` (one row per cash pull: component, source, status, USD, error) |
 | 0074 | `etoro_cash` | FT-142 — `etoro_cash` (latest value of two components: `trading_available`, `money_cash`; native amount, currency, USD, rate, source, as-of) |
 | 0063 | `crypto_index_members` | Jordi-46 Phase 1 — the 46 constituents of the Visser-Labs tokenized index (list_version 2026-09-21; 42 tokens with CoinGecko ids, 4 stocks COIN/HOOD/CRCL/FIGR; 10 verticals; soft `removed_at`); reference only, read by the screener and the list endpoint and by nothing else (no alert, gap-report, entry-zone, watchlist, holdings or thesis code) |
 | 0062 | `video_frame_reads` | SC-54 — `video_frame_reads` (what the vision model read off each chart frame: series, visible values, confidence, model, date; re-reads add rows) and `video_frame_runs` (one row per pass: status, reason, frames, calls, reads, cost) |
@@ -257,6 +258,7 @@ ft video-digest-preview --video-id ID [--prior with|without|both]` runs an extra
   **v5 items (SC-53, v1.95.0):** after each ingest (and its vote) the sweep makes a separate Haiku 5.5 call (thinking off, no regime block, feature `video_items`, output cap 8,000; transcripts over 60 min are read in 60-min chunks with a 60 s overlap) that extracts EVERY causal claim, analogue, seasonality pattern, key level, indicator, named ticker/company/token, prediction and self-correction, each with a 15 to 30 s cited span and no quote field. The **grounding gate** (`internal/videoitems`) checks every ticker, number and year against the passage 30 s before to 45 s after the cited span (at most 300 words; SC-69): `grounded`, `wrong_place` (in the transcript within 120 s), `far`, `invented` or `name_mapping`. Failing items are stored and shown with their flag, never deleted; only `invented` and `name_mapping` stay out of signals. Numbers only a chart can show are marked "from chart, unverified". Named companies are resolved after extraction (alias file `internal/videoitems/ticker_aliases.tsv`, then edit-distance-2 match for ASR spellings, then Yahoo symbol search); unresolved names stay shown as unresolved. A second cheap call (`video_direction`) flags causal claims, predictions and ticker stances whose direction contradicts the speaker's net view, showing that view beside the flag. `GET /api/video-digest/{id}/items`; `ft video-digest-items --video-id ID[,ID] [--force] [--dry-run] [--show]`; the Video Digest tab shows an "Items (v5)" section per card. Items are re-extracted when a digest is re-ingested.
   **Majority vote for the newest Jordi digest (SC-52, v1.94.0):** the regime state of one extraction is not perfectly stable, so the sweep extracts the newest Jordi digest (the one behind the login card) three times (the stored run plus two that are not stored) and keeps the majority state; a split (2 of 3, or three different states, where the more cautious state wins) forces confidence to `low` and the card shows "2 OF 3 RUNS"; a unanimous result shows "3 OF 3 RUNS". Never applied to the backfill or to `ft video-digest-extract` (about $0.06 extra per new video). `ft video-digest-vote --video-id ID [--runs 3]` does it by hand. **Backfill (SC-52 P3, v1.93.0):** `ops/video_digest/video_digest.py` gained a range mode (`--from/--to`, `--no-frames`, `--transcripts-only`, `--captions-only`, `--max-videos`, `--sleep`; metadata cache; stops and reports on a YouTube rate limit). A transcript-only package carries `meta.extract = false`: the daily sweep stores and indexes its transcript but never sends it to the LLM. `ft video-digest-extract --source jordi|cowen [--flagship-only] [--newest-first] [--from D] [--to D] [--max-videos N] [--max-cost USD] [--daily-cap USD] [--dry-run]` digests packages that have no digest, newest or oldest first, never twice, stops at the ceiling (a margin of one more video under it), and with `--daily-cap` lifts `llm_budget_daily_usd` for the run and always restores the previous value (also on Ctrl-C or SIGTERM); the monthly cap is never touched.
   **Login regime proposal (SC-52 P1, v1.92.0, Jordi only):** `GET /api/regime/proposal` returns whether to show a card and what it holds; `POST /api/regime/proposal/{approve,set,dismiss}`. The card shows when the newest Jordi digest (extraction v3) has a proposed state that Fin has not approved, set, dismissed or superseded (a manual regime set after the digest was ingested supersedes it), or when the Jordi regime is past the 14-day stale flag and the newest digest has not been handled. It shows the 2-3 line narrative, the proposed state with the confidence prominently, the evidence passage (labelled "closest passage" when snapped) with the video title, date and a timestamped link, the current state with its set date and age, FT's own macro suggestion (Spec 9p) beside it (a disagreement is stated, neither is preferred), a consequence preview computed at read time from the live alert logic (effective regime, alert margin, entry-zone alerts on/off and the watchlist tickers in the entry zone whose alert would switch), the stance and tilt as context only, and the named catalysts. Buttons: Approve the proposed state (the server applies the digest's own state; the client cannot name another), Set a different state (stable / shifting / defensive, each with its consequence on hover), Dismiss until the next video (snooze), or the corner x (decide later: hidden for the session). An approval or a different set writes through the manual regime path: preferences `regime_jordi*` with source `video-suggestion` and a `regime_history` row (source `manual`, because the table is CHECKed to manual|auto_cowen_form) whose note and `inputs_json` name the digest, video, quote, match type, confidence and the prior state. No LLM call at login; nothing is applied automatically; no Cowen card (Cowen stays manual); hidden in demo mode.
+ft cash-backfill [--apply]   FT-142: fill the history cash column from eToro's end-of-day balances (read-only; dry run unless --apply)
 ft video-items-regate [--apply] [--list]   SC-69: re-run the gate over stored v5 items, no LLM; dry run unless --apply
 ft transcripts [sync|import|search|stats]   SC-52 P2: store every on-disk package transcript (free, idempotent) / SC-67: import plain-text 22v transcripts (--only N,N DIR) / full-text search / corpus size (flags may follow the query; every CLI command except serve/seed refuses to create a missing database, FT_ALLOW_NEW_DB=1 overrides)
 ft video-digest-preview --video-id ID [--prior with|without|both]` runs an extraction without storing it.
@@ -415,13 +417,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.127.0 · 2026-11-13 · pass 142 · SC-74
+
+**Cash source labels, pull log, history backfill.** Each history cash value carries a source label; every eToro cash pull is logged; `ft cash-backfill` fills the cash column from eToro end-of-day balances (dry run unless --apply). Supersedes v1.126.0.
+
 ### v1.126.0 · 2026-11-13 · pass 141 · SC-73
 
 **Summary cash is eToro cash, two components.** Trading available (every sync) plus the eToro Money cash account (daily 03:40 UTC), stored in `etoro_cash`; the manual entry is the fallback after 48 h. The nightly history cash column uses the same figure. Supersedes v1.125.0.
 
+
 ### v1.125.0 · 2026-11-13 · pass 140 · SC-72
 
-**Video-brain status table corrected.** SC-43 P2 is partly built (SC-54 frame reads, nothing feeds the snapshot columns); P3 mention linking and the P4 query tool are not built; transcript search is keyword-only, no web box. Documentation only. Supersedes v1.124.0.
+**Video-brain status table corrected.** SC-43 P2 partly built (SC-54); P3 linking and the P4 query tool not built; search is keyword-only. Documentation only. Supersedes v1.124.0.
+
 
 
 ### v1.124.0 · 2026-11-13 · pass 139 · SC-71
@@ -430,16 +438,19 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.123.0 · 2026-11-13 · pass 138 · SC-70
 
-**CoinGecko error text redacted.** The Diagnostics provider error for a failed CoinGecko call no longer lists the requested coin ids (query string replaced by `?<redacted>`). Supersedes v1.122.0.
+**CoinGecko error text redacted.** Failed CoinGecko calls no longer list the coin ids in Diagnostics. Supersedes v1.122.0.
+
 
 
 
 
 ### v1.122.0 · 2026-11-13 · pass 137 · SC-69
 
-**Gate lead 30 s; reverse alias check.** The grounding passage starts 30 s before the cited span (cap 300 words); `ft video-items-regate` re-grounds stored items with no LLM call. Supersedes v1.121.0.
+**Gate lead 30 s; reverse alias check.** The grounding passage starts 30 s before the cited span; `ft video-items-regate` re-grounds stored items (no LLM). Supersedes v1.121.0.
+
 
 
 
@@ -447,7 +458,8 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 ### v1.121.0 · 2026-11-13 · pass 136 · SC-68
 
-**Context-only 22v digests.** `ft video-digest-stored` digests a stored 22v Jordi transcript (summary, themes, mentions only) as is_flagship=0; the card, vote and prior lookup consider flagship digests only. Supersedes v1.120.0.
+**Context-only 22v digests.** `ft video-digest-stored`: summary, themes, mentions only, is_flagship=0. Supersedes v1.120.0.
+
 
 
 
@@ -455,7 +467,8 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 ### v1.120.0 · 2026-11-13 · pass 135 · SC-67
 
-**22v transcripts in the store.** `ft transcripts import` (id `22v-<n>`, method `whisper`); non-YouTube hits link to the URL. Supersedes v1.119.0.
+**22v transcripts in the store.** `ft transcripts import` (id `22v-<n>`, method `whisper`). Supersedes v1.119.0.
+
 
 
 
@@ -463,7 +476,8 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 ### v1.119.0 · 2026-11-13 · pass 134 · SC-66
 
-**DXY gap rows; -1.0 rows reachable.** DXY gains under 100 rising 0.0, over 105 falling -0.25, flat -0.5; narrower rising rows now come first so -1.0 is reachable. Supersedes v1.118.0.
+**DXY gap rows; -1.0 rows reachable.** Three DXY gap rows; narrower rising rows first. Supersedes v1.118.0.
+
 
 
 
@@ -471,15 +485,8 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 ### v1.118.0 · 2026-11-13 · pass 133 · SC-65
 
-**Risk check at 09:00 UTC; US 2Y gap rows.** The breaker check and its one alert run at 09:00 UTC; five US 2Y gap rows. Supersedes v1.117.0.
+**Risk check at 09:00 UTC; US 2Y gap rows.** Breaker check and its one alert at 09:00 UTC. Supersedes v1.117.0.
 
-
-
-
-
-### v1.117.0 · 2026-11-13 · pass 132 · SC-64
-
-**ICE DXY, stablecoin card, ROC by date.** `pal_dxy` reads the ICE index (Yahoo DX-Y.NYB, ~103), not FRED broad (~121). The stablecoin card shows USD bn; its 4-week ROC is picked by date. Supersedes v1.116.0.
 
 
 
@@ -489,4 +496,4 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.126.0 -->
+<!-- END FT-master-spec v1.127.0 -->

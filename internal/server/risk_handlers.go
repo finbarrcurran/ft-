@@ -54,7 +54,7 @@ func (s *Server) handleRiskSnapshot(w http.ResponseWriter, r *http.Request) {
 		mapStoreError(w, err)
 		return
 	}
-	_ = s.store.SetPortfolioCash(r.Context(), date, check.CashUSD)
+	s.recordHistoryCash(r.Context(), date, check.CashUSD)
 	s.applyBreaker(r.Context(), &check.PortfolioRiskCheck, &monitor.Telegram{})
 	writeJSON(w, http.StatusOK, check)
 }
@@ -110,7 +110,7 @@ func (s *Server) RunNightlyRiskCheck(ctx context.Context, now time.Time, notify 
 	if err != nil {
 		return err
 	}
-	_ = s.store.SetPortfolioCash(ctx, now.UTC().Format("2006-01-02"), check.CashUSD)
+	s.recordHistoryCash(ctx, now.UTC().Format("2006-01-02"), check.CashUSD)
 	s.applyBreaker(ctx, &check.PortfolioRiskCheck, notify)
 	return nil
 }

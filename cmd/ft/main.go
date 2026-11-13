@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"ft/internal/auth"
 	"ft/internal/config"
+	"ft/internal/etorosync"
 	"ft/internal/cryptoindicators"
 	"ft/internal/cryptotheses"
 	"ft/internal/frameworks"
@@ -134,6 +135,8 @@ func main() {
 		runVideoDigestItems(os.Args[2:])
 	case "video-digest-extract":
 		runVideoDigestExtract(os.Args[2:])
+	case "cash-backfill":
+		runCashBackfill(os.Args[2:])
 	case "video-items-regate":
 		runVideoItemsRegate(os.Args[2:])
 	case "video-digest-stored":
@@ -334,6 +337,7 @@ USAGE
   ft nexus-backfill [--range 2y] [--gap-ms N]  fetch daily bars for the Nexus universe (SC-36)
   ft nexus-compute [--as-of DATE]              compute Nexus Trend + Exhaustion (SC-36)
   ft nexus-fundamentals [--as-of DATE]         snapshot Nexus Forward PEG fundamentals (SC-36)
+  ft cash-backfill [--apply]                   FT-142: fill portfolio_value_history.cash_value_usd from eToro's end-of-day balances (read-only GET); dry run unless --apply
   ft video-items-regate [--apply] [--list]     SC-69: re-run the grounding gate over stored v5 items (no LLM); dry run unless --apply
   ft video-digest-stored 22v-N [22v-N ...]     SC-68: digest 22v transcripts held only in the store (context only; is_flagship=0)
   ft video-digest-reground                     re-ground video-digest quotes against transcripts (SC-43)
@@ -1587,6 +1591,45 @@ func runVideoDigestItems(args []string) {
 				fmt.Printf("  %-16s %-13s %.70s%s %v\n", it.Block, it.Class, name, extra, it.Issues)
 			}
 		}
+	}
+}
+
+// runCashBackfill: FT-142. Dry run unless --apply. A fresh backup is the caller's job.
+func runCashBackfill(args []string) {
+	fs := flag.NewFlagSet("cash-backfill", flag.ExitOnError)
+	apply := fs.Bool("apply", false, "write the values (default: dry run)")
+	_ = fs.Parse(args)
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	svc := etorosync.New(st, os.Getenv("FT_ETORO_API_BASE"), os.Getenv("FT_ETORO_API_KEY"), os.Getenv("FT_ETORO_USER_KEY"))
+	now := time.Now().UTC()
+	from := now.AddDate(0, 0, -364).Format("2006-01-02")
+	to := now.Format("2006-01-02")
+	cash, err := svc.FetchCashHistory(context.Background(), from, to)
+	must("fetch balances history", err)
+	plan, err := st.PlanCashBackfill(context.Background(), cash)
+	must("plan", err)
+	var lo, hi string
+	for d := range cash {
+		if lo == "" || d < lo {
+			lo = d
+		}
+		if d > hi {
+			hi = d
+		}
+	}
+	fmt.Printf("eToro days %d (%s .. %s) | history rows %d | matched %d (%s .. %s) | unmatched %d | rows that change %d | apply=%v\n",
+		len(cash), lo, hi, plan.HistoryRows, plan.Matched, plan.FirstDate, plan.LastDate, plan.Unmatched, plan.Changes, *apply)
+	if hi != "" {
+		fmt.Printf("latest eToro day %s: cash $%.2f\n", hi, cash[hi])
+	}
+	if *apply {
+		must("apply", st.ApplyCashBackfill(context.Background(), plan, "etoro_api:balances/history"))
+		fmt.Printf("applied %d row(s), source etoro_api:balances/history\n", len(plan.Updates))
 	}
 }
 
