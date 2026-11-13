@@ -43,31 +43,31 @@ func TestDailyIndicatorAlertsOnceAndRecovers(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 10, 13, 13, 0, 0, 0, time.UTC)
 	n := &fakeNotifier{}
-	m := indMon(t, "pal_dxy", &now, n)
-	setIndicator(t, m, "pal_dxy", "2026-10-02", "", now) // 11 days old, fetched just now
+	m := indMon(t, "universal_stablecoin_supply", &now, n)
+	setIndicator(t, m, "universal_stablecoin_supply", "2026-10-11", "", now) // 11 days old, fetched just now
 	m.Tick(ctx)
 	if len(n.msgs) != 0 {
-		t.Fatalf("11 days is fine: %v", n.msgs)
+		t.Fatalf("2 days is fine: %v", n.msgs)
 	}
-	now = now.AddDate(0, 0, 4) // 2026-10-17: data is 15 days old; the refresh keeps succeeding
-	setIndicator(t, m, "pal_dxy", "2026-10-02", "", now)
+	now = now.AddDate(0, 0, 4) // 2026-10-17: data is 6 days old; the refresh keeps succeeding
+	setIndicator(t, m, "universal_stablecoin_supply", "2026-10-11", "", now)
 	m.Tick(ctx)
-	if len(n.msgs) != 1 || !strings.Contains(n.msgs[0], "SOURCE not updated") || !strings.Contains(n.msgs[0], "2026-10-02") {
+	if len(n.msgs) != 1 || !strings.Contains(n.msgs[0], "SOURCE not updated") || !strings.Contains(n.msgs[0], "2026-10-11") {
 		t.Fatalf("expected one source-not-updated alert, got %v", n.msgs)
 	}
 	now = now.Add(2 * time.Hour)
-	setIndicator(t, m, "pal_dxy", "2026-10-02", "", now)
+	setIndicator(t, m, "universal_stablecoin_supply", "2026-10-11", "", now)
 	m.Tick(ctx)
 	if len(n.msgs) != 1 {
 		t.Fatalf("no repeat inside 24 h: %v", n.msgs)
 	}
 	now = now.Add(24 * time.Hour)
-	setIndicator(t, m, "pal_dxy", "2026-10-02", "", now)
+	setIndicator(t, m, "universal_stablecoin_supply", "2026-10-11", "", now)
 	m.Tick(ctx)
 	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1], "STILL down") {
 		t.Fatalf("daily reminder expected: %v", n.msgs)
 	}
-	setIndicator(t, m, "pal_dxy", "2026-10-16", "", now) // new data
+	setIndicator(t, m, "universal_stablecoin_supply", "2026-10-16", "", now) // new data
 	m.Tick(ctx)
 	if len(n.msgs) != 3 || !strings.Contains(n.msgs[2], "is back") {
 		t.Fatalf("recovery expected: %v", n.msgs)
