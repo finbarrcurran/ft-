@@ -172,10 +172,13 @@ func (s *Server) computeRiskCheck(ctx context.Context, userID int64) (*dashboard
 	// the cash column existed use today's cash balance (cash history was not kept).
 	cash := s.riskCashUSD(ctx)
 	values := make([]float64, 0, len(history)+1)
+	missingCash := 0 // days with no recorded cash, which use today's balance
 	for _, p := range history {
 		c := cash
 		if p.Cash != nil {
 			c = *p.Cash
+		} else {
+			missingCash++
 		}
 		values = append(values, p.Total+c)
 	}
@@ -197,7 +200,7 @@ func (s *Server) computeRiskCheck(ctx context.Context, userID int64) (*dashboard
 		}
 	}
 	check.Advisory = true
-	check.DrawdownBasis = "incl. cash; days before cash was recorded use today's balance"
+	check.DrawdownBasis = drawdownBasis(missingCash, len(history))
 	if cash == 0 {
 		check.DrawdownBasis = "excl. cash"
 	}
@@ -283,4 +286,13 @@ func openPositionFromCrypto(h *domain.CryptoHolding, m metrics.CryptoMetrics) te
 	}
 	// Crypto risk in v1 — no SL math (most crypto holdings don't have SLs set).
 	return op
+}
+
+// drawdownBasis says what the drawdown is measured on (FT-144): every day's recorded cash, and how many days, if any,
+// had none and use today's balance instead.
+func drawdownBasis(missing, days int) string {
+	if missing == 0 {
+		return "incl. cash (recorded for every day)"
+	}
+	return fmt.Sprintf("incl. cash; %d of %d day(s) have no recorded cash and use today's balance", missing, days)
 }
