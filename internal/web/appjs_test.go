@@ -51,3 +51,14 @@ func TestFTBotNodeTests(t *testing.T) {
 		t.Fatalf("ft-bot tests failed:\n%s", out)
 	}
 }
+
+// FT-148: the panel renderer, run on fixtures (direction flag, cited loosely, hidden-by-gate count, link kinds).
+func TestCommentaryRenderFixtures(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	if out, err := exec.Command(node, "--test", "../../ops/ui-tests/commentary_render.test.js").CombinedOutput(); err != nil {
+		t.Fatalf("commentary render tests failed:\n%s", out)
+	}
+}
