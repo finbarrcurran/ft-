@@ -28,3 +28,21 @@ func TestFuzzyASRSpelling(t *testing.T) {
 		t.Fatal("names under 6 letters are never fuzzy-matched")
 	}
 }
+
+// FT-146 PR C: the seven review-queue proposals Fin approved on 2026-11-14 (and nothing else).
+func TestApprovedReviewQueueAliases(t *testing.T) {
+	for name, want := range map[string]string{
+		"USDC": "USDC", "Ada": "ADA", "eth Bitcoin": "ETH", "ethusd": "ETH", "ADA Bitcoin": "ADA", "SOL Bitcoin": "SOL", "Palunteer": "PLTR",
+	} {
+		got := Default.Tickers(name)
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("%q maps to %v, want [%s]", name, got, want)
+		}
+	}
+	// names Fin did not approve stay unresolved
+	for _, name := range []string{"Palanteer", "ETH Bitcoin pair", "Soul Bitcoin", "Ray Dalio", "energy stocks"} {
+		if got := Default.Tickers(name); len(got) != 0 {
+			t.Errorf("%q must stay unresolved, maps to %v", name, got)
+		}
+	}
+}
