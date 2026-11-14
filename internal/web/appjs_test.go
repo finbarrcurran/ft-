@@ -23,6 +23,8 @@ func TestAppJSStaleTabGuards(t *testing.T) {
 		"checkNewVersion",               // an out-of-date tab is told to reload
 		"setInterval(() => {\n    refreshPollTicks++",
 		"last price refresh: ",          // what the header timestamp tracks
+		"eToro cash is live.",           // FT-145: the manual-cash dialog says eToro is live, manual is the fallback
+		"cashManualUsd",                 // and edits the manual entry, not the eToro figure
 	} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("app.js lost %q", want)

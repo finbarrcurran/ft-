@@ -2790,8 +2790,15 @@ function openCashBalanceModal(summaryPayload) {
   closeImportModal();
   const k = (summaryPayload && summaryPayload.kpis) || {};
   const ccy = (summaryPayload && summaryPayload.currency) || 'USD';
-  const curUsd = Number(k.cashUsd || 0);
-  const curEur = Number(k.cashEur || 0);
+  // FT-145: the dialog edits the MANUAL fallback; cashUsd/cashEur may carry eToro cash.
+  const curUsd = Number(k.cashManualUsd != null ? k.cashManualUsd : (k.cashUsd || 0));
+  const curEur = Number(k.cashManualEur != null ? k.cashManualEur : (k.cashEur || 0));
+  let cashNote = '';
+  if (k.cashSource === 'etoro') {
+    cashNote = '<p class="cash-note" style="font-size:0.8rem; margin:0 0 0.6rem"><strong>eToro cash is live.</strong> The Summary shows your eToro cash (Trading available + eToro Money), read from eToro. This manual balance is only a fallback: it is used if the eToro value is more than 48 hours old. Saving it does not change what the Summary shows now.</p>';
+  } else if (k.cashSource === 'manual') {
+    cashNote = '<p class="cash-note" style="font-size:0.8rem; margin:0 0 0.6rem">eToro cash is not available right now, so this manual balance is what the Summary shows. It switches to your eToro cash automatically when that is available.</p>';
+  }
   const root = document.createElement('div');
   root.id = 'modal-root';
   root.innerHTML = `
@@ -2799,12 +2806,13 @@ function openCashBalanceModal(summaryPayload) {
       <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <div>
-            <div class="title">Set cash balance</div>
+            <div class="title">Set manual cash balance (fallback)</div>
             <div class="desc">Single-row, single-user. Stored separately per currency.</div>
           </div>
           <button class="modal-close" id="modal-close" aria-label="Close">×</button>
         </div>
         <div class="modal-body">
+          ${cashNote}
           <form id="cash-form">
             <div class="form-row">
               <label for="cash-ccy">Currency</label>
@@ -2817,7 +2825,7 @@ function openCashBalanceModal(summaryPayload) {
               <label for="cash-amount">Amount</label>
               <input id="cash-amount" type="number" step="0.01" min="0" value="${ccy === 'EUR' ? curEur : curUsd}" />
             </div>
-            <p class="dim" style="font-size:0.78rem">Current: $${curUsd.toFixed(2)} USD · €${curEur.toFixed(2)} EUR. Cash shows as a slice on the Asset Class donut whenever non-zero.</p>
+            <p class="dim" style="font-size:0.78rem">Manual fallback: $${curUsd.toFixed(2)} USD · €${curEur.toFixed(2)} EUR. Cash shows as a slice on the Asset Class donut whenever non-zero.</p>
             <div class="error" id="cash-err"></div>
           </form>
         </div>

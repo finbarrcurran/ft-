@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.131.0 · 2026-11-14** — latest change: A tab left open stays current (§13).
+> **Current version: v1.132.0 · 2026-11-14** — latest change: Cash dialog: eToro cash is live (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.131.0 2026-11-14 -->
+<!-- reference_reviewed: v1.132.0 2026-11-14 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -417,13 +417,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.132.0 · 2026-11-14 · pass 147 · SC-79
+
+**Cash dialog: eToro cash is live.** The manual-cash dialog says the manual balance is only the fallback and edits the manual entry (`cashManualUsd`/`cashManualEur`). Supersedes v1.131.0.
+
 ### v1.131.0 · 2026-11-14 · pass 146 · SC-78
 
 **A tab left open stays current.** The header refresh time (last price refresh) is re-read every minute and an out-of-date tab shows "new version, reload". Supersedes v1.130.0.
 
+
 ### v1.130.0 · 2026-11-14 · pass 145 · SC-77
 
 **Drawdown basis text is computed.** It says "recorded for every day" or how many days still use today's cash. Supersedes v1.129.0.
+
 
 
 ### v1.129.0 · 2026-11-13 · pass 144 · SC-76
@@ -432,9 +438,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.128.0 · 2026-11-13 · pass 143 · SC-75
 
 **Nightly risk check logs its result.** One nightly line and an alert-sent line. Supersedes v1.127.0.
+
 
 
 
@@ -447,9 +455,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.126.0 · 2026-11-13 · pass 141 · SC-73
 
 **Summary cash is eToro cash, two components.** Trading available (each sync) plus eToro Money (daily); manual entry is the fallback after 48 h. Supersedes v1.125.0.
+
 
 
 
@@ -466,9 +476,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.124.0 · 2026-11-13 · pass 139 · SC-71
 
 **Quarter labels are not tickers.** The gate no longer reads Q1 to Q4 or H1/H2 as tickers. Supersedes v1.123.0.
+
 
 
 
@@ -489,21 +501,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.122.0 · 2026-11-13 · pass 137 · SC-69
-
-**Gate lead 30 s; reverse alias check.** The grounding passage starts 30 s before the cited span; `ft video-items-regate` re-grounds stored items (no LLM). Supersedes v1.121.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.131.0 -->
+<!-- END FT-master-spec v1.132.0 -->
