@@ -45,6 +45,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	// is accurate even when the user has only filled in one.
 	cashUSD := readPrefFloat(r, s, "cash_balance_usd", 0)
 	cashEUR := readPrefFloat(r, s, "cash_balance_eur", 0)
+	manualUSD, manualEUR := cashUSD, cashEUR // FT-145: the manual entry itself, for the edit dialog (cashUsd/cashEur may carry eToro cash)
 	// Display cash in the active currency. Prefer the natively-stored one
 	// when set, otherwise convert.
 	var cashDisplayUSD float64
@@ -121,6 +122,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		} else {
 			cashEUR = 0
 		}
+		manualUSD, manualEUR = cashUSD, cashEUR // demo: the synthetic figure, never the real manual entry
 	}
 	totalPnl := totalValue - totalInvestedCost
 	var totalPnlPct *float64
@@ -267,6 +269,8 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 			"cash":           cashDisplayUSD,
 			"cashUsd":        cashUSD,
 			"cashEur":        cashEUR,
+			"cashManualUsd":  manualUSD,
+			"cashManualEur":  manualEUR,
 			"cashSource":     cashSource, // FT-142: etoro | manual | demo
 			"cashAsOf":       cashAsOf,
 			"cashComponents": cashParts,

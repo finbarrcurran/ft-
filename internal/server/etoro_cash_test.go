@@ -75,12 +75,20 @@ func TestSummaryCashSourceAndDemo(t *testing.T) {
 		s.handleSummary(rec, httptest.NewRequest(http.MethodGet, "/api/summary", nil).WithContext(context.WithValue(context.Background(), ctxUserID, int64(1))))
 		return rec.Body.String()
 	}
+	mustExec(t, st, `INSERT OR REPLACE INTO user_preferences (key, value, updated_at) VALUES ('cash_balance_usd','12345.67',0)`)
 	b := call()
+	// FT-145: the dialog edits the manual entry, which stays separate from the eToro figure
+	if !strings.Contains(b, `"cashManualUsd":12345.67`) {
+		t.Fatalf("summary must expose the manual entry separately: %.600s", b)
+	}
 	if !strings.Contains(b, `"cashSource":"etoro"`) || !strings.Contains(b, "17571.41") || !strings.Contains(b, "money_cash") {
 		t.Fatalf("summary: %.600s", b)
 	}
 	mustExec(t, st, `INSERT OR REPLACE INTO user_preferences (key, value, updated_at) VALUES ('demo_mode','on',0)`)
 	b = call()
+	if strings.Contains(b, "12345") {
+		t.Fatalf("demo summary leaks the manual cash entry: %.600s", b)
+	}
 	if !strings.Contains(b, `"cashSource":"demo"`) || strings.Contains(b, "17347") || strings.Contains(b, "17571") || strings.Contains(b, "money_cash") || strings.Contains(b, "202.6") {
 		t.Fatalf("demo summary leaks eToro cash: %.800s", b)
 	}
