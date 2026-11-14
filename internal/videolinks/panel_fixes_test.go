@@ -184,3 +184,22 @@ func TestPanelPayloadCarriesDirectionLooseAndHidden(t *testing.T) {
 		t.Fatalf("direction=%q view=%q loose=%v gate=%q hidden=%d", r.Direction, r.DirectionView, r.CitedLoosely, r.Gate, c.Hidden)
 	}
 }
+
+// A digest note's own second is approximate (FT-148 audit): the link moves to where the transcript really says it.
+func TestPanelNoteTimestampMovesToTheRealMention(t *testing.T) {
+	f := newPanelFx(t)
+	a := f.video("AAAAAAAAAAA", "jordi", "2026-11-09", "", "[0s] intro\n[226s] unrelated talk about rates\n[300s] intel was the one that beat estimates\n[400s] bye")
+	f.mention(a, "Intel", "Intel beat estimates and will find a bottom.", 226) // the digest says 226; the transcript says it at 300
+	b := f.video("BBBBBBBBBBB", "jordi", "2026-11-08", "", "[0s] intro\n[226s] nothing about it here\n[400s] bye")
+	f.mention(b, "Intel", "Intel beat estimates.", 226) // the transcript never says it: no timestamp at all
+	f.ex(`UPDATE video_mentions SET name = 'Palantir' WHERE digest_id IN (?, ?)`, a, b)
+	f.ex(`UPDATE video_mentions SET context = REPLACE(context, 'Intel', 'Palantir') WHERE digest_id IN (?, ?)`, a, b)
+	f.ex(`UPDATE video_transcripts SET text = REPLACE(text, 'intel', 'palantir') WHERE video_id IN ('AAAAAAAAAAA')`)
+	r := f.rows("PLTR")
+	if got := r["AAAAAAAAAAA"]; got.SnippetKind != "note" || got.TsSec == nil || *got.TsSec != 300 || got.Link != "https://youtu.be/AAAAAAAAAAA?t=300" {
+		t.Errorf("the link must move to the real mention at 300 s: %+v", got)
+	}
+	if got := r["BBBBBBBBBBB"]; got.SnippetKind != "note" || got.TsSec != nil || got.Link != "https://youtu.be/BBBBBBBBBBB" {
+		t.Errorf("no real mention in the transcript: the note stays, the link has no timestamp: %+v", got)
+	}
+}

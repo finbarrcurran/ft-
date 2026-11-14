@@ -247,10 +247,17 @@ func buildRow(ctx context.Context, db *sql.DB, base, item, mention *linkRef, ter
 	// 2. the digest note, if it is about the ticker
 	if row.SnippetKind == "none" && note != "" && containsTerm(strings.Fields(normText(note)), terms) {
 		row.Snippet, row.SnippetKind = note, "note"
-		if mentionTS >= 0 {
-			setTS(mentionTS)
-		} else if itemStart >= 0 {
-			setTS(itemStart)
+		// the digest's own second is approximate: point the link at where the transcript really says it (the nearest
+		// mention of the ticker to that second); if the transcript never does, the link has no timestamp
+		target := mentionTS
+		if target < 0 {
+			target = itemStart
+		}
+		if target >= 0 {
+			load()
+			if ti := nearestTerm(words, toks, owner, terms, target, is22v); ti >= 0 {
+				setTS(words[owner[ti]].T)
+			}
 		}
 	}
 	// 3. the transcript window around the nearest real mention (to the cited span or the mention time)
