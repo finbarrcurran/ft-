@@ -24,6 +24,9 @@ func TestAppJSStaleTabGuards(t *testing.T) {
 		"setInterval(() => {\n    refreshPollTicks++",
 		"last price refresh: ",          // what the header timestamp tracks
 		"eToro cash is live.",           // FT-145: the manual-cash dialog says eToro is live, manual is the fallback
+		"renderCommentarySection",       // FT-146 PR B: the per-holding panel, context only
+		"What Jordi &amp; Cowen said",
+		"hidden by the grounding gate",
 		"cashManualUsd",                 // and edits the manual entry, not the eToro figure
 	} {
 		if !strings.Contains(src, want) {

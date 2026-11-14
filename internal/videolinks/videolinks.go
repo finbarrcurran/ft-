@@ -43,10 +43,10 @@ var symbolStop = func() map[string]bool {
 
 // Entity is something FT holds, watches or tracks.
 type Entity struct {
-	Ticker string
-	Name   string
-	InHeld bool
-	InWatch bool
+	Ticker     string
+	Name       string
+	InHeld     bool
+	InWatch    bool
 	InUniverse bool
 }
 
@@ -247,7 +247,7 @@ func Rebuild(ctx context.Context, db *sql.DB, now time.Time) (Result, error) {
 			_ = json.Unmarshal([]byte(it.res), &r)
 		}
 		ticker, method := "", ""
-		if r.Status == "resolved" && r.Ticker != "" && ix.Entity(r.Ticker) != nil {
+		if r.Status == "resolved" && r.Ticker != "" && ix.Entity(r.Ticker) != nil && trustResolution(itemName(it.fields), r) {
 			ticker, method = strings.ToUpper(r.Ticker), MethodResolution
 		} else if r.Status == "" || r.Status == "unresolved" {
 			// not resolved by the extraction: an exact name or symbol may still be one FT holds
@@ -302,6 +302,44 @@ func Rebuild(ctx context.Context, db *sql.DB, now time.Time) (Result, error) {
 		}
 	}
 	return res, tx.Commit()
+}
+
+// genericWords are single words a symbol search can "resolve" to some company ("energy" to Bloom Energy). They are
+// never trusted from a search result (SC-81: found in the first 100-link audit).
+var genericWords = func() map[string]bool {
+	m := map[string]bool{}
+	for _, w := range strings.Fields(`energy manufacturing silver gold oil crude gas copper bank banks tech technology software semis semiconductors
+		crypto coins coin stocks market markets sector industrial industrials materials utilities health healthcare financials consumer retail
+		real estate bonds treasuries yields dollar china japan europe india korea taiwan`) {
+		m[w] = true
+	}
+	return m
+}()
+
+// trustResolution decides whether the ticker the extraction resolved can be linked. An alias, fuzzy or symbol
+// resolution is the curated path and is trusted. A symbol-SEARCH resolution is trusted only when the spoken name
+// is the start of the company name the search matched and is not a generic word; a conflict between the model's
+// ticker and the lookup is never linked.
+func trustResolution(spoken string, r videoitems.Resolution) bool {
+	if r.Conflict {
+		return false
+	}
+	if r.Source != "search" {
+		return true
+	}
+	n, m := videoitems.NormName(spoken), videoitems.NormName(r.Matched)
+	if len(n) < 4 || genericWords[n] || m == "" {
+		return false
+	}
+	return strings.HasPrefix(m, n)
+}
+
+func itemName(fields string) string {
+	var f struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal([]byte(fields), &f)
+	return f.Name
 }
 
 func b2i(b bool) int {

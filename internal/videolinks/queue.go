@@ -20,7 +20,7 @@ const (
 	CatGroup      = "group"          // an asset class or basket, not a security: never linked
 	CatCryptoPair = "crypto-pair"    // "ETH Bitcoin", "ethusd": the base asset is the proposal
 	CatCryptoSym  = "crypto-symbol"  // an exact coin symbol FT already maps (CoinGecko ids)
-	CatCryptoUnk  = "crypto-unknown" // looks like a coin symbol FT has no map for
+	CatSymbolUnk  = "symbol-unknown" // written as a symbol (a coin, stock or ETF): FT has no mapping for it
 	CatNear       = "near-match"     // within edit distance 3 of ONE alias name (a proposal, never applied)
 	CatOther      = "person-or-unlisted"
 )
@@ -29,23 +29,26 @@ var (
 	groupRe = regexp.MustCompile(`(?i)\b(market|markets|index|indices|indexes|stocks|sector|sectors|banks|bonds?|yields?|dominance|coins|companies|equities|equity|names|etfs?|mag ?7|magnificent|pairs?|basket|treasur(?:y|ies)|commodit(?:y|ies)|currencies|miners)\b`)
 	pairRe  = regexp.MustCompile(`(?i)^(.*?)(?:\s+(?:bitcoin|btc|usd|usdt)\s*(?:pairs?)?|\s*usd|\s+pairs?)$`)
 	symRe   = regexp.MustCompile(`^[A-Za-z]{2,6}$`)
+	// index names and commodities are not securities FT holds: group (never linked)
+	indexRe     = regexp.MustCompile(`(?i)\b(dow jones|dow|nasdaq|s&p|sp ?500|russell|nikkei|ftse|dax|kospi|hang seng)\b`)
+	commodityRe = regexp.MustCompile(`(?i)^(copper|gold|silver|oil|crude|natural gas|platinum|palladium|lithium|uranium|wheat|corn|sugar|coffee)$`)
 	// well-known quote/stable symbols that are coins but not in the held-coin map; a proposal only
 	stableSyms = map[string]bool{"USDC": true, "USDT": true, "DAI": true, "USDE": true, "FDUSD": true}
 )
 
 // QueueRow is one name still unresolved after extraction, with a category and a proposal for Fin to accept or reject.
 type QueueRow struct {
-	Name        string
-	Items       int
-	Cowen       int
-	Jordi       int
-	FirstSeen   string
-	LastSeen    string
-	Category    string
-	Proposal    string // "TICKER (why)" or empty
-	AliasLine   string // the one line that would be appended to ticker_aliases.tsv if approved
-	ExampleVid  string
-	ExampleTs   int
+	Name       string
+	Items      int
+	Cowen      int
+	Jordi      int
+	FirstSeen  string
+	LastSeen   string
+	Category   string
+	Proposal   string // "TICKER (why)" or empty
+	AliasLine  string // the one line that would be appended to ticker_aliases.tsv if approved
+	ExampleVid string
+	ExampleTs  int
 }
 
 // ReviewQueue lists every distinct unresolved tickers_named name, most frequent first. Nothing here is applied:
@@ -120,7 +123,7 @@ func classify(q *QueueRow, ix *Index, today string) {
 	norm := videoitems.NormName(name)
 	up := strings.ToUpper(strings.TrimSpace(name))
 	// a pair or a pairing with Bitcoin: the base asset is the proposal
-	if m := pairRe.FindStringSubmatch(name); m != nil && strings.TrimSpace(m[1]) != "" && !groupRe.MatchString(name) {
+	if m := pairRe.FindStringSubmatch(name); m != nil && strings.TrimSpace(m[1]) != "" {
 		base := strings.ToUpper(strings.TrimSpace(m[1]))
 		if _, ok := market.SymbolToGeckoID[base]; ok || ix.Entity(base) != nil || stableSyms[base] {
 			q.Category, q.Proposal = CatCryptoPair, base+" (base asset of a pair)"
@@ -136,7 +139,7 @@ func classify(q *QueueRow, ix *Index, today string) {
 			return
 		}
 	}
-	if groupRe.MatchString(name) {
+	if groupRe.MatchString(name) || indexRe.MatchString(name) || commodityRe.MatchString(strings.TrimSpace(name)) {
 		q.Category = CatGroup
 		return
 	}
@@ -147,7 +150,7 @@ func classify(q *QueueRow, ix *Index, today string) {
 			return
 		}
 		if strings.TrimSpace(name) == up { // written as a symbol
-			q.Category = CatCryptoUnk
+			q.Category = CatSymbolUnk
 			return
 		}
 	}

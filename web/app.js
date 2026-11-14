@@ -8092,6 +8092,52 @@ async function submitPromote(entry, isStock) {
 //   7. Thesis — link + (Spec 11) notes
 //   8. Audit trail — recent audit entries for this holding
 
+// FT-146 PR B — "What Jordi & Cowen said". Context only (D6): reading material, never a score or a signal.
+function renderCommentarySection(res) {
+  if (!res || !res.enabled) return '';
+  const c = res.commentary;
+  const srcName = (s) => (s === 'jordi' ? 'Jordi' : 'Cowen');
+  const head = '<h3 class="rh-side">What Jordi &amp; Cowen said <span class="dim" style="font-size:0.78rem; font-weight:normal">· context only, not a score or advice</span></h3>';
+  if (!c) return `<section class="detail-section" id="dh-commentary">${head}<p class="dim">No commentary linked to this holding.</p></section>`;
+  const last = ['jordi', 'cowen'].map((s) => {
+    const l = c.last && c.last[s];
+    return l ? `${srcName(s)} ${l.daysAgo}d ago${l.stance ? ` (${escapeHTML(l.stance)})` : ''}` : `${srcName(s)}: never`;
+  }).join(' · ');
+  const rows = (c.rows || []).map((r) => {
+    const loose = r.citedLoosely ? ' <span class="amber-text" title="The name or value is in this video but not at the cited second">cited loosely</span>' : '';
+    const dir = r.direction === 'contradicts' ? ` <span class="loss" title="${escapeHTML(r.directionView || '')}">⚠ against his net view</span>` : '';
+    const note = r.snippetKind === 'note' ? ' <span class="dim">(digest note)</span>' : '';
+    const text = r.snippet ? `${r.snippetKind === 'passage' ? '“…' : ''}${escapeHTML(r.snippet)}${r.snippetKind === 'passage' ? '…”' : ''}` : '<span class="dim">—</span>';
+    return `<tr>
+      <td class="dim">${escapeHTML(r.date)}</td>
+      <td>${escapeHTML(srcName(r.source))}</td>
+      <td>${escapeHTML(r.stance || '')}</td>
+      <td>${text}${note}${loose}${dir}</td>
+      <td><a href="${escapeHTML(r.link)}" target="_blank" rel="noopener noreferrer" title="${escapeHTML(r.title)}">▶ watch</a></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="5" class="dim" style="text-align:center">Nothing in the last ${c.days} days.</td></tr>`;
+  const more = c.total > c.shown ? `<button class="btn-ghost" id="dh-commentary-more">Show all ${c.total} (last 2 years)</button>` : '';
+  const hidden = c.hidden > 0 ? `<span class="dim" style="font-size:0.78rem">${c.hidden} item${c.hidden === 1 ? '' : 's'} hidden by the grounding gate.</span>` : '';
+  return `<section class="detail-section" id="dh-commentary">${head}
+    <p class="dim" style="font-size:0.82rem; margin:0 0 0.5rem">Last mentioned: ${last}</p>
+    <div class="tablewrap"><table class="holdings"><thead><tr><th>Date</th><th>Who</th><th>Stance</th><th>What was said</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div style="margin-top:0.4rem">${more} ${hidden}</div>
+  </section>`;
+}
+
+function bindCommentaryMore(kind, id) {
+  const btn = $('#dh-commentary-more');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const res = await api(`/api/holdings/${kind}/${id}/commentary?days=730&limit=50`);
+      const host = $('#dh-commentary');
+      if (host) host.outerHTML = renderCommentarySection(res);
+    } catch (_) { btn.disabled = false; }
+  });
+}
+
 async function renderHoldingDetail({ kind, id }) {
   const content = $('#content');
   content.innerHTML = '<div class="empty">loading detail…</div>';
@@ -8127,6 +8173,9 @@ async function renderHoldingDetail({ kind, id }) {
     return;
   }
 
+  // FT-146 — what Jordi and Cowen said about this holding (context only; off until the link audit passes).
+  let commentary = { enabled: false };
+  try { commentary = await api(`/api/holdings/${kind}/${id}/commentary`); } catch (_) { /* panel is optional */ }
   const tickerOrSym = holding.ticker || holding.symbol || '—';
   const currentPrice = kind === 'stock' ? holding.currentPrice : holding.currentPriceUsd;
   const positionUSD = taxlots.taxLots.reduce((s, l) => s + (l.quantityOpen * (currentPrice || 0)), 0);
@@ -8407,7 +8456,8 @@ async function renderHoldingDetail({ kind, id }) {
     }
   }
 
-  content.innerHTML = header + positionRisk + scoreSection + txnSection + lotsSection + divSection + thesisSection + sectorPeersSection + auditSection;
+  content.innerHTML = header + positionRisk + scoreSection + txnSection + lotsSection + divSection + thesisSection + renderCommentarySection(commentary) + sectorPeersSection + auditSection;
+  bindCommentaryMore(kind, id);
 
   // Wire interactions.
   $('#dh-back').addEventListener('click', () => {

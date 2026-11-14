@@ -283,6 +283,7 @@ func (s *Server) routes() {
 
 	// Spec 14: Per-holding theses.
 	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis", s.requireUser(s.handleGetHoldingThesis))
+	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/commentary", s.requireUser(s.handleHoldingCommentary)) // FT-146 PR B
 	s.mux.HandleFunc("PUT /api/holdings/{kind}/{id}/thesis", s.requireUser(s.handlePutHoldingThesis))
 	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis/versions", s.requireUser(s.handleHoldingThesisVersions))
 	s.mux.HandleFunc("PUT /api/holdings/{kind}/{id}/thesis/status", s.requireUser(s.handleHoldingThesisStatus))
