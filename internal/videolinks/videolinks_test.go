@@ -157,11 +157,16 @@ func TestReviewQueueCategories(t *testing.T) {
 			}
 		}
 	}
-	add("energy stocks", 3)    // a group
-	add("ETH Bitcoin", 2)      // a pair: base asset ETH
-	add("ethusd", 1)           // a pair
-	add("Ada", 4)              // an exact coin symbol FT maps
-	add("USDC", 5)             // a stablecoin symbol
+	add("energy stocks", 3) // a group
+	add("DAI Bitcoin", 2)   // a pair: base asset DAI
+	add("DAI", 4)           // an exact coin symbol FT maps
+	add("FDUSD", 5)         // a stablecoin symbol
+	// the seven names Fin approved on 2026-11-14 are mapped by the alias file now and must not be queued again
+	add("Palunteer", 3)
+	add("ethusd", 2)
+	add("eth Bitcoin", 2)
+	add("Ada", 1)
+	add("USDC", 1)
 	add("XYZQ", 1)             // looks like a symbol, FT has no map for it
 	add("Palunteer Inc", 1)    // within edit distance of an alias name -> a proposal, never applied
 	add("Ray Dalio", 2)        // a person
@@ -178,18 +183,23 @@ func TestReviewQueueCategories(t *testing.T) {
 	for _, r := range rows {
 		cat[strings.ToLower(r.Name)] = r
 	}
-	want := map[string]string{"energy stocks": CatGroup, "eth bitcoin": CatCryptoPair, "ethusd": CatCryptoPair, "ada": CatCryptoSym,
-		"usdc": CatCryptoSym, "xyzq": CatSymbolUnk, "ray dalio": CatOther,
+	for _, approved := range []string{"palunteer", "ethusd", "eth bitcoin", "ada", "usdc"} {
+		if _, present := cat[approved]; present {
+			t.Errorf("%q is mapped by the alias file and must be skipped by the review queue", approved)
+		}
+	}
+	want := map[string]string{"energy stocks": CatGroup, "dai bitcoin": CatCryptoPair, "dai": CatCryptoSym,
+		"fdusd": CatCryptoSym, "xyzq": CatSymbolUnk, "ray dalio": CatOther,
 		"eth bitcoin pair": CatCryptoPair, "dow jones": CatGroup, "copper": CatGroup, "igv": CatSymbolUnk, "gm": CatSymbolUnk}
 	for name, c := range want {
 		if cat[name].Category != c {
 			t.Errorf("%q: category %q, want %q", name, cat[name].Category, c)
 		}
 	}
-	if !strings.HasPrefix(cat["eth bitcoin"].Proposal, "ETH") || !strings.Contains(cat["ada"].AliasLine, "ADA\tada\tmanual-2026-11-14") {
-		t.Errorf("proposals: %+v / %+v", cat["eth bitcoin"], cat["ada"])
+	if !strings.HasPrefix(cat["dai bitcoin"].Proposal, "DAI") || !strings.Contains(cat["dai"].AliasLine, "DAI\tdai\tmanual-2026-11-14") {
+		t.Errorf("proposals: %+v / %+v", cat["dai bitcoin"], cat["dai"])
 	}
-	if rows[0].Name != "USDC" || rows[0].Items != 5 {
+	if rows[0].Name != "FDUSD" || rows[0].Items != 5 {
 		t.Errorf("most frequent first: %+v", rows[0])
 	}
 	// nothing was applied: no link was created from the queue
