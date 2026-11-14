@@ -761,6 +761,7 @@ function renderDashboard(user) {
   }
   loadActiveTab();
   loadRefreshStatus();
+  startRefreshPolling(); // FT-144: a tab left open keeps the header and the version check current
   startMarketPill();
   startRegimePills();
   maybeShowRegimeProposal(); // SC-52 P1
@@ -1984,6 +1985,44 @@ async function applyImport() {
   renderImportBody();
 }
 
+// FT-144 — the header's "refreshed <ago>" is the time of the last successful PRICE refresh (stocks, crypto, FX: the
+// server's last_refreshed_at, every 15 minutes), not the page load. It used to be read once, so a tab left open
+// went stale; it is now re-read every minute. A tab running older JS than the server is told to reload.
+function currentAssetVersion() {
+  const sc = Array.from(document.scripts).find((x) => /app\.js\?v=/.test(x.src));
+  const m = sc && sc.src.match(/app\.js\?v=([0-9a-f]+)/);
+  return m ? m[1] : null;
+}
+
+async function checkNewVersion() {
+  try {
+    const res = await fetch('/', { cache: 'no-store', credentials: 'same-origin' });
+    const m = (await res.text()).match(/app\.js\?v=([0-9a-f]+)/);
+    const cur = currentAssetVersion();
+    if (!m || !cur || m[1] === cur || $('#new-version')) return;
+    const a = document.createElement('a');
+    a.id = 'new-version';
+    a.href = '#';
+    a.textContent = ' · new version, reload';
+    a.title = 'FT was updated since this tab loaded; reload to get the new screens';
+    a.style.cssText = 'color:var(--accent, #6aa9ff); font-size:0.78rem; margin-left:0.4rem';
+    a.addEventListener('click', (ev) => { ev.preventDefault(); location.reload(); });
+    const host = $('#refresh-status');
+    if (host && host.parentNode) host.parentNode.insertBefore(a, host.nextSibling);
+  } catch (_) { /* offline or logged out: nothing to say */ }
+}
+
+let refreshPollTicks = 0;
+function startRefreshPolling() {
+  setInterval(() => {
+    refreshPollTicks++;
+    const el = $('#refresh-status');
+    if (el && !/^refreshing/.test(el.textContent || '')) loadRefreshStatus();
+    if (refreshPollTicks % 5 === 0) checkNewVersion();
+  }, 60 * 1000);
+  setTimeout(checkNewVersion, 15 * 1000);
+}
+
 async function loadRefreshStatus() {
   try {
     const s = await api('/api/refresh-status');
@@ -1991,7 +2030,7 @@ async function loadRefreshStatus() {
     if (!el) return;
     if (s.lastRefreshedAt) {
       el.textContent = `refreshed ${timeAgo(s.lastRefreshedAt)}`;
-      el.title = s.lastRefreshedAt;
+      el.title = 'last price refresh: ' + s.lastRefreshedAt;
     } else {
       el.textContent = 'never refreshed';
       el.title = '';
