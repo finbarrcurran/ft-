@@ -38,7 +38,7 @@ func fixture(t *testing.T) *sql.DB {
 	ex(`DELETE FROM nexus_universe`)
 	ex(`INSERT INTO nexus_universe (ticker, company, theme, is_nexus, active, added_at) VALUES ('LITE', 'Lumentum', 'optical', 1, 1, 1)`)
 	for i, src := range []string{"jordi", "cowen"} {
-		ex(`INSERT INTO video_digests (id, source, video_id, published_at, package_path, ingested_at) VALUES (?,?,?,?,'/x',1)`, i+1, src, fmt.Sprintf("vid%d", i+1), "2026-11-0"+fmt.Sprint(i+1))
+		ex(`INSERT INTO video_digests (id, source, video_id, published_at, package_path, ingested_at) VALUES (?,?,?,?,'/x',1)`, i+1, src, fmt.Sprintf("vid%dAAAAAAA", i+1), "2026-11-0"+fmt.Sprint(i+1))
 	}
 	men := func(digest int, name, typ string) {
 		ex(`INSERT INTO video_mentions (digest_id, name, type) VALUES (?,?,?)`, digest, name, typ)
@@ -266,11 +266,11 @@ func TestForTickerPanelRows(t *testing.T) {
 	// vid2 (cowen, 2026-11-02) has a PLTR item "Palunteer" and a PLTR mention "PLTR"; give the item a cited span,
 	// a direction flag and a transcript. vid1 (jordi, 2026-11-01) has a PLTR mention only.
 	ex(`UPDATE video_items SET ref_start = 100, ref_end = 115, direction_verdict = 'contradicts', direction_view = 'net bearish' WHERE resolution_json LIKE '%PLTR%' AND gate_class = 'grounded'`)
-	ex(`INSERT INTO video_transcripts (video_id, source, title, published_at, text, text_sha, fetched_at) VALUES ('vid2','cowen','T','2026-11-02', ?, 'x', 1)`,
+	ex(`INSERT INTO video_transcripts (video_id, source, title, published_at, text, text_sha, fetched_at) VALUES ('vid2AAAAAAA','cowen','T','2026-11-02', ?, 'x', 1)`,
 		"[0s] intro words\n[100s] palantir is the one i would buy here today\n[130s] later words")
 	ex(`UPDATE video_digests SET title = 'Weekly' WHERE id = 2`)
 	// an older Jordi mention outside a 30-day window
-	ex(`INSERT INTO video_digests (id, source, video_id, published_at, package_path, ingested_at) VALUES (3,'jordi','vid3','2026-06-01','/x',1)`)
+	ex(`INSERT INTO video_digests (id, source, video_id, published_at, package_path, ingested_at) VALUES (3,'jordi','vid3AAAAAAA','2026-06-01','/x',1)`)
 	ex(`INSERT INTO video_mentions (digest_id, name, type, context, stance) VALUES (3,'Palantir','stock','Old take.','bullish')`)
 	// a gate-held item for PLTR: counted as hidden, never shown
 	ex(`INSERT INTO video_items (run_id, digest_id, block, ord, fields_json, gate_class, resolution_json, signal_ok)
@@ -283,17 +283,17 @@ func TestForTickerPanelRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Ticker != "PLTR" || c.Total != 2 || c.Shown != 2 || c.Rows[0].VideoID != "vid2" || c.Rows[1].VideoID != "vid1" {
+	if c.Ticker != "PLTR" || c.Total != 2 || c.Shown != 2 || c.Rows[0].VideoID != "vid2AAAAAAA" || c.Rows[1].VideoID != "vid1AAAAAAA" {
 		t.Fatalf("one row per video, newest first, inside 30 days: %+v", c)
 	}
 	r := c.Rows[0] // the Cowen video: the item supplies the verbatim passage, the gate class and the direction flag
 	if r.SnippetKind != "passage" || r.Snippet != "palantir is the one i would buy here today" || r.Direction != "contradicts" || r.Gate != "grounded" || r.CitedLoosely {
 		t.Fatalf("item row: %+v", r)
 	}
-	if r.Link != "https://youtu.be/vid2?t=100" || r.TsSec == nil || *r.TsSec != 100 || r.Title != "Weekly" {
+	if r.Link != "https://youtu.be/vid2AAAAAAA?t=100" || r.TsSec == nil || *r.TsSec != 100 || r.Title != "Weekly" {
 		t.Fatalf("deep link: %+v", r)
 	}
-	if n := c.Rows[1]; n.SnippetKind != "note" || n.Stance != "" && n.Source != "jordi" {
+	if n := c.Rows[1]; n.SnippetKind != "none" || n.Snippet != "" || n.Link != "https://youtu.be/vid1AAAAAAA" || n.TsSec != nil {
 		t.Fatalf("mention row: %+v", n)
 	}
 	if c.Hidden != 1 {

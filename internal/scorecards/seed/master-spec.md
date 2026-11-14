@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.138.0 · 2026-11-14** — latest change: Bot shows every alert kind, acks only what it showed (§13).
+> **Current version: v1.139.0 · 2026-11-14** — latest change: Commentary panel fixes (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.138.0 2026-11-14 -->
+<!-- reference_reviewed: v1.139.0 2026-11-14 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -420,31 +420,40 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.139.0 · 2026-11-14 · pass 154 · SC-86
+
+**Commentary panel fixes.** 22v rows link to the 22v page; snippets always name the ticker (else "mentioned in this video"); t=0/1 means no timestamp; render fixtures for the flags. Panel stays off. Supersedes v1.138.0.
+
 ### v1.138.0 · 2026-11-14 · pass 153 · SC-85
 
-**Bot shows every alert kind, acks only what it showed.** `ops/ft-bot` renders proximity, trade-event and Nexus alerts (never an empty message); Nexus ack (id 0) now works. Supersedes v1.137.0.
+**Bot shows every alert kind, acks only what it showed.** `ops/ft-bot` renders proximity, trade-event and Nexus alerts; Nexus ack works. Supersedes v1.137.0.
+
 
 ### v1.137.0 · 2026-11-14 · pass 152 · SC-84
 
-**Review queue skips mapped names.** Approved aliases no longer reappear in `ft video-links review-queue`. Supersedes v1.136.0.
+**Review queue skips mapped names.** Supersedes v1.136.0.
+
 
 
 ### v1.136.0 · 2026-11-14 · pass 151 · SC-83
 
-**Seven approved aliases.** USDC, Ada, "eth Bitcoin", ethusd, "ADA Bitcoin", "SOL Bitcoin", Palunteer added to the alias file; every other unresolved name stays unresolved. Supersedes v1.135.0.
+**Seven approved aliases.** Supersedes v1.135.0.
+
 
 
 
 ### v1.135.0 · 2026-11-14 · pass 150 · SC-82
 
-**Fuzzy resolutions link only at edit distance 1.** Wrong links like altcoin to Bitcoin are no longer made. Supersedes v1.134.0.
+**Fuzzy resolutions link only at edit distance 1.** Supersedes v1.134.0.
+
 
 
 
 
 ### v1.134.0 · 2026-11-14 · pass 149 · SC-81
 
-**"What Jordi & Cowen said" panel (off until audited).** Per-holding commentary endpoint and panel, context only; search-resolution precision fix; queue label fixes. Supersedes v1.133.0.
+**"What Jordi & Cowen said" panel.** Per-holding panel, context only. Supersedes v1.133.0.
+
 
 
 
@@ -452,7 +461,8 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 ### v1.133.0 · 2026-11-14 · pass 148 · SC-80
 
-**Commentator-to-holdings link data.** `video_links` rebuilt nightly; `ft video-links review-queue`. Supersedes v1.132.0.
+**Commentator-to-holdings link data.** `video_links`, nightly. Supersedes v1.132.0.
+
 
 
 
@@ -461,7 +471,8 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 ### v1.132.0 · 2026-11-14 · pass 147 · SC-79
 
-**Cash dialog: eToro cash is live.** Manual cash is the labelled fallback. Supersedes v1.131.0.
+**Cash dialog: eToro cash is live.** Supersedes v1.131.0.
+
 
 
 
@@ -477,18 +488,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.130.0 · 2026-11-14 · pass 145 · SC-77
 
 **Drawdown basis text is computed.** Supersedes v1.129.0.
 
-
-
-
-
-
-### v1.129.0 · 2026-11-13 · pass 144 · SC-76
-
-**Risk check names its "today" value.** Supersedes v1.128.0.
 
 
 
@@ -499,4 +503,4 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.138.0 -->
+<!-- END FT-master-spec v1.139.0 -->

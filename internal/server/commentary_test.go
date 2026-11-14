@@ -16,8 +16,8 @@ func TestHoldingCommentaryEndpoint(t *testing.T) {
 	s, st := snapServer(t)
 	ctx := context.Background()
 	mustExec(t, st, `INSERT INTO stock_holdings (id, user_id, name, ticker, invested_usd, avg_open_price, current_price, updated_at) VALUES (31, 1, 'Palantir', 'PLTR', 100, 10, 12, 1)`)
-	mustExec(t, st, `INSERT INTO video_digests (id, source, video_id, title, published_at, package_path, ingested_at) VALUES (1,'jordi','vidA','Weekly',?, '/x',1)`, time.Now().UTC().AddDate(0, 0, -3).Format("2006-01-02"))
-	mustExec(t, st, `INSERT INTO video_mentions (digest_id, name, type, context, stance) VALUES (1,'Palantir','stock','Likes the AI software story.','bullish')`)
+	mustExec(t, st, `INSERT INTO video_digests (id, source, video_id, title, published_at, package_path, ingested_at) VALUES (1,'jordi','vidAAAAAAAA','Weekly',?, '/x',1)`, time.Now().UTC().AddDate(0, 0, -3).Format("2006-01-02"))
+	mustExec(t, st, `INSERT INTO video_mentions (digest_id, name, type, context, stance) VALUES (1,'Palantir','stock','Palantir: likes the AI software story.','bullish')`)
 	if _, err := videolinks.Rebuild(ctx, st.DB, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -36,8 +36,8 @@ func TestHoldingCommentaryEndpoint(t *testing.T) {
 	if err := st.SetPreference(ctx, "video_links_panel", "on"); err != nil {
 		t.Fatal(err)
 	}
-	if code, b := call("stock", "31", "?days=30&limit=5"); code != 200 || !strings.Contains(b, `"enabled":true`) || !strings.Contains(b, "Likes the AI software story.") ||
-		!strings.Contains(b, `"snippetKind":"note"`) || !strings.Contains(b, "Context only") || !strings.Contains(b, "https://youtu.be/vidA?t=0") {
+	if code, b := call("stock", "31", "?days=30&limit=5"); code != 200 || !strings.Contains(b, `"enabled":true`) || !strings.Contains(b, "Palantir: likes the AI software story.") ||
+		!strings.Contains(b, `"snippetKind":"note"`) || !strings.Contains(b, "Context only") || !strings.Contains(b, "https://youtu.be/vidAAAAAAAA") {
 		t.Fatalf("on: %d %s", code, b)
 	}
 	if code, _ := call("bond", "31", ""); code != http.StatusBadRequest {

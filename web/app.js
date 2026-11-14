@@ -8107,13 +8107,19 @@ function renderCommentarySection(res) {
     const loose = r.citedLoosely ? ' <span class="amber-text" title="The name or value is in this video but not at the cited second">cited loosely</span>' : '';
     const dir = r.direction === 'contradicts' ? ` <span class="loss" title="${escapeHTML(r.directionView || '')}">⚠ against his net view</span>` : '';
     const note = r.snippetKind === 'note' ? ' <span class="dim">(digest note)</span>' : '';
-    const text = r.snippet ? `${r.snippetKind === 'passage' ? '“…' : ''}${escapeHTML(r.snippet)}${r.snippetKind === 'passage' ? '…”' : ''}` : '<span class="dim">—</span>';
+    // FT-148: the snippet is always about the ticker; when none could be shown the row says so and shows no text.
+    const text = r.snippetKind === 'none' || !r.snippet
+      ? '<span class="dim">mentioned in this video</span>'
+      : `${r.snippetKind === 'passage' ? '“…' : ''}${escapeHTML(r.snippet)}${r.snippetKind === 'passage' ? '…”' : ''}`;
+    // FT-148: a YouTube row links to the video (at the second only when there is a real one), a 22v row to the 22v
+    // page, and a row with no usable link shows none.
+    const watch = !r.link ? '' : `<a href="${escapeHTML(r.link)}" target="_blank" rel="noopener noreferrer" title="${escapeHTML(r.title)}">${r.linkKind === '22v' ? 'open on 22v' : '▶ watch'}</a>`;
     return `<tr>
       <td class="dim">${escapeHTML(r.date)}</td>
       <td>${escapeHTML(srcName(r.source))}</td>
       <td>${escapeHTML(r.stance || '')}</td>
       <td>${text}${note}${loose}${dir}</td>
-      <td><a href="${escapeHTML(r.link)}" target="_blank" rel="noopener noreferrer" title="${escapeHTML(r.title)}">▶ watch</a></td>
+      <td>${watch}</td>
     </tr>`;
   }).join('') || `<tr><td colspan="5" class="dim" style="text-align:center">Nothing in the last ${c.days} days.</td></tr>`;
   const more = c.total > c.shown ? `<button class="btn-ghost" id="dh-commentary-more">Show all ${c.total} (last 2 years)</button>` : '';
