@@ -84,6 +84,9 @@ func ReviewQueue(ctx context.Context, db *sql.DB, today string) ([]QueueRow, err
 		if name == "" {
 			continue
 		}
+		if len(ix.aliases.Tickers(name)) > 0 {
+			continue // approved since the extraction (an alias line now maps it): nothing left to review
+		}
 		key := videoitems.NormName(name)
 		q := agg[key]
 		if q == nil {
