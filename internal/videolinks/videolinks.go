@@ -324,6 +324,11 @@ func trustResolution(spoken string, r videoitems.Resolution) bool {
 	if r.Conflict {
 		return false
 	}
+	if r.Source == "fuzzy" {
+		// SC-82: the 100-link audit found "altcoin" resolved to Bitcoin and "Litecoin" to Bitcoin at edit distance 2.
+		// A fuzzy resolution is linked only at edit distance 1 (a one-letter ASR slip); the rest wait for a reviewed alias.
+		return levenshtein(videoitems.NormName(spoken), videoitems.NormName(r.Matched)) <= 1
+	}
 	if r.Source != "search" {
 		return true
 	}
@@ -332,6 +337,26 @@ func trustResolution(spoken string, r videoitems.Resolution) bool {
 		return false
 	}
 	return strings.HasPrefix(m, n)
+}
+
+func levenshtein(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, min(cur[j-1]+1, prev[j-1]+cost))
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }
 
 func itemName(fields string) string {
