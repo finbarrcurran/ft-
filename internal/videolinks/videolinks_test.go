@@ -301,3 +301,30 @@ func TestForTickerPanelRows(t *testing.T) {
 		t.Fatalf("unknown ticker: %+v", none)
 	}
 }
+
+// SC-82: a fuzzy resolution links only at edit distance 1.
+func TestFuzzyResolutionOnlyAtDistanceOne(t *testing.T) {
+	db := fixture(t)
+	ctx := context.Background()
+	add := func(name, matched, ticker string) {
+		if _, err := db.Exec(`INSERT INTO video_items (run_id, digest_id, block, ord, fields_json, gate_class, resolution_json, signal_ok)
+			VALUES ((SELECT id FROM video_item_runs WHERE digest_id = 2), 2, 'tickers_named', 9, ?, 'grounded', ?, 1)`,
+			fmt.Sprintf(`{"name":%q}`, name), fmt.Sprintf(`{"name":%q,"status":"resolved","ticker":%q,"source":"fuzzy","matched":%q}`, name, ticker, matched)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("Palantr", "palantir", "PLTR")   // one letter off: linked
+	add("altcoin", "bitcoin", "BTC")     // distance 2: a different thing, never linked
+	add("Palanteer", "palantir", "PLTR") // distance 2: waits for a reviewed alias
+	if _, err := Rebuild(ctx, db, time.Unix(1_800_000_000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	has := func(name string) bool {
+		var n int
+		db.QueryRow(`SELECT COUNT(*) FROM video_links l JOIN video_items i ON i.id = l.source_id AND l.source_kind = 'item' WHERE i.fields_json LIKE ?`, `%"name":"`+name+`"%`).Scan(&n)
+		return n > 0
+	}
+	if !has("Palantr") || has("altcoin") || has("Palanteer") {
+		t.Fatalf("fuzzy rule: Palantr=%v altcoin=%v Palanteer=%v", has("Palantr"), has("altcoin"), has("Palanteer"))
+	}
+}
