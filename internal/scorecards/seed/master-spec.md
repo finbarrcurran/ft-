@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.133.0 · 2026-11-14** — latest change: Commentator-to-holdings link data (§13).
+> **Current version: v1.134.0 · 2026-11-14** — latest change: "What Jordi & Cowen said" panel (off until audited) (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.133.0 2026-11-14 -->
+<!-- reference_reviewed: v1.134.0 2026-11-14 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -400,7 +400,7 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 | SC-43 P2 / SC-54 frame reads | Vision read of chart frames; fill the Cowen snapshot columns left NULL in P1 (200WMA, log band, dominance, ETH/BTC) | **Partly built (SC-54).** `video_frame_reads` holds what the vision model read off chart frames (a handful of digests so far, about $0.02). Nothing feeds `cowen_weekly_snapshot` from it: those four columns are still NULL. No wider vision run is planned; one frame read (FT-141) is the proof of concept. |
 | SC-52 P2 transcripts | Full transcripts stored and searchable | **Built (v1.88.0).** Every complete package is stored by the daily sweep (and `ft transcripts sync`), digested or not; plain-text 22v Whisper transcripts load with `ft transcripts import` (SC-67, id `22v-<n>`, no timestamps). Keyword and phrase search only (FTS5): CLI, `GET /api/transcripts/search` and the `search_transcripts` connector tool; there is no search box in the web UI. |
 | SC-52 P1 login regime card | Jordi regime proposal on login | **Built (v1.92.0).** Cowen has no card (manual). |
-| SC-43 P3 / P4 | Mention-to-holdings linking (P3); digest query tool (P4) | **P3 data layer built (SC-80):** `video_links` and the mention `held`/`watchlist` flags, rebuilt nightly by exact alias, exact symbol or resolved ticker (no fuzzy, no LLM; D6, D7); the per-holding panel is PR B (not built). P4 not built. |
+| SC-43 P3 / P4 | Mention-to-holdings linking (P3); digest query tool (P4) | **P3 built (SC-80/81), panel OFF:** `video_links` (nightly, exact alias/symbol or trusted resolved ticker; no fuzzy, no LLM; D6, D7) and the holding-detail panel "What Jordi & Cowen said" (`GET /api/holdings/{kind}/{id}/commentary`), off until `video_links_panel` = on, which waits for a 100-link audit at 98% precision. P4 not built. |
 | SC-04 batch automation | Thesis updates at scale | Parked pending Fin's decisions on model / scope / sourcing |
 | Cron scrapers (Farside) | Restore on the Lenovo, or replace | **Farside: fixed 2026-10-11** — three post-migration causes: cron logs pointed at `/var/log` (now `~curran/logs`); `curran` could not write `/var/lib/ft/data/{farside,capitol-trades}` (joined group `ft`, dirs `curran:ft` 2775; `/var/lib/ft` stays 750); Playwright and Chromium were missing (installed v1.60; all in `ops/scrapers/install.sh`, logrotate keeps 8 weekly logs). **Capitol Trades: replaced by Bargo (SC-47, 2026-10-11)** — the cron was removed. Farside: the ETF-flow **card** stays live regardless (FT ignores a cache file older than 36 h and fetches directly), but the **chart** reads the cache file with no freshness check, so a stale file shows silently |
 | Manual eToro statement fallback | Retire or keep as break-glass | Kept (permanent break-glass). Fixed 2026-10-11: wallet scoping, live units, SU/SU.PA matching, audit rows (see §5). Remaining limit: a statement can't see partial closes (when live data exists it no longer proposes updates from the statement). Still open: the performance importer's handling of multi-year statements (whole statement attributed to the End-Date year), "Income from Refunds" in the Financial Summary, and its €-only reconciliation warning — ai to spec |
@@ -420,48 +420,57 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.134.0 · 2026-11-14 · pass 149 · SC-81
+
+**"What Jordi & Cowen said" panel (off until audited).** Per-holding commentary endpoint and panel, context only; search-resolution precision fix; queue label fixes. Supersedes v1.133.0.
+
 ### v1.133.0 · 2026-11-14 · pass 148 · SC-80
 
-**Commentator-to-holdings link data.** `video_links` rebuilt nightly by exact alias, exact symbol or the resolved ticker (no fuzzy, no LLM); `ft video-links review-queue` exports the unresolved names with proposals. Context only. Supersedes v1.132.0.
+**Commentator-to-holdings link data.** `video_links` rebuilt nightly; `ft video-links review-queue`. Supersedes v1.132.0.
+
 
 ### v1.132.0 · 2026-11-14 · pass 147 · SC-79
 
-**Cash dialog: eToro cash is live.** The manual-cash dialog says the manual balance is only the fallback and edits the manual entry (`cashManualUsd`/`cashManualEur`). Supersedes v1.131.0.
+**Cash dialog: eToro cash is live.** Manual cash is the labelled fallback. Supersedes v1.131.0.
+
 
 ### v1.131.0 · 2026-11-14 · pass 146 · SC-78
 
-**A tab left open stays current.** Header refresh time re-read every minute; an old tab shows "new version, reload". Supersedes v1.130.0.
+**A tab left open stays current.** Header polls; old tab shows "reload". Supersedes v1.130.0.
+
 
 ### v1.130.0 · 2026-11-14 · pass 145 · SC-77
 
-**Drawdown basis text is computed.** "recorded for every day" or how many days use today's cash. Supersedes v1.129.0.
+**Drawdown basis text is computed.** Supersedes v1.129.0.
+
 
 ### v1.129.0 · 2026-11-13 · pass 144 · SC-76
 
-**Risk check names its "today" value.** `valueSource`, `valueAsOf` on the check. Supersedes v1.128.0.
+**Risk check names its "today" value.** Supersedes v1.128.0.
+
 
 ### v1.128.0 · 2026-11-13 · pass 143 · SC-75
 
-**Nightly risk check logs its result.** One nightly line plus an alert-sent line. Supersedes v1.127.0.
+**Nightly risk check logs its result.** Supersedes v1.127.0.
+
 
 ### v1.127.0 · 2026-11-13 · pass 142 · SC-74
 
 **Cash source labels, pull log, backfill.** `cash_source`, `etoro_cash_pulls`, `ft cash-backfill`. Supersedes v1.126.0.
 
+
 ### v1.126.0 · 2026-11-13 · pass 141 · SC-73
 
 **Summary cash is eToro cash.** Trading available plus eToro Money; manual is the fallback. Supersedes v1.125.0.
+
 
 ### v1.125.0 · 2026-11-13 · pass 140 · SC-72
 
 **Video-brain status table corrected.** Documentation only. Supersedes v1.124.0.
 
-### v1.124.0 · 2026-11-13 · pass 139 · SC-71
-
-**Quarter labels are not tickers.** Q1-Q4, H1/H2 not read as tickers. Supersedes v1.123.0.
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.133.0 -->
+<!-- END FT-master-spec v1.134.0 -->

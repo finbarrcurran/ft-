@@ -102,6 +102,9 @@ func validPreferenceValue(key, value string) bool {
 	case "alerts_snooze_until":
 		// Backlog polish — unix-seconds timestamp as a string. "0" clears.
 		return len(value) > 0 && len(value) <= 16
+	case "video_links_panel":
+		// FT-146: the per-holding "What Jordi & Cowen said" panel. Off until the link audit reaches 98% precision.
+		return value == "on" || value == "off"
 	case "cash_balance_usd", "cash_balance_eur":
 		// Spec 12 D2 — non-negative decimal string. Generous cap for ultra-
 		// wealthy users (16 chars handles up to $9.9 trillion).
