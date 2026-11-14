@@ -43,6 +43,7 @@ import (
 	"ft/internal/technicals"
 	"ft/internal/theses"
 	"ft/internal/videodigest"
+	"ft/internal/videolinks"
 	"log/slog"
 	"net/http"
 	"os"
@@ -135,6 +136,8 @@ func main() {
 		runVideoDigestItems(os.Args[2:])
 	case "video-digest-extract":
 		runVideoDigestExtract(os.Args[2:])
+	case "video-links":
+		runVideoLinks(os.Args[2:])
 	case "cash-backfill":
 		runCashBackfill(os.Args[2:])
 	case "video-items-regate":
@@ -337,6 +340,7 @@ USAGE
   ft nexus-backfill [--range 2y] [--gap-ms N]  fetch daily bars for the Nexus universe (SC-36)
   ft nexus-compute [--as-of DATE]              compute Nexus Trend + Exhaustion (SC-36)
   ft nexus-fundamentals [--as-of DATE]         snapshot Nexus Forward PEG fundamentals (SC-36)
+  ft video-links rebuild|review-queue [--out F]  FT-146: link commentator mentions/items to holdings and watchlist (no LLM); review-queue writes the unresolved names as CSV
   ft cash-backfill [--apply]                   FT-142: fill portfolio_value_history.cash_value_usd from eToro's end-of-day balances (read-only GET); dry run unless --apply
   ft video-items-regate [--apply] [--list]     SC-69: re-run the grounding gate over stored v5 items (no LLM); dry run unless --apply
   ft video-digest-stored 22v-N [22v-N ...]     SC-68: digest 22v transcripts held only in the store (context only; is_flagship=0)
@@ -582,6 +586,18 @@ func runServe() {
 			pull()
 		}
 	}()
+
+	// FT-146 — rebuild the commentator-to-holdings links nightly at 05:10 UTC (no LLM, a few seconds).
+	go scheduleAt(bgCtx, 5, 10, func() {
+		ctx, cancel := context.WithTimeout(bgCtx, 5*time.Minute)
+		defer cancel()
+		r, err := videolinks.Rebuild(ctx, st.DB, time.Now())
+		if err != nil {
+			slog.Warn("video links rebuild failed", "err", err)
+			return
+		}
+		slog.Info("video links rebuilt", "mentionsLinked", r.MentionsLinked, "itemsLinked", r.ItemsLinked, "links", r.Links)
+	})
 
 	// Spec 9f D2 — daily sector ETF ingest at 22:00 UTC (after US close,
 	// before APAC open). Independent of the 04:00 UTC job so a stalled
@@ -1591,6 +1607,53 @@ func runVideoDigestItems(args []string) {
 				fmt.Printf("  %-16s %-13s %.70s%s %v\n", it.Block, it.Class, name, extra, it.Issues)
 			}
 		}
+	}
+}
+
+// runVideoLinks: FT-146 (P3). `rebuild` recomputes the links (idempotent); `review-queue [--out file.csv]` exports the
+// unresolved names with a category and a proposal for review. Nothing here applies a proposal.
+func runVideoLinks(args []string) {
+	sub := "rebuild"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("video-links", flag.ExitOnError)
+	out := fs.String("out", "", "review-queue: write the CSV to this file (default: standard output)")
+	_ = fs.Parse(args)
+	cfg, err := config.Load()
+	must("load config", err)
+	st, err := store.Open(cfg.DBPath)
+	must("open store", err)
+	defer st.Close()
+	must("migrate", st.Migrate())
+	ctx := context.Background()
+	switch sub {
+	case "rebuild":
+		r, err := videolinks.Rebuild(ctx, st.DB, time.Now())
+		must("rebuild", err)
+		fmt.Printf("mentions %d (linked %d) | tickers_named items %d (linked %d) | links %d | by kind %v | by method %v\n",
+			r.Mentions, r.MentionsLinked, r.Items, r.ItemsLinked, r.Links, r.ByKind, r.ByMethod)
+	case "review-queue":
+		rows, err := videolinks.ReviewQueue(ctx, st.DB, time.Now().UTC().Format("2006-01-02"))
+		must("review queue", err)
+		w := os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			must("create", err)
+			defer f.Close()
+			w = f
+		}
+		must("write csv", videolinks.WriteCSV(w, rows))
+		byCat := map[string]int{}
+		items := 0
+		for _, r := range rows {
+			byCat[r.Category]++
+			items += r.Items
+		}
+		fmt.Fprintf(os.Stderr, "review queue: %d distinct names, %d items, by category %v\n", len(rows), items, byCat)
+	default:
+		fmt.Fprintln(os.Stderr, "usage: ft video-links rebuild | review-queue [--out file.csv]")
+		os.Exit(2)
 	}
 }
 

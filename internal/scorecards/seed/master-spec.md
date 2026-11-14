@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.132.0 · 2026-11-14** — latest change: Cash dialog: eToro cash is live (§13).
+> **Current version: v1.133.0 · 2026-11-14** — latest change: Commentator-to-holdings link data (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.132.0 2026-11-14 -->
+<!-- reference_reviewed: v1.133.0 2026-11-14 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -124,6 +124,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | 0071 | `ticker_market_stats` | SC-57 — `ticker_market_stats` (52-week range, all-time high + history range, market cap, as-of, last error) |
 | 0072 | `ticker_stats_price` | FT-082 — price columns |
 | 0073 | `portfolio_cash` | FT-110 — `cash_value_usd` on `portfolio_value_history` |
+| 0076 | `video_links` | FT-146 — `video_links` (mention or v5 ticker item → ticker FT holds, watches or tracks; kind, method, gate class; rebuilt in full nightly) |
 | 0075 | `cash_source_pulls` | FT-142 — `portfolio_value_history.cash_source` (etoro_api:nightly, etoro_api:balances/history, manual) and `etoro_cash_pulls` (one row per cash pull: component, source, status, USD, error) |
 | 0074 | `etoro_cash` | FT-142 — `etoro_cash` (latest value of two components: `trading_available`, `money_cash`; native amount, currency, USD, rate, source, as-of) |
 | 0063 | `crypto_index_members` | Jordi-46 Phase 1 — the 46 constituents of the Visser-Labs tokenized index (list_version 2026-09-21; 42 tokens with CoinGecko ids, 4 stocks COIN/HOOD/CRCL/FIGR; 10 verticals; soft `removed_at`); reference only, read by the screener and the list endpoint and by nothing else (no alert, gap-report, entry-zone, watchlist, holdings or thesis code) |
@@ -157,6 +158,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | Weekly FT snapshot (SC-46) | Sunday 18:00 UTC (Sunday evening Dublin) + Monday 07:00 UTC catch-up | `Server.RunScheduledSnapshot`: builds the deterministic weekly snapshot from the same in-process handlers the connector tools call (portfolio, YTD performance and trade statistics, thesis scores and locks, gap report, watchlist in-zone set, alerts raised in the last 7 days, regimes, crypto indicators with data dates, non-ok monitor entries, the latest week of video digests), compares it with the previous weeks (deltas, 4-week trend, text/set changes, a Top-changes block of at most 8 lines ranked by a fixed rule: regime changes and thesis-score changes, then set changes, then the largest relative movers), saves it to `ft_snapshots` and writes `/var/lib/ft/data/bridge/snapshot/ft-snapshot.md`; one Telegram note. The Monday run takes the week that just ended only if Sunday's did not run. A section whose source fails is omitted with a note, never invented; demo mode refuses to snapshot. **Snapshot v2 (v1.86.1):** each regime is shown with its set-at date, age and the 14-day stale flag, an unset/unclassified regime reads "unset since <date>" and is never a "changed from X to Y" or a Top change, and stale regimes are listed under Data health (which no longer says "all ok" for them); value changes carry an "of which" note from `holdings_audit` since the previous snapshot (removals, additions, invested-amount adjustments with invested USD; capital flows are not recorded in FT and are stated as not separable) plus the same for the three earlier weeks; the Watchlist section lists "In entry zone without a thesis" (entry-zone tickers also in the gap report), and a ticker entering that state is a Top change; header `ft_snapshot_version: 2`, marker `END ft-snapshot v2`. Weeks before the first stored snapshot are filled ONLY from existing history tables (portfolio value, alerts raised, regimes, thesis scores and lock dates); everything else starts at its first snapshot. Monitor `snapshot`: alert when the newest snapshot is older than 8 days, weekly reminders, quiet before the first one |
 | Video digest sweep | 09:15, plus ~2 min after boot | SC-43: ingests any complete package in `/var/lib/video_digest` not yet digested (one governor LLM call per new video) |
 | eToro Money cash (FT-142) | 03:40 (+2 min after boot) | one read-only `GET /api/v1/balances` (Cash accounts); the Trading cash is stored by every 30-min sync |
+| Video links (FT-146) | 05:10 | rebuild `video_links` (no LLM) |
 | Risk check (SC-59) | 09:00 | cash-inclusive drawdown; arms the ADVISORY breaker + one Telegram alert |
 | Sector rotation ingest | 22:00 | 34 sector ETFs + SPY + VWRL daily close. CLI: `ft sector-ingest`; FT-081: split steps repaired after each run (`ft sector-repair`) |
 | Weekly sector digest | Fri 22:00 | Top/bottom by RS, WoW movers → `sector_rotation_digests` |
@@ -258,6 +260,7 @@ ft video-digest-preview --video-id ID [--prior with|without|both]` runs an extra
   **v5 items (SC-53, v1.95.0):** after each ingest (and its vote) the sweep makes a separate Haiku 5.5 call (thinking off, no regime block, feature `video_items`, output cap 8,000; transcripts over 60 min are read in 60-min chunks with a 60 s overlap) that extracts EVERY causal claim, analogue, seasonality pattern, key level, indicator, named ticker/company/token, prediction and self-correction, each with a 15 to 30 s cited span and no quote field. The **grounding gate** (`internal/videoitems`) checks every ticker, number and year against the passage 30 s before to 45 s after the cited span (at most 300 words; SC-69): `grounded`, `wrong_place` (in the transcript within 120 s), `far`, `invented` or `name_mapping`. Failing items are stored and shown with their flag, never deleted; only `invented` and `name_mapping` stay out of signals. Numbers only a chart can show are marked "from chart, unverified". Named companies are resolved after extraction (alias file `internal/videoitems/ticker_aliases.tsv`, then edit-distance-2 match for ASR spellings, then Yahoo symbol search); unresolved names stay shown as unresolved. A second cheap call (`video_direction`) flags causal claims, predictions and ticker stances whose direction contradicts the speaker's net view, showing that view beside the flag. `GET /api/video-digest/{id}/items`; `ft video-digest-items --video-id ID[,ID] [--force] [--dry-run] [--show]`; the Video Digest tab shows an "Items (v5)" section per card. Items are re-extracted when a digest is re-ingested.
   **Majority vote for the newest Jordi digest (SC-52, v1.94.0):** the regime state of one extraction is not perfectly stable, so the sweep extracts the newest Jordi digest (the one behind the login card) three times (the stored run plus two that are not stored) and keeps the majority state; a split (2 of 3, or three different states, where the more cautious state wins) forces confidence to `low` and the card shows "2 OF 3 RUNS"; a unanimous result shows "3 OF 3 RUNS". Never applied to the backfill or to `ft video-digest-extract` (about $0.06 extra per new video). `ft video-digest-vote --video-id ID [--runs 3]` does it by hand. **Backfill (SC-52 P3, v1.93.0):** `ops/video_digest/video_digest.py` gained a range mode (`--from/--to`, `--no-frames`, `--transcripts-only`, `--captions-only`, `--max-videos`, `--sleep`; metadata cache; stops and reports on a YouTube rate limit). A transcript-only package carries `meta.extract = false`: the daily sweep stores and indexes its transcript but never sends it to the LLM. `ft video-digest-extract --source jordi|cowen [--flagship-only] [--newest-first] [--from D] [--to D] [--max-videos N] [--max-cost USD] [--daily-cap USD] [--dry-run]` digests packages that have no digest, newest or oldest first, never twice, stops at the ceiling (a margin of one more video under it), and with `--daily-cap` lifts `llm_budget_daily_usd` for the run and always restores the previous value (also on Ctrl-C or SIGTERM); the monthly cap is never touched.
   **Login regime proposal (SC-52 P1, v1.92.0, Jordi only):** `GET /api/regime/proposal` returns whether to show a card and what it holds; `POST /api/regime/proposal/{approve,set,dismiss}`. The card shows when the newest Jordi digest (extraction v3) has a proposed state that Fin has not approved, set, dismissed or superseded (a manual regime set after the digest was ingested supersedes it), or when the Jordi regime is past the 14-day stale flag and the newest digest has not been handled. It shows the 2-3 line narrative, the proposed state with the confidence prominently, the evidence passage (labelled "closest passage" when snapped) with the video title, date and a timestamped link, the current state with its set date and age, FT's own macro suggestion (Spec 9p) beside it (a disagreement is stated, neither is preferred), a consequence preview computed at read time from the live alert logic (effective regime, alert margin, entry-zone alerts on/off and the watchlist tickers in the entry zone whose alert would switch), the stance and tilt as context only, and the named catalysts. Buttons: Approve the proposed state (the server applies the digest's own state; the client cannot name another), Set a different state (stable / shifting / defensive, each with its consequence on hover), Dismiss until the next video (snooze), or the corner x (decide later: hidden for the session). An approval or a different set writes through the manual regime path: preferences `regime_jordi*` with source `video-suggestion` and a `regime_history` row (source `manual`, because the table is CHECKed to manual|auto_cowen_form) whose note and `inputs_json` name the digest, video, quote, match type, confidence and the prior state. No LLM call at login; nothing is applied automatically; no Cowen card (Cowen stays manual); hidden in demo mode.
+ft video-links rebuild|review-queue [--out F]   FT-146: link commentator mentions/items to holdings and watchlist (no LLM); review-queue exports the unresolved names as CSV
 ft cash-backfill [--apply]   FT-142: fill the history cash column from eToro's end-of-day balances (read-only; dry run unless --apply)
 ft video-items-regate [--apply] [--list]   SC-69: re-run the gate over stored v5 items, no LLM; dry run unless --apply
 ft transcripts [sync|import|search|stats]   SC-52 P2: store every on-disk package transcript (free, idempotent) / SC-67: import plain-text 22v transcripts (--only N,N DIR) / full-text search / corpus size (flags may follow the query; every CLI command except serve/seed refuses to create a missing database, FT_ALLOW_NEW_DB=1 overrides)
@@ -397,7 +400,7 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 | SC-43 P2 / SC-54 frame reads | Vision read of chart frames; fill the Cowen snapshot columns left NULL in P1 (200WMA, log band, dominance, ETH/BTC) | **Partly built (SC-54).** `video_frame_reads` holds what the vision model read off chart frames (a handful of digests so far, about $0.02). Nothing feeds `cowen_weekly_snapshot` from it: those four columns are still NULL. No wider vision run is planned; one frame read (FT-141) is the proof of concept. |
 | SC-52 P2 transcripts | Full transcripts stored and searchable | **Built (v1.88.0).** Every complete package is stored by the daily sweep (and `ft transcripts sync`), digested or not; plain-text 22v Whisper transcripts load with `ft transcripts import` (SC-67, id `22v-<n>`, no timestamps). Keyword and phrase search only (FTS5): CLI, `GET /api/transcripts/search` and the `search_transcripts` connector tool; there is no search box in the web UI. |
 | SC-52 P1 login regime card | Jordi regime proposal on login | **Built (v1.92.0).** Cowen has no card (manual). |
-| SC-43 P3 / P4 | Mention-to-holdings/watchlist/universe linking (P3); digest query tool (P4) | **Not built.** `video_mentions.held` and `watchlist` exist (and are stripped in demo mode) but no code fills them; v5 `tickers_named` items resolve a name to a ticker only. No Q&A, semantic search, or connector tool for digests, items or regime reads. The login regime card (SC-52 P1) and the v5 items view are built. |
+| SC-43 P3 / P4 | Mention-to-holdings linking (P3); digest query tool (P4) | **P3 data layer built (SC-80):** `video_links` and the mention `held`/`watchlist` flags, rebuilt nightly by exact alias, exact symbol or resolved ticker (no fuzzy, no LLM; D6, D7); the per-holding panel is PR B (not built). P4 not built. |
 | SC-04 batch automation | Thesis updates at scale | Parked pending Fin's decisions on model / scope / sourcing |
 | Cron scrapers (Farside) | Restore on the Lenovo, or replace | **Farside: fixed 2026-10-11** — three post-migration causes: cron logs pointed at `/var/log` (now `~curran/logs`); `curran` could not write `/var/lib/ft/data/{farside,capitol-trades}` (joined group `ft`, dirs `curran:ft` 2775; `/var/lib/ft` stays 750); Playwright and Chromium were missing (installed v1.60; all in `ops/scrapers/install.sh`, logrotate keeps 8 weekly logs). **Capitol Trades: replaced by Bargo (SC-47, 2026-10-11)** — the cron was removed. Farside: the ETF-flow **card** stays live regardless (FT ignores a cache file older than 36 h and fetches directly), but the **chart** reads the cache file with no freshness check, so a stale file shows silently |
 | Manual eToro statement fallback | Retire or keep as break-glass | Kept (permanent break-glass). Fixed 2026-10-11: wallet scoping, live units, SU/SU.PA matching, audit rows (see §5). Remaining limit: a statement can't see partial closes (when live data exists it no longer proposes updates from the statement). Still open: the performance importer's handling of multi-year statements (whole statement attributed to the End-Date year), "Income from Refunds" in the Financial Summary, and its €-only reconciliation warning — ai to spec |
@@ -417,93 +420,48 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.133.0 · 2026-11-14 · pass 148 · SC-80
+
+**Commentator-to-holdings link data.** `video_links` rebuilt nightly by exact alias, exact symbol or the resolved ticker (no fuzzy, no LLM); `ft video-links review-queue` exports the unresolved names with proposals. Context only. Supersedes v1.132.0.
+
 ### v1.132.0 · 2026-11-14 · pass 147 · SC-79
 
 **Cash dialog: eToro cash is live.** The manual-cash dialog says the manual balance is only the fallback and edits the manual entry (`cashManualUsd`/`cashManualEur`). Supersedes v1.131.0.
 
 ### v1.131.0 · 2026-11-14 · pass 146 · SC-78
 
-**A tab left open stays current.** The header refresh time (last price refresh) is re-read every minute and an out-of-date tab shows "new version, reload". Supersedes v1.130.0.
-
+**A tab left open stays current.** Header refresh time re-read every minute; an old tab shows "new version, reload". Supersedes v1.130.0.
 
 ### v1.130.0 · 2026-11-14 · pass 145 · SC-77
 
-**Drawdown basis text is computed.** It says "recorded for every day" or how many days still use today's cash. Supersedes v1.129.0.
-
-
+**Drawdown basis text is computed.** "recorded for every day" or how many days use today's cash. Supersedes v1.129.0.
 
 ### v1.129.0 · 2026-11-13 · pass 144 · SC-76
 
-**Risk check names its "today" value.** `valueSource` and `valueAsOf` on the check; the live holdings value, never the snapshot. Supersedes v1.128.0.
-
-
-
+**Risk check names its "today" value.** `valueSource`, `valueAsOf` on the check. Supersedes v1.128.0.
 
 ### v1.128.0 · 2026-11-13 · pass 143 · SC-75
 
-**Nightly risk check logs its result.** One nightly line and an alert-sent line. Supersedes v1.127.0.
-
-
-
-
+**Nightly risk check logs its result.** One nightly line plus an alert-sent line. Supersedes v1.127.0.
 
 ### v1.127.0 · 2026-11-13 · pass 142 · SC-74
 
-**Cash source labels, pull log, history backfill.** Source label per history cash value; every eToro cash pull logged; `ft cash-backfill`. Supersedes v1.126.0.
-
-
-
-
-
+**Cash source labels, pull log, backfill.** `cash_source`, `etoro_cash_pulls`, `ft cash-backfill`. Supersedes v1.126.0.
 
 ### v1.126.0 · 2026-11-13 · pass 141 · SC-73
 
-**Summary cash is eToro cash, two components.** Trading available (each sync) plus eToro Money (daily); manual entry is the fallback after 48 h. Supersedes v1.125.0.
-
-
-
-
-
-
+**Summary cash is eToro cash.** Trading available plus eToro Money; manual is the fallback. Supersedes v1.125.0.
 
 ### v1.125.0 · 2026-11-13 · pass 140 · SC-72
 
-**Video-brain status table corrected.** SC-43 P2 partly built (SC-54); P3 and P4 not built. Documentation only. Supersedes v1.124.0.
-
-
-
-
-
-
-
+**Video-brain status table corrected.** Documentation only. Supersedes v1.124.0.
 
 ### v1.124.0 · 2026-11-13 · pass 139 · SC-71
 
-**Quarter labels are not tickers.** The gate no longer reads Q1 to Q4 or H1/H2 as tickers. Supersedes v1.123.0.
-
-
-
-
-
-
-
-
-
-### v1.123.0 · 2026-11-13 · pass 138 · SC-70
-
-**CoinGecko error text redacted.** Failed calls no longer list coin ids in Diagnostics. Supersedes v1.122.0.
-
-
-
-
-
-
-
-
-
+**Quarter labels are not tickers.** Q1-Q4, H1/H2 not read as tickers. Supersedes v1.123.0.
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.132.0 -->
+<!-- END FT-master-spec v1.133.0 -->
