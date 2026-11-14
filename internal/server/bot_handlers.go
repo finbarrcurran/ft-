@@ -252,7 +252,10 @@ func (s *Server) handleBotAlertsAck(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(r, w, &req) {
 		return
 	}
-	if req.HoldingKind == "" || req.HoldingID == 0 || req.Kind == "" {
+	// A system alert (the AI Nexus health check, holdingKind "nexus") has no holding, so its id is 0; any other
+	// alert needs a holding id. Without this the nexus_anomaly ack was refused every time and the alert re-fired
+	// at every poll (FT-039).
+	if req.HoldingKind == "" || req.Kind == "" || (req.HoldingID == 0 && req.HoldingKind != "nexus") {
 		writeError(w, http.StatusBadRequest, "holdingKind, holdingId, kind are required")
 		return
 	}

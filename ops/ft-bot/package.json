@@ -1,0 +1,13 @@
+{
+  "name": "ft-bot",
+  "version": "0.1.0",
+  "description": "Standalone Telegram daemon that pings Fin about FT alerts and answers /alerts /movers /summary commands.",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

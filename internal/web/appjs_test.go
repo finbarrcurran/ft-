@@ -39,3 +39,15 @@ func TestAppJSStaleTabGuards(t *testing.T) {
 		}
 	}
 }
+
+// FT-039 (SC-85): the Telegram bot (ops/ft-bot) renders every alert kind and acknowledges only what it showed. Its
+// own tests run with node when it is installed.
+func TestFTBotNodeTests(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	if out, err := exec.Command(node, "--test", "../../ops/ft-bot/render.test.js").CombinedOutput(); err != nil {
+		t.Fatalf("ft-bot tests failed:\n%s", out)
+	}
+}
