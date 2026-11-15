@@ -40,9 +40,29 @@ func TestApprovedReviewQueueAliases(t *testing.T) {
 		}
 	}
 	// names Fin did not approve stay unresolved
-	for _, name := range []string{"Palanteer", "ETH Bitcoin pair", "Soul Bitcoin", "Ray Dalio", "energy stocks"} {
+	for _, name := range []string{"ETH Bitcoin pair", "Ray Dalio", "energy stocks"} { // "Palanteer" and "Soul Bitcoin" were approved later (SC-88)
 		if got := Default.Tickers(name); len(got) != 0 {
 			t.Errorf("%q must stay unresolved, maps to %v", name, got)
+		}
+	}
+}
+
+// FT-148 / SC-88: the alias candidates Fin approved on 2026-11-15, and nothing else from that list.
+func TestApprovedAliasesRound2(t *testing.T) {
+	for name, want := range map[string]string{
+		"Salana": "SOL", "salano": "SOL", "Soul Bitcoin": "SOL", "Sole Bitcoin": "SOL", "ETH/USD": "ETH", "Palanteer": "PLTR",
+		"ExxonMobil": "XOM", "Integris": "ENTG", "Enterris": "ENTG", "Hyperlquid": "HYPE", "Marlell": "MRVL", "Microns": "MU",
+		"Eli Lilly (LLY)": "LLY",
+	} {
+		got := Default.Tickers(name)
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("%q maps to %v, want [%s]", name, got, want)
+		}
+	}
+	// rejected by Fin: every fuzzy proposal that was not approved above
+	for _, name := range []string{"Marvel", "synopsis", "Brazil (EWZ)", "Altcoins", "altcoin", "Litecoin", "Soitec", "Costco", "Integrys", "Harvey", "Pax Gold", "memecoin", "Dot Bitcoin", "Avac Bitcoin", "alt USD", "Arweave", "Sharplink", "Mosaic"} {
+		if got := Default.Tickers(name); len(got) != 0 {
+			t.Errorf("%q must stay unmapped, maps to %v", name, got)
 		}
 	}
 }
