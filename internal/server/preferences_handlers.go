@@ -14,6 +14,7 @@ import (
 	"errors"
 	"ft/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -102,6 +103,13 @@ func validPreferenceValue(key, value string) bool {
 	case "alerts_snooze_until":
 		// Backlog polish — unix-seconds timestamp as a string. "0" clears.
 		return len(value) > 0 && len(value) <= 16
+	case "coingecko_partb_enabled":
+		// Jordi-46 Part B kill switch. Ships off; Fin turns it on after the dry run.
+		return value == "on" || value == "off"
+	case "coingecko_partb_soft_stop":
+		// Jordi-46 Part B: keyed CoinGecko calls a month above which Part B stops making new calls (default 7000).
+		n, err := strconv.Atoi(value)
+		return err == nil && n >= 100 && n <= 10000
 	case "video_links_chips":
 		// FT-149: the Watchlist / AI Nexus chips and drawer. Off until Fin says go (after the watchlist/universe audit).
 		return value == "on" || value == "off"

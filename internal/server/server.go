@@ -199,6 +199,7 @@ func (s *Server) routes() {
 	// SC-21: crypto market screener — CoinGecko top-250 + DefiLlama TVL.
 	s.mux.HandleFunc("GET /api/crypto-screener", s.requireUser(s.handleCryptoScreener))
 	s.mux.HandleFunc("GET /api/crypto-index/{key}", s.requireUser(s.handleCryptoIndex)) // Jordi-46 Phase 1: reference list
+	s.mux.HandleFunc("GET /api/crypto-index/{key}/breadth", s.requireUser(s.handleCryptoIndexBreadth)) // Jordi-46 Part B
 
 	// Spec 9c: per-holding levels (S/R candidates + suggested SL/TP/R-mult).
 	// Token-or-cookie so the bot's /levels command works.
