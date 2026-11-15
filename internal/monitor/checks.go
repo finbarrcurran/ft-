@@ -131,6 +131,7 @@ func DefaultChecks(db *sql.DB) []Check {
 	checks = append(checks, ThesisChecks(db)...)
 	checks = append(checks, ThesisTokenCheck())
 	checks = append(checks, CalendarChecks(db)...)
+	checks = append(checks, CoinGeckoBudgetCheck(db)) // Jordi-46 Part B soft stop
 	return append(checks, marketFeedChecks(db)...)
 }
 
