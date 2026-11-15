@@ -6100,10 +6100,28 @@ function renderDiagnosticsSection(d) {
     const bad = r.fail > 0 ? ` <span class="${r.fail429 > 0 || r.fail > r.ok ? 'amber-text' : 'dim'}">(${r.fail} fail)</span>` : '';
     return `<td class="num">${r.calls}${bad}</td>`;
   }).join('') + '</tr>').join('');
-  const usageHTML = (usageLines.length || pdRows) ? `
+  // Jordi-46 Part B — CoinGecko: monthly keyed total vs soft stop and limit, per-endpoint calls, projection.
+  const cg = d.coingecko;
+  let cgHTML = '';
+  if (cg) {
+    const fmtF = (f) => f ? f.replace('partb_', 'Part B ') : 'existing';
+    const epRows = (cg.month_endpoints || []).map(u => `<tr><td>${escapeHTML(fmtF(u.feature))}</td><td>${escapeHTML(u.endpoint)}</td><td>${u.keyed ? 'keyed' : 'keyless'}</td><td class="num">${u.calls}</td><td class="num">${u.fail}${u.fail429 ? ` <span class="amber-text">(${u.fail429} × 429)</span>` : ''}</td></tr>`).join('');
+    const over = cg.monthKeyed >= cg.softStop;
+    cgHTML = `
+      <h4 class="diag-h4">CoinGecko calls <span class="dim" style="font-size:0.78rem; font-weight:normal">(${escapeHTML(cg.month)}, UTC)</span></h4>
+      <ul class="diag-kv">
+        <li><strong>Keyed this month</strong>: <span class="${over ? 'amber-text' : ''}">${cg.monthKeyed}</span> <span class="dim">of ${cg.monthlyLimit} (Part B soft stop ${cg.softStop}${over ? ' — reached: no new Part B calls' : ''})</span></li>
+        <li><strong>Projected month-end keyed total</strong>: ${cg.projectedMonthKeyed ? cg.projectedMonthKeyed : '<span class="dim">—</span>'} <span class="dim">· ${escapeHTML(cg.projectionNote)}</span></li>
+        <li><strong>Part B switch</strong>: ${cg.partBEnabled ? '<span class="gain">on</span>' : '<span class="dim">off</span>'} <span class="dim">(preference coingecko_partb_enabled)</span></li>
+      </ul>
+      ${epRows ? `<div class="tablewrap"><table class="holdings"><thead><tr><th>Feature</th><th>Endpoint</th><th>Key</th><th class="num">Calls</th><th class="num">Failed</th></tr></thead><tbody>${epRows}</tbody></table></div><p class="dim" style="font-size:0.78rem">Per-endpoint counters start when Part B is deployed; the keyed total above covers the whole month.</p>` : ''}
+    `;
+  }
+  const usageHTML = (usageLines.length || pdRows || cgHTML) ? `
       <h4 class="diag-h4">Provider usage <span class="dim" style="font-size:0.78rem; font-weight:normal">(calls per UTC day)</span></h4>
       ${usageLines.length ? `<ul class="diag-kv">${usageLines.join('')}</ul>` : ''}
       ${pdRows ? `<div class="tablewrap"><table class="holdings"><thead><tr><th>Provider</th>${days.map(dy => `<th class="num">${escapeHTML(dy.slice(5))}</th>`).join('')}</tr></thead><tbody>${pdRows}</tbody></table></div>` : ''}
+      ${cgHTML}
   ` : '';
 
   return `
@@ -7164,6 +7182,7 @@ async function renderCryptoScreener() {
 
   $('#content').innerHTML = `
     ${screenerAssetToggle()}
+    ${f.tag === 'visser46' ? '<div id="v46-breadth" class="screener-summary dim">Loading Visser 46 breadth…</div>' : ''}
     <div class="screener-filters">
       <div class="screener-filter-row">
         <strong>Category</strong>
@@ -7205,6 +7224,7 @@ async function renderCryptoScreener() {
   `;
 
   wireScreenerAssetToggle();
+  if (f.tag === 'visser46') loadV46Breadth();
 
   $('#cs-cat').addEventListener('change', (ev) => { state.cryptoScreenerFilters.category = ev.target.value; renderCryptoScreener(); });
   $('#cs-tag').addEventListener('change', (ev) => { state.cryptoScreenerFilters.tag = ev.target.value; renderCryptoScreener(); });
@@ -7249,6 +7269,29 @@ async function renderCryptoScreener() {
       });
     });
   });
+}
+
+// Jordi-46 Part B — breadth of the 46-name index, computed by FT from stored closes (no CoinGecko call on load).
+async function loadV46Breadth() {
+  const el = document.getElementById('v46-breadth');
+  if (!el) return;
+  try {
+    const d = await api('/api/crypto-index/visser46/breadth');
+    const b = d.breadth || {};
+    const cell = (m) => (m && m.n > 0) ? `${Math.round(m.pct)}% <span class="dim">(${m.yes}/${m.n})</span>` : '<span class="dim">—</span>';
+    const row = (g, strong) => `<tr><td>${strong ? '<strong>' : ''}${escapeHTML(g.name)}${strong ? '</strong>' : ''} <span class="dim">${g.members}</span></td>` +
+      `<td class="num">${cell(g.above50)}</td><td class="num">${cell(g.above200)}</td><td class="num">${cell(g.rising50)}</td><td class="num">${cell(g.rising200)}</td></tr>`;
+    const miss = (b.missing || []).map(m => `<li><strong>${escapeHTML(m.symbol)}</strong> <span class="dim">${m.closes} closes${m.newest ? ', newest ' + escapeHTML(m.newest) : ''} — ${m.reasons.map(escapeHTML).join('; ')}</span></li>`).join('');
+    el.classList.remove('dim');
+    el.innerHTML = `
+      <h4 class="diag-h4">Visser 46 breadth <span class="dim" style="font-size:0.78rem; font-weight:normal">as of ${escapeHTML(b.asOf || '')} · from stored closes · ${d.partB && d.partB.enabled ? 'Part B data on' : 'Part B data off'}</span></h4>
+      <div class="tablewrap"><table class="holdings"><thead><tr><th>Vertical</th><th class="num">Above 50D</th><th class="num">Above 200D</th><th class="num">Rising 50D</th><th class="num">Rising 200D</th></tr></thead>
+      <tbody>${row(b.total, true)}${(b.verticals || []).map(g => row(g, false)).join('')}</tbody></table></div>
+      <p class="dim" style="font-size:0.78rem">${escapeHTML(b.note || '')} ${escapeHTML(d.publishedFigure || '')}</p>
+      ${miss ? `<details><summary class="dim">${(b.missing || []).length} member(s) missing or short on history</summary><ul class="diag-kv">${miss}</ul></details>` : ''}`;
+  } catch (e) {
+    el.innerHTML = `<span class="loss">breadth failed: ${escapeHTML(e.message)}</span>`;
+  }
 }
 
 // ---------- watchlist tab -----------------------------------------------
