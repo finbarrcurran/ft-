@@ -17,17 +17,21 @@ func TestAppJSStaleTabGuards(t *testing.T) {
 	}
 	src := string(b)
 	for _, want := range []string{
-		"cashFromEtoro",                 // the Summary cash card source label
-		"eToro cash",                    // its text
-		"startRefreshPolling",           // the header is re-read every minute
-		"checkNewVersion",               // an out-of-date tab is told to reload
+		"cashFromEtoro",       // the Summary cash card source label
+		"eToro cash",          // its text
+		"startRefreshPolling", // the header is re-read every minute
+		"checkNewVersion",     // an out-of-date tab is told to reload
 		"setInterval(() => {\n    refreshPollTicks++",
-		"last price refresh: ",          // what the header timestamp tracks
-		"eToro cash is live.",           // FT-145: the manual-cash dialog says eToro is live, manual is the fallback
-		"renderCommentarySection",       // FT-146 PR B: the per-holding panel, context only
+		"last price refresh: ", // what the header timestamp tracks
+		"eToro cash is live.",  // FT-145: the manual-cash dialog says eToro is live, manual is the fallback
+		"commentaryChipHTML",   // FT-149 PR B: the chip and drawer on Watchlist / AI Nexus rows
+		"openCommentaryDrawer",
+		"loadCommentaryChips('watchlist')",
+		"loadCommentaryChips('universe')",
+		"renderCommentarySection", // FT-146 PR B: the per-holding panel, context only
 		"What Jordi &amp; Cowen said",
 		"hidden by the grounding gate",
-		"cashManualUsd",                 // and edits the manual entry, not the eToro figure
+		"cashManualUsd", // and edits the manual entry, not the eToro figure
 	} {
 		if !strings.Contains(src, want) {
 			t.Fatalf("app.js lost %q", want)

@@ -762,6 +762,7 @@ function renderDashboard(user) {
   loadActiveTab();
   loadRefreshStatus();
   startRefreshPolling(); // FT-144: a tab left open keeps the header and the version check current
+  bindCommentaryChips(); // FT-149: chips on Watchlist / AI Nexus rows open the commentary drawer
   startMarketPill();
   startRegimePills();
   maybeShowRegimeProposal(); // SC-52 P1
@@ -7268,6 +7269,7 @@ async function renderWatchlist() {
   state.watchlist = res.watchlist || [];
   // Spec 9f D6 — sector flow pill cache for watchlist rows.
   const sectorTagMap = await getSectorTagMap();
+  await loadCommentaryChips('watchlist'); // FT-149
 
   if (state.watchlist.length === 0) {
     $('#content').innerHTML = `
@@ -7337,7 +7339,7 @@ async function renderWatchlist() {
     `;
     return `
       <tr data-wid="${e.id}">
-        <td><strong>${escapeHTML(e.ticker)}</strong>${sectorFlowPill(e.sectorUniverseId, sectorTagMap)}</td>
+        <td><strong>${escapeHTML(e.ticker)}</strong>${sectorFlowPill(e.sectorUniverseId, sectorTagMap)}${commentaryChip(e.ticker)}</td>
         <td>${escapeHTML(e.companyName || '—')}${watchlistGapChips(e)}</td>
         <td><span class="dim">${escapeHTML(e.sector || '—')}</span></td>
         <td class="num">${dash(e.currentPrice, fmtNum2)}</td>
@@ -8091,6 +8093,75 @@ async function submitPromote(entry, isStock) {
 //   6. Dividends — table + Add Dividend button (stocks only)
 //   7. Thesis — link + (Spec 11) notes
 //   8. Audit trail — recent audit entries for this holding
+
+// FT-149 PR B — a chip ("J 3d · C 12d") on Watchlist and AI Nexus rows; a click opens a drawer with the same panel.
+// Context only (D6). Both the chips and the drawer stay hidden until the server enables them (video_links_chips).
+let commentaryChips = {};
+async function loadCommentaryChips(set) {
+  commentaryChips = {};
+  if (state.demo) return;
+  try {
+    const r = await api(`/api/commentary/summary?set=${encodeURIComponent(set)}`);
+    if (r && r.enabled) commentaryChips = r.tickers || {};
+  } catch (_) { /* chips are optional */ }
+}
+
+function commentaryChipHTML(ticker, entry) {
+  if (!entry) return '';
+  const parts = [];
+  if (entry.jordi) parts.push(`J ${entry.jordi.daysAgo}d`);
+  if (entry.cowen) parts.push(`C ${entry.cowen.daysAgo}d`);
+  if (!parts.length) return '';
+  const t = escapeHTML(ticker);
+  return `<button type="button" class="cm-chip" data-cm-ticker="${t}" title="What Jordi &amp; Cowen said about ${t} (context only)">💬 ${parts.join(' · ')}</button>`;
+}
+
+function commentaryChip(ticker) {
+  return commentaryChipHTML(ticker, commentaryChips[String(ticker || '').toUpperCase()]);
+}
+
+let commentaryChipsBound = false;
+function bindCommentaryChips() {
+  if (commentaryChipsBound) return;
+  commentaryChipsBound = true;
+  document.addEventListener('click', (ev) => {
+    const b = ev.target && ev.target.closest ? ev.target.closest('.cm-chip') : null;
+    if (!b) return;
+    ev.preventDefault();
+    openCommentaryDrawer(b.dataset.cmTicker);
+  });
+}
+
+async function openCommentaryDrawer(ticker) {
+  closeImportModal();
+  const root = document.createElement('div');
+  root.id = 'modal-root';
+  root.innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal cm-drawer" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div><div class="title">What Jordi &amp; Cowen said · ${escapeHTML(ticker)}</div></div>
+          <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body" id="cm-drawer-body"><p class="dim">loading…</p></div>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  $('#modal-close').addEventListener('click', closeImportModal);
+  $('#modal-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'modal-overlay') closeImportModal(); });
+  const body = $('#cm-drawer-body');
+  const load = async (days, limit) => {
+    try {
+      const res = await api(`/api/commentary?ticker=${encodeURIComponent(ticker)}&days=${days}&limit=${limit}`);
+      body.innerHTML = renderCommentarySection(res) || '<p class="dim">Commentary is not enabled.</p>';
+      const more = $('#dh-commentary-more');
+      if (more) more.addEventListener('click', () => { more.disabled = true; load(730, 50); });
+    } catch (e) {
+      body.innerHTML = `<p class="loss">failed: ${escapeHTML(e.message)}</p>`;
+    }
+  };
+  await load(90, 10);
+}
 
 // FT-146 PR B — "What Jordi & Cowen said". Context only (D6): reading material, never a score or a signal.
 function renderCommentarySection(res) {
@@ -13724,7 +13795,7 @@ function nexusEntryTable(rows, entry, demo) {
   const cols = [['ticker', 'Ticker', ''], ['theme', 'Theme', ''], ['trendScore', 'Trend', NX_TIP.trend], ['setupLabel', 'Setup', NX_TIP.setup], ['exhScore', 'Exh', NX_TIP.exh], ['band', 'Band', NX_TIP.band], ['themeRank', 'Rank', 'Order among names that cleared both gates, cheapest-by-theme first (1 = best Fwd PEG in-theme). A rank is not a buy.'], ['fwdPeg', 'Fwd PEG', NX_TIP.peg], ['change5d', '5D %', 'Price change over the last 5 trading days. Negative = recent dip.'], ['change20d', '20D %', 'Price change over the last 20 trading days — the medium-term move behind the dip.'], ['priceVsMa50', 'vs MA50', 'How far price sits above (+) or below (−) its 50-day average. Context only — no weight in ranking.']];
   if (!demo) cols.push(['_thesisSort', 'Thesis', NX_TIP.thesis]);
   return banner + nexusTable('entry', cols, rows, (r) => `
-    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
+    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}${commentaryChip(r.ticker)}</td>
     <td class="nx-theme-cell">${escapeHTML(r.theme || '—')}</td>
     <td class="num"><span class="nx-score">${r.trendScore == null ? '—' : r.trendScore}</span></td>
     <td><span class="nx-setup ${nxSetupClass(r.setupLabel)}" title="${escapeHTML(NX_SETUP_TIP[r.setupLabel] || '')}">${escapeHTML(r.setupLabel || '—')}</span></td>
@@ -13741,7 +13812,7 @@ function nexusEntryTable(rows, entry, demo) {
 function nexusTechTable(rows) {
   const cols = [['ticker', 'Ticker', ''], ['trendScore', 'Score', NX_TIP.trend], ['setupLabel', 'Setup', NX_TIP.setup], ['ret1w', '1W', NX_TIP.ret], ['ret1m', '1M', NX_TIP.ret], ['ret3m', '3M', NX_TIP.ret], ['rsi14', 'RSI', NX_TIP.rsi], ['vs20d', 'vs20D', NX_TIP.vs], ['vs50d', 'vs50D', NX_TIP.vs], ['vs200d', 'vs200D', NX_TIP.vs], ['slope50d', '50D Slp', NX_TIP.slope], ['slope200d', '200D Slp', NX_TIP.slope], ['rsSpy', 'RS·SPY', NX_TIP.rsSpy], ['rsRank', 'RS#', NX_TIP.rsRank], ['volRatio', 'Vol×', NX_TIP.volT], ['atrPct', 'ATR%', NX_TIP.atrT], ['dist52wHi', '52W Hi', NX_TIP.dist52], ['price', 'Price', ''], ['_thesisSort', 'Thesis', NX_TIP.thesis]].filter((c) => !(state.demo && c[0] === '_thesisSort'));
   return nexusTable('technical', cols, rows, (r) => `
-    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
+    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}${commentaryChip(r.ticker)}</td>
     <td class="num"><span class="nx-score">${nxNum(r.trendScore, 0)}</span></td>
     <td><span class="nx-setup ${nxSetupClass(r.setupLabel)}" title="${escapeHTML(NX_SETUP_TIP[r.setupLabel] || '')}">${escapeHTML(r.setupLabel || '—')}</span></td>
     <td class="num ${nxCls(r.ret1w)}">${nxPct(r.ret1w)}</td>
@@ -13765,7 +13836,7 @@ function nexusTechTable(rows) {
 function nexusExhTable(rows) {
   const cols = [['ticker', 'Ticker', ''], ['exhScore', 'Exh', NX_TIP.exh], ['band', 'Band', NX_TIP.band], ['rsi14', 'RSI14', NX_TIP.rsiE], ['rsi5', 'RSI5', NX_TIP.rsiE], ['williamsR', 'W%R', NX_TIP.wr], ['pos20d', '20D Pos', NX_TIP.pos], ['ext20dAtr', '20D Ext', NX_TIP.ext], ['ext50dAtr', '50D Ext', NX_TIP.ext], ['retVol1m', 'Ret/Vol', NX_TIP.retVol], ['imp5dAtr', '5D Imp', NX_TIP.imp], ['volRatio', 'Vol×', NX_TIP.volE], ['atrExpansion', 'ATR Exp', NX_TIP.atrExp], ['tdSetup', 'TD-S', NX_TIP.td], ['tdCountdown', 'TD-C', NX_TIP.td], ['tdScore', 'TD', NX_TIP.td], ['dataWtPct', 'Wt%', NX_TIP.dataWt], ['_thesisSort', 'Thesis', NX_TIP.thesis]].filter((c) => !(state.demo && c[0] === '_thesisSort'));
   return nexusTable('exhaustion', cols, rows, (r) => `
-    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
+    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}${commentaryChip(r.ticker)}</td>
     <td class="num"><span class="nx-score">${nxNum(r.exhScore, 0)}</span></td>
     <td><span class="nx-band ${nxBandClass(r.band)}">${escapeHTML(r.band || '—')}</span></td>
     <td class="num">${nxNum(r.rsi14, 0)}</td>
@@ -13792,7 +13863,7 @@ function nexusFundTable(rows) {
     const pegCell = r.fwdPeg == null ? '—' : nxNum(r.fwdPeg, 2) + (unstable ? ` <span class="nx-warn" title="${escapeHTML(NX_TIP.unstable)}">⚠</span>` : '');
     return `
     <td class="nx-theme-cell">${escapeHTML(r.theme || '—')}</td>
-    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}</td>
+    <td class="nx-tk">${escapeHTML(r.ticker)}${nexusBadge(r._m)}${commentaryChip(r.ticker)}</td>
     <td class="num">${r.marketCap == null ? '—' : '$' + fmtCompact(r.marketCap)}</td>
     <td class="num">${nxNum(r.fwdPe, 1)}</td>
     <td class="num">${r.nextFyEpsGrowth == null ? '—' : (r.nextFyEpsGrowth * 100).toFixed(0) + '%'}</td>
@@ -13858,6 +13929,8 @@ async function renderNexus() {
     state.nexusData = { universe: uni.universe || [], owned, watch: watchset, thesis, demo: false };
     }
   }
+
+  await loadCommentaryChips('universe'); // FT-149
 
   const view = state.nexusView;
   // Header always needs technical (for benchmarks + trend theme avg) + exhaustion.
