@@ -65,3 +65,27 @@ test('links: YouTube with and without a second, 22v page, and no link at all', (
   const dead = render(payload([{ ...base, link: '', linkKind: 'none' }]));
   assert.doesNotMatch(dead, /<a href/);
 });
+
+// FT-149: the chip on Watchlist and AI Nexus rows.
+const ca = src.indexOf('function commentaryChipHTML(ticker, entry) {');
+const cb = src.indexOf('function commentaryChip(ticker) {');
+assert.ok(ca > 0 && cb > ca, 'commentaryChipHTML not found in web/app.js');
+const chip = new Function('escapeHTML', `${src.slice(ca, cb)}; return commentaryChipHTML;`)(escapeHTML);
+
+test('chip: both commentators, one, or none', () => {
+  const both = chip('NVDA', { jordi: { daysAgo: 3 }, cowen: { daysAgo: 12 } });
+  assert.match(both, /💬 J 3d · C 12d/);
+  assert.match(both, /data-cm-ticker="NVDA"/);
+  assert.match(both, /class="cm-chip"/);
+  assert.match(chip('MU', { jordi: { daysAgo: 0 } }), /💬 J 0d</);
+  assert.doesNotMatch(chip('MU', { jordi: { daysAgo: 0 } }), /C \d/);
+  assert.match(chip('MU', { cowen: { daysAgo: 40 } }), /💬 C 40d</);
+  assert.strictEqual(chip('MU', undefined), '');
+  assert.strictEqual(chip('MU', {}), '');
+});
+
+test('chip: the ticker is escaped', () => {
+  const h = chip('A"><b>', { jordi: { daysAgo: 1 } });
+  assert.doesNotMatch(h, /<b>/);
+  assert.match(h, /&quot;/);
+});

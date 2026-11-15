@@ -5547,6 +5547,10 @@ a.score-badge { display: inline-block; }
 .nx-th.sorted { color: rgb(var(--color-accent)); }
 .nx-tk { font-weight: 600; }
 .nx-badge { margin-left: 0.25rem; }
+/* FT-149 — commentary chip on Watchlist / AI Nexus rows and its drawer */
+.cm-chip { margin-left: 0.4rem; padding: 0 0.45rem; font-size: 0.7rem; line-height: 1.3; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; opacity: 0.75; white-space: nowrap; }
+.cm-chip:hover { opacity: 1; }
+.cm-drawer { max-width: 58rem; width: 92vw; }
 .nx-score { font-weight: 700; }
 .nx-setup, .nx-band, .nx-status { padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.74rem; }
 .nx-buy { background: rgb(46 160 67 / 0.18); color: rgb(126 231 135); }
