@@ -17,8 +17,8 @@ import (
 	"ft/internal/etorosync"
 	"ft/internal/llm"
 	"ft/internal/macroregime"
-	"ft/internal/oauth"
 	"ft/internal/nexus"
+	"ft/internal/oauth"
 	"ft/internal/refresh"
 	"ft/internal/scorecards"
 	"ft/internal/signals"
@@ -37,9 +37,9 @@ import (
 const sessionCookieName = "ft_session"
 
 type Server struct {
-	oauth            *oauth.Service                   // SC-41b OAuth server for the claude.ai connector (nil when FT_BASE_URL is unset)
-	loginFail        *oauth.Limiter                   // failed logins per client IP
-	loginAll         *oauth.Limiter                   // failed logins overall
+	oauth            *oauth.Service // SC-41b OAuth server for the claude.ai connector (nil when FT_BASE_URL is unset)
+	loginFail        *oauth.Limiter // failed logins per client IP
+	loginAll         *oauth.Limiter // failed logins overall
 	cfg              *config.Config
 	store            *store.Store
 	refresh          *refresh.Service
@@ -96,9 +96,9 @@ func New(cfg *config.Config, st *store.Store, llmSvc *llm.Service) *Server {
 		return out, nil
 	}
 	s.videoDigest = videodigest.New(st.DB, llmSvc, os.Getenv("FT_VIDEO_DIGEST_ROOT")) // SC-43 P1
-	s.videoDigest.ReadChartFrames = true // SC-54: chart frames of public videos
-	s.videoDigest.ExtractV5Items = true // SC-53: v5 items after each ingest
-	s.videoDigest.VoteRuns = 3                                                       // SC-52: newest Jordi digest = majority of 3 extractions
+	s.videoDigest.ReadChartFrames = true                                              // SC-54: chart frames of public videos
+	s.videoDigest.ExtractV5Items = true                                               // SC-53: v5 items after each ingest
+	s.videoDigest.VoteRuns = 3                                                        // SC-52: newest Jordi digest = majority of 3 extractions
 	s.etoroSync = etorosync.New(st, os.Getenv("FT_ETORO_API_BASE"),
 		os.Getenv("FT_ETORO_API_KEY"), os.Getenv("FT_ETORO_USER_KEY")) // SC-42
 	s.initOAuth()
@@ -180,10 +180,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/regime/jordi", s.requireUser(s.handleSetJordiRegime))
 	s.mux.HandleFunc("POST /api/regime/cowen/manual", s.requireUser(s.handleSetCowenManual))
 	s.mux.HandleFunc("POST /api/regime/cowen/auto", s.requireUser(s.handleSetCowenAuto))
-	s.mux.HandleFunc("GET /api/regime/proposal", s.requireUser(s.handleRegimeProposal))                       // SC-52 P1
-	s.mux.HandleFunc("POST /api/regime/proposal/approve", s.requireUser(s.handleRegimeProposalApprove))     // SC-52 P1
-	s.mux.HandleFunc("POST /api/regime/proposal/set", s.requireUser(s.handleRegimeProposalSet))             // SC-52 P1
-	s.mux.HandleFunc("POST /api/regime/proposal/dismiss", s.requireUser(s.handleRegimeProposalDismiss))     // SC-52 P1
+	s.mux.HandleFunc("GET /api/regime/proposal", s.requireUser(s.handleRegimeProposal))                 // SC-52 P1
+	s.mux.HandleFunc("POST /api/regime/proposal/approve", s.requireUser(s.handleRegimeProposalApprove)) // SC-52 P1
+	s.mux.HandleFunc("POST /api/regime/proposal/set", s.requireUser(s.handleRegimeProposalSet))         // SC-52 P1
+	s.mux.HandleFunc("POST /api/regime/proposal/dismiss", s.requireUser(s.handleRegimeProposalDismiss)) // SC-52 P1
 	s.mux.HandleFunc("GET /api/regime/history", s.requireUser(s.handleListRegimeHistory))
 
 	// Spec 9p — Macro Regime & Sector Rotation.
@@ -230,10 +230,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/etoro/import/preview", s.requireUser(s.handleEtoroImportPreview))
 	s.mux.HandleFunc("POST /api/etoro/import/apply", s.requireUser(s.handleEtoroImportApply))
 	s.mux.HandleFunc("GET /api/etoro/performance", s.requireUser(s.handleEtoroPerformance))
-	s.mux.HandleFunc("GET /api/etoro/trade-stats", s.requireUser(s.handleEtoroTradeStats)) // SC-51
-	s.mux.HandleFunc("GET /api/etoro/capital-flows", s.requireUser(s.handleEtoroCapitalFlows))                // SC-52 P4
-	s.mux.HandleFunc("POST /api/etoro/capital-flows", s.requireUser(s.handleEtoroCapitalFlowAdd))             // SC-52 P4 manual fallback
-	s.mux.HandleFunc("DELETE /api/etoro/capital-flows/{id}", s.requireUser(s.handleEtoroCapitalFlowDelete)) // SC-52 P4
+	s.mux.HandleFunc("GET /api/etoro/trade-stats", s.requireUser(s.handleEtoroTradeStats))                                   // SC-51
+	s.mux.HandleFunc("GET /api/etoro/capital-flows", s.requireUser(s.handleEtoroCapitalFlows))                               // SC-52 P4
+	s.mux.HandleFunc("POST /api/etoro/capital-flows", s.requireUser(s.handleEtoroCapitalFlowAdd))                            // SC-52 P4 manual fallback
+	s.mux.HandleFunc("DELETE /api/etoro/capital-flows/{id}", s.requireUser(s.handleEtoroCapitalFlowDelete))                  // SC-52 P4
 	s.mux.HandleFunc("GET /api/etoro/sync", s.requireUser(s.handleEtoroSyncStatus))                                          // SC-42
 	s.mux.HandleFunc("POST /api/etoro/sync", s.requireUser(s.handleEtoroSyncRun))                                            // SC-42
 	s.mux.HandleFunc("GET /api/etoro/reconcile/proposals", s.requireUser(s.handleEtoroProposals))                            // SC-44
@@ -284,6 +284,8 @@ func (s *Server) routes() {
 	// Spec 14: Per-holding theses.
 	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis", s.requireUser(s.handleGetHoldingThesis))
 	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/commentary", s.requireUser(s.handleHoldingCommentary)) // FT-146 PR B
+	s.mux.HandleFunc("GET /api/commentary", s.requireUser(s.handleCommentaryByTicker))                     // FT-149: the drawer
+	s.mux.HandleFunc("GET /api/commentary/summary", s.requireUser(s.handleCommentarySummary))              // FT-149: the chips
 	s.mux.HandleFunc("PUT /api/holdings/{kind}/{id}/thesis", s.requireUser(s.handlePutHoldingThesis))
 	s.mux.HandleFunc("GET /api/holdings/{kind}/{id}/thesis/versions", s.requireUser(s.handleHoldingThesisVersions))
 	s.mux.HandleFunc("PUT /api/holdings/{kind}/{id}/thesis/status", s.requireUser(s.handleHoldingThesisStatus))
@@ -348,11 +350,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/registry", s.requireUser(s.handleRegistry))                           // SC-28 Registry / Document-Control
 	s.mux.HandleFunc("GET /api/nexus/entry-candidates", s.requireUser(s.handleNexusEntryCandidates)) // SC-39
 	s.mux.HandleFunc("GET /api/calibration/theses", s.requireUser(s.handleCalibrationTheses))        // SC-38
-	s.mux.HandleFunc("GET /api/transcripts/search", s.requireUser(s.handleTranscriptSearch)) // SC-52 P2
+	s.mux.HandleFunc("GET /api/transcripts/search", s.requireUser(s.handleTranscriptSearch))         // SC-52 P2
 	s.mux.HandleFunc("GET /api/video-digest", s.requireUser(s.handleVideoDigestList))                // SC-43 P1
 	s.mux.HandleFunc("POST /api/video-digest/ingest", s.requireUser(s.handleVideoDigestIngest))      // SC-43 P1
-	s.mux.HandleFunc("GET /api/video-digest/{id}/frames", s.requireUser(s.handleVideoDigestFrames))   // SC-54 frame reads
-	s.mux.HandleFunc("GET /api/video-frame/{id}", s.requireUser(s.handleVideoDigestFrameImage)) // SC-54 thumbnail
+	s.mux.HandleFunc("GET /api/video-digest/{id}/frames", s.requireUser(s.handleVideoDigestFrames))  // SC-54 frame reads
+	s.mux.HandleFunc("GET /api/video-frame/{id}", s.requireUser(s.handleVideoDigestFrameImage))      // SC-54 thumbnail
 	s.mux.HandleFunc("GET /api/video-digest/{id}/items", s.requireUser(s.handleVideoDigestItems))    // SC-53 v5 items
 	s.mux.HandleFunc("GET /api/scorecards/{code}", s.requireUserOrToken(s.handleScorecardGet))
 	s.mux.HandleFunc("PUT /api/scorecards/{code}", s.requireUser(s.handleScorecardUpdate))

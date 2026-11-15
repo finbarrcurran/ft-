@@ -102,6 +102,9 @@ func validPreferenceValue(key, value string) bool {
 	case "alerts_snooze_until":
 		// Backlog polish — unix-seconds timestamp as a string. "0" clears.
 		return len(value) > 0 && len(value) <= 16
+	case "video_links_chips":
+		// FT-149: the Watchlist / AI Nexus chips and drawer. Off until Fin says go (after the watchlist/universe audit).
+		return value == "on" || value == "off"
 	case "video_links_panel":
 		// FT-146: the per-holding "What Jordi & Cowen said" panel. Off until the link audit reaches 98% precision.
 		return value == "on" || value == "off"
