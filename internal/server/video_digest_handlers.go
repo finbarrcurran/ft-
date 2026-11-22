@@ -129,10 +129,12 @@ func (s *Server) RunVideoDigestSweep(ctx context.Context) {
 
 // GET /api/transcripts/search?q=&source=&from=&to=&limit= — SC-52 P2. Full-text search over the
 // stored transcripts (FTS5): a word, several words (all must occur) or a "quoted phrase".
-// Read-only, no LLM. The corpus is public video content, so demo mode does not change it.
+// Read-only, no LLM. YouTube transcripts are public; the 22v-* rows are private subscriber material,
+// so with demo mode on they are left out of both the hits and the corpus counts (FT-157).
 func (s *Server) handleTranscriptSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	opt := videodigest.SearchOptions{Source: q.Get("source"), From: q.Get("from"), To: q.Get("to")}
+	demo := s.demoModeOn(r.Context())
+	opt := videodigest.SearchOptions{Source: q.Get("source"), From: q.Get("from"), To: q.Get("to"), ExcludePrivate: demo}
 	switch opt.Source {
 	case "", "all":
 		opt.Source = ""
@@ -169,7 +171,7 @@ func (s *Server) handleTranscriptSearch(w http.ResponseWriter, r *http.Request) 
 	if hits == nil {
 		hits = []videodigest.TranscriptHit{}
 	}
-	stats, _ := s.videoDigest.TranscriptStats(r.Context())
+	stats, _ := s.videoDigest.TranscriptStatsFor(r.Context(), demo)
 	writeJSON(w, http.StatusOK, map[string]any{"query": q.Get("q"), "hits": hits, "corpus": stats})
 }
 
