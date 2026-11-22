@@ -45,7 +45,7 @@ sources:
     channel_id: UCRvqjQPSeaWn-uEx-w0XOIg      # @benjaminjcowen / Into the Cryptoverse
     display_handle: "@benjaminjcowen"
     cadence: weekly_multi
-    max_videos_per_week: 5
+    max_videos_per_week: 10
     select: flag_flagship
     flagship:
       weekday: sunday

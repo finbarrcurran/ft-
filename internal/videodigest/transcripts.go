@@ -123,6 +123,8 @@ type SearchOptions struct {
 	From   string // published >= (YYYY-MM-DD)
 	To     string // published <= (YYYY-MM-DD)
 	Limit  int
+	// ExcludePrivate drops the 22v-* subscriber transcripts (FT-157: demo mode).
+	ExcludePrivate bool
 }
 
 var markerRe = regexp.MustCompile(`\[(\d+)s\]`)
@@ -178,6 +180,9 @@ func (s *Service) SearchTranscripts(ctx context.Context, q string, o SearchOptio
 	if o.To != "" {
 		where += " AND t.published_at <= ?"
 		args = append(args, o.To)
+	}
+	if o.ExcludePrivate {
+		where += " AND t.video_id NOT LIKE '22v-%'"
 	}
 	args = append(args, o.Limit)
 	rows, err := s.DB.QueryContext(ctx, `
@@ -248,8 +253,17 @@ type TranscriptCounts struct {
 }
 
 func (s *Service) TranscriptStats(ctx context.Context) (TranscriptCounts, error) {
+	return s.TranscriptStatsFor(ctx, false)
+}
+
+// TranscriptStatsFor is TranscriptStats, optionally leaving out the private 22v-* rows (FT-157).
+func (s *Service) TranscriptStatsFor(ctx context.Context, excludePrivate bool) (TranscriptCounts, error) {
 	out := TranscriptCounts{BySource: map[string]int{}}
-	rows, err := s.DB.QueryContext(ctx, `SELECT source, COUNT(*), COALESCE(SUM(LENGTH(text)),0), COALESCE(MIN(published_at),''), COALESCE(MAX(published_at),'') FROM video_transcripts GROUP BY source`)
+	where := ""
+	if excludePrivate {
+		where = " WHERE video_id NOT LIKE '22v-%'"
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT source, COUNT(*), COALESCE(SUM(LENGTH(text)),0), COALESCE(MIN(published_at),''), COALESCE(MAX(published_at),'') FROM video_transcripts`+where+` GROUP BY source`)
 	if err != nil {
 		return out, err
 	}
