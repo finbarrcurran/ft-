@@ -109,9 +109,8 @@ type mcpPerformanceArgs struct {
 
 // --- Tool registration -------------------------------------------------
 
-// mountMCP registers the SC-41 read-only MCP server and mounts it at /mcp,
-// gated by requireReadToken. Called once from routes().
-func (s *Server) mountMCP() {
+// newMCPServer builds the SC-41 read-only MCP server with all of its tools.
+func (s *Server) newMCPServer() *mcp.Server {
 	impl := &mcp.Implementation{Name: "ft", Version: "1.0.0"}
 	srv := mcp.NewServer(impl, nil)
 
@@ -254,6 +253,14 @@ func (s *Server) mountMCP() {
 		return mcpResult(data)
 	})
 
+	s.registerBrainTools(srv) // 22v brain, loopback; hidden in demo mode
+
+	return srv
+}
+
+// mountMCP mounts the MCP server at /mcp, gated by requireReadToken. Called once from routes().
+func (s *Server) mountMCP() {
+	srv := s.newMCPServer()
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, &mcp.StreamableHTTPOptions{
 		// FT binds 127.0.0.1 only and is reached exclusively via the
 		// Cloudflare Tunnel, which connects from a localhost address but
