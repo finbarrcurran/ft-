@@ -1,7 +1,7 @@
 # ops/video_digest — Jarvis-side video package builder (SC-43 P0, SC-52 P3)
 
 `video_digest.py`, `sources.yaml`, `run_weekly.sh` are what runs on Jarvis as `curran` from
-`~curran/scripts/video_digest/` (the weekly `video-digest.timer`). This directory is the version-controlled
+`~curran/scripts/video_digest/` (the daily 05:25 Dublin `video-digest.timer`; Cowen cap 10 videos per ISO week). This directory is the version-controlled
 copy; **installing a change is a manual copy** (`scp` to `~curran/scripts/video_digest/`), nothing deploys it.
 
 SC-52 P3 added a range backfill (captions only, no frames):

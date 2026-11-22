@@ -1,6 +1,6 @@
 #!/bin/bash
 # SC-43 weekly wrapper. Installed 2026-09-26 as video-digest.timer (AC1–12 passed; P1 handover §0).
-# Schedule: Sun 20:00 + Mon 08:00 Europe/Dublin (idempotent). Logs: /var/lib/video_digest/logs/.
+# Schedule: daily 05:25 Europe/Dublin since 2026-11-22 (idempotent; was Sun 20:00 + Mon 08:00). Logs: /var/lib/video_digest/logs/.
 set -euo pipefail
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 

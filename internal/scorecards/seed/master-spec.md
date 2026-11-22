@@ -6,13 +6,13 @@
 >
 > **Editing.** Click `Edit` to update inline. `Save` for a tweak; `Save as new version` for a substantive change (records the changelog).
 >
-> **Current version: v1.143.0 · 2026-11-15** — latest change: Commentary chips and drawer (§13).
+> **Current version: v1.144.0 · 2026-11-22** — latest change: 22v brain tools, 22v hidden in demo mode, daily digest (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.143.0 2026-11-15 -->
+<!-- reference_reviewed: v1.144.0 2026-11-22 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** — tab list from `web/app.js`, migrations from `internal/store/migrations/` and the live `schema_migrations` table (48 applied), jobs from `cmd/ft/main.go` and Jarvis's timers/cron, endpoints from the route table in `internal/server/server.go`, environment names from the code and `/etc/ft/env`. Items marked *(carried over)* were not re-verified in that pass. §13 below lists the ten newest changes; older history is in the archive. **These sections are the current state.**
 
@@ -176,7 +176,7 @@ Top bar: brand · market pill (all 7 exchanges, click-to-focus) · regime pills 
 | `ft-bridge-spec.timer` | every 10 min | SC-45: exports the working spec (live DB row) and the archive (`docs/spec-archive/`) to Google Drive (`FT-Bridge/spec`, `FT-Bridge/spec/archive`) when either changes. Source and installer in `ops/bridge/` (`sudo ops/bridge/install.sh`) |
 | `ft-bridge-snapshot.timer` | every 10 min | SC-46: pushes `/var/lib/ft/data/bridge/snapshot/ft-snapshot.md` to `FT-Bridge/reports/ft-snapshot.md` (same Drive file, replaced in place through `ft_bridge_push.sh`) only when it changed and only if it ends with its `<!-- END ft-snapshot vN -->` marker; touches `snapshot.ok` (monitor `drive_snapshot`, 2 h) |
 | `ft-bridge-library.timer` | every 10 min | SC-47: mirrors the research library to Google Drive `FT-Bridge/library/` (one-way, Claude reads only): `specs/` (repo `ft_specs/`), `handovers/`, `theses/<adapter>/` (per-ticker locked stock theses, added v1.79.1), `scoring/` (stock + crypto logs, methodology registry, and the GENERATED `scoring_log_live` / `crypto_scoring_log_live` tallies built from `theses_index` / `crypto_theses`), `crypto/` (log, `adapters/`, `theses/`) and `FT-library-INDEX` (per-file last-updated + source commit + repo HEAD). Uploads only documents whose content changed (so a thesis lock/upload or a DB change shows within 10 min); `flock` prevents overlap. Source `ops/bridge/ft-bridge-library`; both bridge exporters touch `/var/lib/ft/data/bridge/{spec,library}.ok` on success, which the connectivity monitor watches (stale > 2 h → Telegram) |
-| `video-digest.timer` | Sun 20:00 + Mon 08:00 Europe/Dublin | SC-43 P0: fetches new Jordi/Cowen videos into `/var/lib/video_digest` |
+| `video-digest.timer` | daily 05:25 Europe/Dublin | SC-43 P0: fetches new Jordi/Cowen videos into `/var/lib/video_digest` |
 | `ft-backup.timer`, `ft-restore-verify.timer` | systemd timers | SC-37 backup / DR and restore verification. SC-55: the restore check compares the restored `theses_index` counts (locked, superseded, archived) with the live DB, tolerance max(3, 5% of live rows) each, instead of a fixed floor |
 | DB backup (cron, user `ft`) | 03:15 daily | `/opt/ft/bin/backup-db.sh` |
 | Jarvis config backup (cron) | Sun 03:30 | `/opt/ft/bin/backup-jarvis-config.sh` |
@@ -268,7 +268,7 @@ ft video-digest-preview --video-id ID [--prior with|without|both]` runs an extra
 
 **Bot:** `GET /api/bot/{alerts,holdings/summary,holdings/movers,refresh-status}` **T**, `POST /api/bot/{alerts/ack,refresh}` **T**
 
-**MCP connector (SC-41):** `/mcp` — JSON-RPC, bearer token whose scope contains `read` (minted with `ft token create-mcp`). Six read-only tools: `get_theses`, `get_scorecards`, `get_gap_report`, `get_alerts`, `get_performance`, `get_watchlist`. Each returns what the matching dashboard endpoint returns (same demo-mode gating) inside an envelope with `queriedAt`. No write tool exists.
+**MCP connector (SC-41):** `/mcp` — JSON-RPC, bearer token whose scope contains `read` (minted with `ft token create-mcp`). Ten read-only tools: the six above, `search_transcripts` and (SC-91) `brain_search`, `brain_sheet`, `brain_read`, `brain_stats`. The first seven return what the dashboard endpoint returns (same demo gating) in an envelope with `queriedAt`; the brain tools call the private 22v connector on loopback and are hidden and refused in demo mode. No write tool exists.
 
 **OAuth for the claude.ai connector (SC-41b, v1.79.0):** `/mcp` also accepts an OAuth access token (`ft_oat_…`, 1 h, scope `read`, bound to `https://ft.curranhouse.dev/mcp`) issued by FT's own single-user OAuth 2.1 server, because the claude.ai connector dialog has no field for a static bearer. Routes (no cookie; each authenticates itself): `GET /.well-known/oauth-protected-resource[/…]` (RFC 9728), `GET /.well-known/oauth-authorization-server` (RFC 8414), `POST /register` (RFC 7591; redirect URIs limited to `https://claude.ai/api/mcp/auth_callback` and loopback; 50-client cap, 10 registrations/h/IP), `GET|POST /authorize` (Fin approves with his FT email + password; PKCE S256 required; single-use code, 60 s), `POST /token` (form-encoded; 1 h access tokens, rotating 30-day refresh tokens; a re-presented spent refresh token revokes its family and alerts). An unauthenticated `/mcp` call now answers 401 with `WWW-Authenticate: Bearer resource_metadata=…, scope="read"`; unknown `/.well-known/*` paths return JSON 404 (they used to return the SPA page). **Login hardening (same release):** `POST /api/auth/login` and `/authorize` share a limiter — 5 failed attempts per client IP per 15 min and 30 overall per hour, then 429 with `Retry-After`, never a permanent lock; failures are logged and the first lockout sends a Telegram alert. The static `ft_mcp_` tokens keep working. Kill switches: `ft oauth revoke-all`, `ft oauth revoke-client`, `ft token revoke`; Diagnostics shows client and sign-in counts. **Cloudflare:** FT cannot apply the recommended WAF rule itself (no API token); it must be set in the dashboard (restrict `/mcp`, `/token`, `/register`, `/.well-known/*` to `160.79.104.0/21`, and rate-limit `/api/auth/login`).
 
@@ -420,13 +420,19 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, in short form (≤ 800 characters each). The full text of these, and every older change, is in the archive: `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12; this list only records that something changed.
 
+### v1.144.0 · 2026-11-22 · pass 159 · SC-91
+
+**22v brain MCP tools.** Four loopback brain tools, hidden in demo mode (which also hides `22v-*` transcripts from search); digest timer daily, Cowen cap 10. Supersedes v1.143.0.
+
 ### v1.143.0 · 2026-11-15 · pass 158 · SC-90
 
 **Commentary chips and drawer.** A "J 3d · C 12d" chip on Watchlist and AI Nexus rows opens the same panel in a drawer; off until `video_links_chips` = on. Audited: 100% snippet, 100% link, 0 dead. Supersedes v1.142.0.
 
+
 ### v1.142.0 · 2026-11-15 · pass 157 · SC-89
 
 **Commentary API for watchlist/universe.** `/api/commentary` (drawer) and `/api/commentary/summary` (chips), behind `video_links_panel` and the new `video_links_chips` (off). No UI yet. Supersedes v1.141.0.
+
 
 
 ### v1.141.0 · 2026-11-15 · pass 156 · SC-88
@@ -435,9 +441,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.140.0 · 2026-11-14 · pass 155 · SC-87
 
 **Note rows link to the real mention.** Supersedes v1.139.0.
+
 
 
 
@@ -450,9 +458,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.138.0 · 2026-11-14 · pass 153 · SC-85
 
 **Bot shows every alert kind, acks only what it showed.** `ops/ft-bot`. Supersedes v1.137.0.
+
 
 
 
@@ -469,9 +479,11 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
+
 ### v1.136.0 · 2026-11-14 · pass 151 · SC-83
 
 **Seven approved aliases.** Supersedes v1.135.0.
+
 
 
 
@@ -492,21 +504,9 @@ The ten newest changes, newest first, in short form (≤ 800 characters each). T
 
 
 
-### v1.134.0 · 2026-11-14 · pass 149 · SC-81
-
-**"What Jordi & Cowen said" panel.** Per-holding panel, context only. Supersedes v1.133.0.
-
-
-
-
-
-
-
-
-
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.143.0 -->
+<!-- END FT-master-spec v1.144.0 -->
