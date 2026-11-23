@@ -272,4 +272,5 @@ func recordCoinGeckoCall(ctx context.Context, rawURL, apiKey string, err error) 
 		provider = "coingecko_key"
 	}
 	health.Record(ctx, provider, err)
+	health.RecordCoinGecko(ctx, rawURL, apiKey != "", err)
 }

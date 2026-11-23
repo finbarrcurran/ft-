@@ -26,6 +26,23 @@ const (
 // the sequential daily job; it adds one unit each time). Tests shorten it.
 var cgBackoffUnit = 15 * time.Second
 
+// CoinGeckoBase is the CoinGecko API root used by Jordi-46 Part B (internal/visser46). Tests point it at a
+// fake server; the older calls in this file keep their literal URLs.
+var CoinGeckoBase = "https://api.coingecko.com/api/v3"
+
+// CoinGeckoKeyed reports whether the Demo key is configured (a keyed call then counts against 10,000 a month).
+func CoinGeckoKeyed() bool { return coingeckoKey() != "" }
+
+// CoinGeckoGetJSON is the exported keyed/keyless GET for Part B: path is relative to CoinGeckoBase.
+// It goes through cgGetJSON, so provider_daily and the per-endpoint counters see every attempt.
+func CoinGeckoGetJSON(ctx context.Context, path string, q url.Values, keyed bool, retries int, out any) error {
+	u := CoinGeckoBase + path
+	if len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+	return cgGetJSON(ctx, u, keyed, retries, out)
+}
+
 func coingeckoKey() string { return os.Getenv("FT_COINGECKO_API_KEY") }
 
 // cgGetJSON GETs a CoinGecko URL. keyed sends the Demo key when one is configured (the call is then
@@ -46,6 +63,7 @@ func cgGetJSON(ctx context.Context, rawURL string, keyed bool, retries int, out 
 	for attempt := 0; ; attempt++ {
 		err = redactQuery(httpGetJSONHeaders(ctx, rawURL, hdr, out))
 		health.Record(ctx, provider, err)
+		health.RecordCoinGecko(ctx, rawURL, key != "", err)
 		if err == nil || attempt >= retries || !strings.Contains(err.Error(), "http 429") {
 			return err
 		}

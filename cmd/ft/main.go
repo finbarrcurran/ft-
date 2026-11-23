@@ -44,6 +44,7 @@ import (
 	"ft/internal/theses"
 	"ft/internal/videodigest"
 	"ft/internal/videolinks"
+	"ft/internal/visser46"
 	"log/slog"
 	"net/http"
 	"os"
@@ -96,6 +97,10 @@ func main() {
 		runSeed(os.Args[2:])
 	case "daily":
 		runDaily(os.Args[2:])
+	case "visser46-backfill":
+		runVisser46Backfill(os.Args[2:])
+	case "visser46-report":
+		runVisser46Report(os.Args[2:])
 	case "token":
 		runToken(os.Args[2:])
 	case "backfill-bars":
@@ -345,6 +350,8 @@ USAGE
   ft video-items-regate [--apply] [--list]     SC-69: re-run the grounding gate over stored v5 items (no LLM); dry run unless --apply
   ft video-digest-stored 22v-N [22v-N ...]     SC-68: digest 22v transcripts held only in the store (context only; is_flagship=0)
   ft video-digest-reground                     re-ground video-digest quotes against transcripts (SC-43)
+  ft visser46-backfill [--dry-run]            Jordi-46 Part B: one-off year of daily closes for the 46-name index (keyed CoinGecko + Yahoo); --dry-run makes no call; needs coingecko_partb_enabled=on
+  ft visser46-report                           Jordi-46 Part B: CoinGecko calls this month per endpoint and feature, keyed total, projection
   ft token revoke --id N [--user-id N]         revoke a service token
   ft oauth status | revoke-all | revoke-client --id ID | create-client --name N --redirect URI [--secret]
                                                manage the claude.ai connector's OAuth sign-ins (SC-41b)
@@ -401,6 +408,7 @@ func runServe() {
 	// internal/market and internal/news can call health.Record without
 	// importing internal/store.
 	health.Init(st)
+	health.InitEndpoint(st) // Jordi-46 Part B: per-endpoint CoinGecko call counters
 
 	// Spec 9g D7: seed Philosophy + Energy + Hydrocarbons scorecards on
 	// first run. Idempotent — checks per-code before inserting. Uses a
@@ -515,6 +523,24 @@ func runServe() {
 			ctx, cancel := context.WithTimeout(bgCtx, 15*time.Minute)
 			defer cancel()
 			dailySvc.RunDailyJob(ctx, 1, 365)
+		})
+	}()
+
+	// Jordi-46 Part B: ONE keyed /coins/markets call every 30 minutes for the index tokens, and a daily close from
+	// that snapshot at 00:35 UTC. Both stay dormant (no call) until the preference coingecko_partb_enabled is on;
+	// every call is gated again at the moment it is made.
+	go func() {
+		v46 := visser46.New(st)
+		go v46.RunRefreshLoop(bgCtx)
+		scheduleAt(bgCtx, 0, 35, func() {
+			ctx, cancel := context.WithTimeout(bgCtx, 5*time.Minute)
+			defer cancel()
+			res, err := v46.DailyClose(ctx)
+			if err != nil {
+				slog.Warn("visser46 daily close failed", "err", err)
+				return
+			}
+			slog.Info("visser46 daily close", "date", res.Date, "appended", res.Appended, "missing", res.MissingTokens, "stocks", res.StocksUpdated, "stockErrors", res.StockErrors)
 		})
 	}()
 
@@ -2071,6 +2097,7 @@ func runSnapshot(args []string) {
 	must("holidays", marketdata.LoadHolidays())
 	must("macro", macro.Load())
 	health.Init(st)
+	health.InitEndpoint(st) // Jordi-46 Part B: per-endpoint CoinGecko call counters
 	srv := server.New(cfg, st, llm.NewService(st, os.Getenv("FT_ANTHROPIC_API_KEY")))
 	opt := server.SnapshotOptions{DryRun: *dry, WeekOverride: *week}
 	if !*dry {

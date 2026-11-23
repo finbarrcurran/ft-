@@ -79,6 +79,7 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	// SC-48 — provider usage: today's calls against each limit, plus a 7-day view.
 	out["providerDaily"], _ = s.store.ProviderDaily(r.Context(), 7)
 	out["usage"] = s.providerUsage(r.Context())
+	out["coingecko"] = s.coinGeckoUsage(r.Context()) // Jordi-46 Part B: per-endpoint counters, monthly keyed total, projection
 
 	// API key presence — no values, just bools.
 	keys := []string{
