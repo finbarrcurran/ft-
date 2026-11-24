@@ -204,3 +204,10 @@ func (s *Store) ListPriceHistory(ctx context.Context, ticker, kind string) ([]Pr
 	}
 	return out, rows.Err()
 }
+
+// CoinGeckoFeatureCallsOn returns the CoinGecko calls recorded for a feature on a UTC day ('YYYY-MM-DD'), any key state.
+func (s *Store) CoinGeckoFeatureCallsOn(ctx context.Context, day, feature string) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(calls),0) FROM coingecko_calls WHERE day = ? AND feature = ?`, day, feature).Scan(&n)
+	return n, err
+}

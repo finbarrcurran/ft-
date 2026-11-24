@@ -247,6 +247,10 @@ func isGateErr(err error) bool {
 // RefreshOnce makes ONE keyed /coins/markets call for every token of the index and stores the snapshot.
 // Ids CoinGecko does not return are logged and keep their previous row; nothing is filled in.
 func (s *Service) RefreshOnce(ctx context.Context) (stored int, missing []string, err error) {
+	return s.refreshWith(ctx, s.C.Markets)
+}
+
+func (s *Service) refreshWith(ctx context.Context, fetch func(context.Context, []string) ([]MarketRow, error)) (stored int, missing []string, err error) {
 	tokens, _, err := s.members(ctx)
 	if err != nil {
 		return 0, nil, err
@@ -257,7 +261,7 @@ func (s *Service) RefreshOnce(ctx context.Context) (stored int, missing []string
 		ids = append(ids, *m.CoinGeckoID)
 		idSym[*m.CoinGeckoID] = m.Symbol
 	}
-	rows, err := s.C.Markets(ctx, ids)
+	rows, err := fetch(ctx, ids)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -327,6 +331,7 @@ func (s *Service) RunRefreshLoop(ctx context.Context) {
 type CloseResult struct {
 	Date          string
 	Appended      int
+	ExemptCall    bool     // the one exempt /coins/markets call was made above the soft stop
 	MissingTokens []string // no snapshot from this UTC day: listed, never filled
 	StocksUpdated []string
 	StockErrors   []string
@@ -346,6 +351,18 @@ func (s *Service) DailyClose(ctx context.Context) (*CloseResult, error) {
 	tokens, stocks, err := s.members(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// At or above the soft stop the refresh is stopped, so the snapshot would be stale: the close may make ONE
+	// exempt keyed /coins/markets call a day (kill switch and key still apply). Below the stop: no extra call.
+	if errors.Is(s.Gate.Allow(ctx), ErrSoftStop) {
+		exempt := func(ctx context.Context, ids []string) ([]MarketRow, error) {
+			return s.C.MarketsExempt(ctx, s.Store, ids, now)
+		}
+		if _, _, err := s.refreshWith(ctx, exempt); err != nil {
+			slog.Info("visser46 daily close: exempt refresh not made", "why", err)
+		} else {
+			res.ExemptCall = true
+		}
 	}
 	snaps, err := s.Store.ListIndexSnapshots(ctx)
 	if err != nil {

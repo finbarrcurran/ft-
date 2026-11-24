@@ -326,15 +326,14 @@ func Test429RetryIsGatedAndCounted(t *testing.T) {
 	}
 }
 
-func TestDailyCloseNeedsNoCallAndIgnoresSoftStop(t *testing.T) {
+func TestDailyCloseBelowSoftStopNeedsNoCall(t *testing.T) {
 	svc, f, st := setup(t)
 	turnOn(t, st)
 	ctx := context.Background()
 	if _, _, err := svc.RefreshOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
-	_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "100") // soft stop... still above the 1 call made
-	_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "1")   // now AT the soft stop
+	// below the soft stop (1 keyed call of 7000): the close uses the stored snapshot, no extra call
 	before := f.count()
 	// a clock just after 00:00 UTC next day is not needed: use today with the snapshot fetched now
 	svc.StockBars = func(ctx context.Context, tk, rng string) ([]market.OHLCBar, error) {
@@ -344,8 +343,8 @@ func TestDailyCloseNeedsNoCallAndIgnoresSoftStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.count() != before {
-		t.Fatal("the daily close made a CoinGecko call")
+	if f.count() != before || res.ExemptCall {
+		t.Fatal("below the soft stop the daily close made a CoinGecko call")
 	}
 	if res.Appended != 42 || len(res.MissingTokens) != 0 || len(res.StocksUpdated) != 4 {
 		t.Fatalf("res = %+v", res)
@@ -535,5 +534,77 @@ func TestPartBLeavesProtectedTablesUntouched(t *testing.T) {
 		if before[tb] != after[tb] {
 			t.Errorf("%s changed:\nbefore %q\nafter  %q", tb, before[tb], after[tb])
 		}
+	}
+}
+
+func exemptUsage(t *testing.T, st *store.Store) int {
+	n, err := st.CoinGeckoFeatureCallsOn(context.Background(), time.Now().UTC().Format("2006-01-02"), FeatureDailyCloseExempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// Above the soft stop the refresh is refused, but the daily close makes exactly ONE exempt keyed markets call a day.
+func TestDailyCloseExemptCallAboveSoftStop(t *testing.T) {
+	svc, f, st := setup(t)
+	turnOn(t, st)
+	ctx := context.Background()
+	_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "100")
+	_, _ = st.DB.Exec(`INSERT INTO provider_daily (provider, day, calls, ok) VALUES ('coingecko_key', ?, 150, 150)`, time.Now().UTC().Format("2006-01-02"))
+	if _, _, err := svc.RefreshOnce(ctx); !errors.Is(err, ErrSoftStop) || f.count() != 0 {
+		t.Fatalf("refresh above the stop: %v calls=%d", err, f.count())
+	}
+	res, err := svc.DailyClose(ctx)
+	if err != nil || f.count() != 1 || f.hits["markets"] != 1 || !res.ExemptCall || res.Appended != 42 {
+		t.Fatalf("err=%v calls=%d res=%+v", err, f.count(), res)
+	}
+	if exemptUsage(t, st) != 1 {
+		t.Fatal("the exempt call is not counted under its own feature tag")
+	}
+	now := time.Now().UTC()
+	rows, _ := st.CoinGeckoEndpointUsage(ctx, now.Format("2006-01-02"), now.AddDate(0, 0, 1).Format("2006-01-02"))
+	if len(rows) != 1 || rows[0].Feature != FeatureDailyCloseExempt {
+		t.Fatalf("usage = %+v", rows)
+	}
+	// a second attempt the same day (also after a restart: a fresh Service reads today's counter) makes no call
+	if res, _ = svc.DailyClose(ctx); f.count() != 1 || res.ExemptCall {
+		t.Fatalf("second attempt: calls=%d %+v", f.count(), res)
+	}
+	svc2 := New(st)
+	svc2.StockBars = svc.StockBars
+	if res, _ = svc2.DailyClose(ctx); f.count() != 1 || res.ExemptCall {
+		t.Fatalf("after restart: calls=%d", f.count())
+	}
+}
+
+func TestDailyCloseExemptRefusedBySwitchAndKey(t *testing.T) {
+	for _, c := range []struct{ name, switchV, key string }{{"switch off", "off", "demo-key"}, {"no key", "on", ""}} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, f, st := setup(t)
+			ctx := context.Background()
+			_ = st.SetPreference(ctx, store.PrefPartBEnabled, c.switchV)
+			t.Setenv("FT_COINGECKO_API_KEY", c.key)
+			_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "100")
+			_, _ = st.DB.Exec(`INSERT INTO provider_daily (provider, day, calls, ok) VALUES ('coingecko_key', ?, 150, 150)`, time.Now().UTC().Format("2006-01-02"))
+			res, err := svc.DailyClose(ctx)
+			if err != nil || f.count() != 0 || res.ExemptCall || exemptUsage(t, st) != 0 {
+				t.Fatalf("err=%v calls=%d %+v", err, f.count(), res)
+			}
+		})
+	}
+}
+
+func TestDailyCloseExemptFailedAttemptUsesTheDay(t *testing.T) {
+	svc, f, st := setup(t)
+	turnOn(t, st)
+	ctx := context.Background()
+	_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "100")
+	_, _ = st.DB.Exec(`INSERT INTO provider_daily (provider, day, calls, ok) VALUES ('coingecko_key', ?, 150, 150)`, time.Now().UTC().Format("2006-01-02"))
+	f.hook = func(n int, w http.ResponseWriter, r *http.Request) bool { http.Error(w, "rate", 429); return true }
+	_, _ = svc.DailyClose(ctx)
+	_, _ = svc.DailyClose(ctx)
+	if f.count() != 1 {
+		t.Fatalf("calls = %d, want 1 (no retry, no second attempt)", f.count())
 	}
 }
