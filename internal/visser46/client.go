@@ -25,6 +25,8 @@ type Client struct {
 const (
 	FeatureRefresh  = "partb_refresh"
 	FeatureBackfill = "partb_backfill"
+	// FeatureDailyCloseExempt tags the single call a day the daily close may make above the soft stop.
+	FeatureDailyCloseExempt = "partb_dailyclose_exempt"
 )
 
 // get runs one gated keyed call; a 429 is retried after backoff, the gate being asked again before every attempt.
@@ -69,6 +71,36 @@ func (c *Client) Markets(ctx context.Context, ids []string) ([]MarketRow, error)
 	q.Set("sparkline", "false")
 	var rows []MarketRow
 	if err := c.get(ctx, FeatureRefresh, "/coins/markets", q, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// MarketsExempt is Markets for the daily close above the soft stop: exempt from the soft stop only (kill switch
+// and key still apply), at most ONE call per UTC day (today's counter is read from the store, so a restart does
+// not reset it), no retry (a failed attempt uses the day's call).
+func (c *Client) MarketsExempt(ctx context.Context, st interface {
+	CoinGeckoFeatureCallsOn(ctx context.Context, day, feature string) (int, error)
+}, ids []string, now time.Time) ([]MarketRow, error) {
+	if err := c.Gate.AllowExempt(ctx); err != nil {
+		return nil, err
+	}
+	n, err := st.CoinGeckoFeatureCallsOn(ctx, now.UTC().Format("2006-01-02"), FeatureDailyCloseExempt)
+	if err != nil {
+		return nil, err
+	}
+	if n >= 1 {
+		return nil, ErrExemptUsed
+	}
+	q := url.Values{}
+	q.Set("vs_currency", "usd")
+	q.Set("ids", strings.Join(ids, ","))
+	q.Set("price_change_percentage", "24h,7d,30d")
+	q.Set("per_page", "250")
+	q.Set("sparkline", "false")
+	var rows []MarketRow
+	ctx = health.WithFeature(ctx, FeatureDailyCloseExempt)
+	if err := market.CoinGeckoGetJSON(ctx, "/coins/markets", q, true, 0, &rows); err != nil {
 		return nil, err
 	}
 	return rows, nil

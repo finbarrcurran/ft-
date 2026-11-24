@@ -24,6 +24,7 @@ var (
 	ErrKillSwitchOff = errors.New("visser46: kill switch is off (coingecko_partb_enabled != on)")
 	ErrSoftStop      = errors.New("visser46: monthly keyed soft stop reached")
 	ErrNoKey         = errors.New("visser46: no CoinGecko Demo key configured (Part B calls are keyed only)")
+	ErrExemptUsed    = errors.New("visser46: today's one exempt daily-close call was already made")
 )
 
 // Settings is what Gate reads; *store.Store satisfies it.
@@ -63,6 +64,22 @@ func (g *Gate) Allow(ctx context.Context) error {
 	}
 	if limit := g.S.PartBSoftStop(ctx); n >= limit {
 		return fmt.Errorf("%w (%d of %d)", ErrSoftStop, n, limit)
+	}
+	return nil
+}
+
+// AllowExempt is Allow without the soft stop: the kill switch and the key still apply. Used only by the daily
+// close's single exempt call.
+func (g *Gate) AllowExempt(ctx context.Context) error {
+	if err := g.KillSwitchOnly(ctx); err != nil {
+		return err
+	}
+	has := g.HasKey
+	if has == nil {
+		has = market.CoinGeckoKeyed
+	}
+	if !has() {
+		return ErrNoKey
 	}
 	return nil
 }

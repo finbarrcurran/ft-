@@ -297,3 +297,48 @@ func (s *Store) SetCalendarDates(ctx context.Context, userID int64, ticker, earn
 		ed, xd, time.Now().Unix(), userID, ticker)
 	return err
 }
+
+// InsertPriceHistoryIfAbsent inserts (ticker, kind, date, close) rows and leaves any existing row untouched
+// (ON CONFLICT DO NOTHING). Jordi-46 Part B uses it so the 04:00 job stays the only writer of a closed day's value.
+func (s *Store) InsertPriceHistoryIfAbsent(ctx context.Context, ticker, kind string, points []PricePoint) error {
+	if len(points) == 0 {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO price_history (ticker, kind, date, close) VALUES (?, ?, ?, ?) ON CONFLICT(ticker, kind, date) DO NOTHING`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, p := range points {
+		if p.Close <= 0 {
+			continue
+		}
+		if _, err := stmt.ExecContext(ctx, ticker, kind, p.Date, p.Close); err != nil {
+			return fmt.Errorf("insert %s %s %s: %w", ticker, kind, p.Date, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// HeldStockTickers returns the tickers of every active (not soft-deleted) stock holding.
+func (s *Store) HeldStockTickers(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT DISTINCT ticker FROM stock_holdings WHERE deleted_at IS NULL AND ticker IS NOT NULL AND ticker <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out[strings.ToUpper(t)] = true
+	}
+	return out, rows.Err()
+}

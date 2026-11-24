@@ -189,10 +189,10 @@ func TestBackfillDryRunMakesNoCall(t *testing.T) {
 	if f.count() != 0 {
 		t.Fatalf("dry run made %d calls", f.count())
 	}
-	if rep.PlannedCalls != 41 || len(rep.TokensSkipped) != 1 || rep.TokensSkipped[0] != "BTC" || len(rep.StocksPlanned) != 4 {
+	if rep.PlannedCalls != 36 || len(rep.HeldSkipped) != 6 || len(rep.StocksPlanned) != 4 {
 		t.Fatalf("plan = %+v", rep)
 	}
-	if !strings.Contains(out.String(), "CoinGecko calls it would make: 41") {
+	if !strings.Contains(out.String(), "CoinGecko calls it would make: 36") {
 		t.Fatalf("output:\n%s", out.String())
 	}
 }
@@ -227,7 +227,7 @@ func TestBackfillStoresAndFlagsThin(t *testing.T) {
 	if rep.StoppedBy != nil || len(rep.Failed) != 0 {
 		t.Fatalf("rep = %+v", rep)
 	}
-	if f.hits["market_chart"] != 42 || f.count() != 42 {
+	if f.hits["market_chart"] != 36 || f.count() != 36 {
 		t.Fatalf("calls = %v, want 42 market_chart", f.hits)
 	}
 	n, _, _ := st.CountPriceHistory(ctx, "TAO", "crypto")
@@ -244,7 +244,7 @@ func TestBackfillStoresAndFlagsThin(t *testing.T) {
 	if len(rep.StocksDone) != 4 {
 		t.Fatalf("stocks = %v", rep.StocksDone)
 	}
-	if k, _ := st.CoinGeckoMonthKeyed(ctx, time.Now().UTC()); k != 42 {
+	if k, _ := st.CoinGeckoMonthKeyed(ctx, time.Now().UTC()); k != 36 {
 		t.Fatalf("keyed counter = %d", k)
 	}
 	// run again: everything is backfilled, nothing is called
@@ -326,15 +326,14 @@ func Test429RetryIsGatedAndCounted(t *testing.T) {
 	}
 }
 
-func TestDailyCloseNeedsNoCallAndIgnoresSoftStop(t *testing.T) {
+func TestDailyCloseBelowSoftStopNeedsNoCall(t *testing.T) {
 	svc, f, st := setup(t)
 	turnOn(t, st)
 	ctx := context.Background()
 	if _, _, err := svc.RefreshOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
-	_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "100") // soft stop... still above the 1 call made
-	_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "1")   // now AT the soft stop
+	// below the soft stop (1 keyed call of 7000): the close uses the stored snapshot, no extra call
 	before := f.count()
 	// a clock just after 00:00 UTC next day is not needed: use today with the snapshot fetched now
 	svc.StockBars = func(ctx context.Context, tk, rng string) ([]market.OHLCBar, error) {
@@ -344,10 +343,10 @@ func TestDailyCloseNeedsNoCallAndIgnoresSoftStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.count() != before {
-		t.Fatal("the daily close made a CoinGecko call")
+	if f.count() != before || res.ExemptCall {
+		t.Fatal("below the soft stop the daily close made a CoinGecko call")
 	}
-	if res.Appended != 42 || len(res.MissingTokens) != 0 || len(res.StocksUpdated) != 4 {
+	if res.Appended != 36 || len(res.MissingTokens) != 0 || len(res.StocksUpdated) != 4 {
 		t.Fatalf("res = %+v", res)
 	}
 	pts, _ := st.ListPriceHistory(ctx, "TAO", "crypto")
@@ -357,7 +356,7 @@ func TestDailyCloseNeedsNoCallAndIgnoresSoftStop(t *testing.T) {
 	// a snapshot older than today's 00:00 UTC is listed as missing, never filled
 	svc.Now = func() time.Time { return time.Now().UTC().AddDate(0, 0, 1) }
 	res, _ = svc.DailyClose(ctx)
-	if res.Appended != 0 || len(res.MissingTokens) != 42 {
+	if res.Appended != 0 || len(res.MissingTokens) != 36 {
 		t.Fatalf("stale snapshot: %+v", res)
 	}
 	// kill switch off: tokens still append from a fresh snapshot, stocks (Yahoo) are not fetched
@@ -367,7 +366,7 @@ func TestDailyCloseNeedsNoCallAndIgnoresSoftStop(t *testing.T) {
 		t.Fatal("Yahoo called with the switch off")
 		return nil, nil
 	}
-	if res, _ = svc.DailyClose(ctx); res.Appended != 42 || len(res.StocksUpdated) != 0 {
+	if res, _ = svc.DailyClose(ctx); res.Appended != 36 || len(res.StocksUpdated) != 0 {
 		t.Fatalf("switch off: %+v", res)
 	}
 }
@@ -535,5 +534,146 @@ func TestPartBLeavesProtectedTablesUntouched(t *testing.T) {
 		if before[tb] != after[tb] {
 			t.Errorf("%s changed:\nbefore %q\nafter  %q", tb, before[tb], after[tb])
 		}
+	}
+}
+
+func exemptUsage(t *testing.T, st *store.Store) int {
+	n, err := st.CoinGeckoFeatureCallsOn(context.Background(), time.Now().UTC().Format("2006-01-02"), FeatureDailyCloseExempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// Above the soft stop the refresh is refused, but the daily close makes exactly ONE exempt keyed markets call a day.
+func TestDailyCloseExemptCallAboveSoftStop(t *testing.T) {
+	svc, f, st := setup(t)
+	turnOn(t, st)
+	ctx := context.Background()
+	_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "100")
+	_, _ = st.DB.Exec(`INSERT INTO provider_daily (provider, day, calls, ok) VALUES ('coingecko_key', ?, 150, 150)`, time.Now().UTC().Format("2006-01-02"))
+	if _, _, err := svc.RefreshOnce(ctx); !errors.Is(err, ErrSoftStop) || f.count() != 0 {
+		t.Fatalf("refresh above the stop: %v calls=%d", err, f.count())
+	}
+	res, err := svc.DailyClose(ctx)
+	if err != nil || f.count() != 1 || f.hits["markets"] != 1 || !res.ExemptCall || res.Appended != 36 {
+		t.Fatalf("err=%v calls=%d res=%+v", err, f.count(), res)
+	}
+	if exemptUsage(t, st) != 1 {
+		t.Fatal("the exempt call is not counted under its own feature tag")
+	}
+	now := time.Now().UTC()
+	rows, _ := st.CoinGeckoEndpointUsage(ctx, now.Format("2006-01-02"), now.AddDate(0, 0, 1).Format("2006-01-02"))
+	if len(rows) != 1 || rows[0].Feature != FeatureDailyCloseExempt {
+		t.Fatalf("usage = %+v", rows)
+	}
+	// a second attempt the same day (also after a restart: a fresh Service reads today's counter) makes no call
+	if res, _ = svc.DailyClose(ctx); f.count() != 1 || res.ExemptCall {
+		t.Fatalf("second attempt: calls=%d %+v", f.count(), res)
+	}
+	svc2 := New(st)
+	svc2.StockBars = svc.StockBars
+	if res, _ = svc2.DailyClose(ctx); f.count() != 1 || res.ExemptCall {
+		t.Fatalf("after restart: calls=%d", f.count())
+	}
+}
+
+func TestDailyCloseExemptRefusedBySwitchAndKey(t *testing.T) {
+	for _, c := range []struct{ name, switchV, key string }{{"switch off", "off", "demo-key"}, {"no key", "on", ""}} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, f, st := setup(t)
+			ctx := context.Background()
+			_ = st.SetPreference(ctx, store.PrefPartBEnabled, c.switchV)
+			t.Setenv("FT_COINGECKO_API_KEY", c.key)
+			_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "100")
+			_, _ = st.DB.Exec(`INSERT INTO provider_daily (provider, day, calls, ok) VALUES ('coingecko_key', ?, 150, 150)`, time.Now().UTC().Format("2006-01-02"))
+			res, err := svc.DailyClose(ctx)
+			if err != nil || f.count() != 0 || res.ExemptCall || exemptUsage(t, st) != 0 {
+				t.Fatalf("err=%v calls=%d %+v", err, f.count(), res)
+			}
+		})
+	}
+}
+
+func TestDailyCloseExemptFailedAttemptUsesTheDay(t *testing.T) {
+	svc, f, st := setup(t)
+	turnOn(t, st)
+	ctx := context.Background()
+	_ = st.SetPreference(ctx, store.PrefPartBSoftStop, "100")
+	_, _ = st.DB.Exec(`INSERT INTO provider_daily (provider, day, calls, ok) VALUES ('coingecko_key', ?, 150, 150)`, time.Now().UTC().Format("2006-01-02"))
+	f.hook = func(n int, w http.ResponseWriter, r *http.Request) bool { http.Error(w, "rate", 429); return true }
+	_, _ = svc.DailyClose(ctx)
+	_, _ = svc.DailyClose(ctx)
+	if f.count() != 1 {
+		t.Fatalf("calls = %d, want 1 (no retry, no second attempt)", f.count())
+	}
+}
+
+// FT-165: the 04:00 job is the only writer for held coins; for the other tokens the close only inserts and never
+// changes a row that already exists. Held stocks are left alone too.
+func TestDailyCloseNeverOverwritesAndSkipsHeld(t *testing.T) {
+	svc, _, st := setup(t)
+	turnOn(t, st)
+	ctx := context.Background()
+	today := time.Now().UTC().Format("2006-01-02")
+	if _, _, err := svc.RefreshOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// existing 04:00-style rows: a held coin (BTC) and a non-held token (TAO) with a value the snapshot (2.5) would change
+	for _, sym := range []string{"BTC", "TAO"} {
+		_ = st.InsertPriceHistoryBatch(ctx, sym, "crypto", []store.PricePoint{{Date: today, Close: 99}})
+	}
+	// COIN is held as a stock: its rows are not touched; HOOD is not held
+	if _, err := st.DB.Exec(`INSERT INTO users (id, email, password_hash, created_at) VALUES (1, 'fin@example.test', 'x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.Exec(`INSERT INTO stock_holdings (user_id, name, ticker, invested_usd, updated_at) VALUES (1, 'Coinbase', 'COIN', 100, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	yday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
+	_ = st.InsertPriceHistoryBatch(ctx, "HOOD", "stock", []store.PricePoint{{Date: yday, Close: 77}})
+	svc.StockBars = func(ctx context.Context, tk, rng string) ([]market.OHLCBar, error) {
+		return []market.OHLCBar{{Date: yday, Close: 1}}, nil // would change every row it touches
+	}
+	res, err := svc.DailyClose(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOf := func(tk, kind, date string) float64 {
+		pts, _ := st.ListPriceHistory(ctx, tk, kind)
+		for _, p := range pts {
+			if p.Date == date {
+				return p.Close
+			}
+		}
+		return -1
+	}
+	if got := closeOf("TAO", "crypto", today); got != 99 {
+		t.Errorf("existing non-held row changed to %v", got)
+	}
+	if got := closeOf("BTC", "crypto", today); got != 99 {
+		t.Errorf("held coin row changed to %v", got)
+	}
+	if got := closeOf("HOOD", "stock", yday); got != 77 {
+		t.Errorf("existing stock row changed to %v", got)
+	}
+	if n, _, _ := st.CountPriceHistory(ctx, "COIN", "stock"); n != 0 {
+		t.Errorf("held stock COIN got %d rows from Part B", n)
+	}
+	// a token with no row yet still gets its close; held coins are listed as skipped
+	if got := closeOf("VIRTUAL", "crypto", today); got != 2.5 {
+		t.Errorf("new row = %v, want 2.5", got)
+	}
+	if len(res.HeldSkipped) < 2 { // BTC and COIN at least
+		t.Errorf("held skipped = %v", res.HeldSkipped)
+	}
+	// the backfill skips held coins too and does not overwrite
+	rep, _ := svc.Backfill(ctx, BackfillOptions{DryRun: true})
+	found := map[string]bool{}
+	for _, h := range rep.HeldSkipped {
+		found[h] = true
+	}
+	if !found["BTC"] || !found["COIN"] || found["TAO"] {
+		t.Errorf("backfill held skip = %v", rep.HeldSkipped)
 	}
 }

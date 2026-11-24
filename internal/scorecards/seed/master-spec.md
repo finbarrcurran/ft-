@@ -6,13 +6,13 @@
 >
 > **Editing.** `Edit` updates inline; `Save as new version` records the changelog.
 >
-> **Current version: v1.145.0 · 2026-11-15** — latest change: Visser 46 price data, kill switch off (§13).
+> **Current version: v1.145.2 · 2026-11-24** — latest change: 04:00 job is the only writer for held coins (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.145.0 2026-11-15 -->
+<!-- reference_reviewed: v1.145.2 2026-11-24 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** and have been kept current since (each bump updates the affected parts). Items marked *(carried over)* were not re-verified in that pass. **These sections are the current state.**
 
@@ -155,7 +155,7 @@ Latest migration `0077_visser46_partb.sql`.
 | Crypto Indicators | 00:30, plus ~30 s after boot | Refresh all indicators + composite snapshot |
 | Macro Regime | 01:00, plus ~75 s after boot | FRED refresh + regime snapshot |
 | Legislators / committees | 02:00, self-gated to the first day of each quarter | Signals reference data |
-| Visser 46 (Part B) | refresh every 30 min; daily close 00:35 | ONE keyed `/coins/markets` call for the 42 index tokens into `crypto_index_snapshot`; the close appends from it (no call). Dormant unless `coingecko_partb_enabled` = `on`; gated before every call (key, month's keyed calls below `coingecko_partb_soft_stop`). CLI `ft visser46-backfill [--dry-run]`, `ft visser46-report` |
+| Visser 46 (Part B) | refresh every 30 min; daily close 00:35 | ONE keyed `/coins/markets` call for the 42 index tokens into `crypto_index_snapshot`; the close appends from it, insert-only, skipping held coins (no call; above the soft stop ONE exempt `partb_dailyclose_exempt` call a day). Dormant unless `coingecko_partb_enabled` = `on`; gated before every call (key, month's keyed calls below `coingecko_partb_soft_stop`). CLI `ft visser46-backfill [--dry-run]`, `ft visser46-report` |
 | Daily job | 04:00 | 365-day price history, calendar dates, beta, 12m vol, analyst forecasts, market stats (SC-57; a failed half keeps stored values; `ft market-stats-refresh`). CLI: `ft daily` |
 | Weekly FT snapshot (SC-46) | Sunday 18:00 UTC (Sunday evening Dublin) + Monday 07:00 UTC catch-up | `Server.RunScheduledSnapshot`: builds the deterministic weekly snapshot from the same in-process handlers the connector tools call (portfolio, YTD performance and trade statistics, thesis scores and locks, gap report, watchlist in-zone set, alerts raised in the last 7 days, regimes, crypto indicators with data dates, non-ok monitor entries, the latest week of video digests), compares it with the previous weeks (deltas, 4-week trend, text/set changes, a Top-changes block of at most 8 lines ranked by a fixed rule: regime changes and thesis-score changes, then set changes, then the largest relative movers), saves it to `ft_snapshots` and writes `/var/lib/ft/data/bridge/snapshot/ft-snapshot.md`; one Telegram note. The Monday run takes the week that just ended only if Sunday's did not run. A section whose source fails is omitted with a note, never invented; demo mode refuses to snapshot. **Snapshot v2 (v1.86.1):** each regime is shown with its set-at date, age and the 14-day stale flag, an unset/unclassified regime reads "unset since <date>" and is never a "changed from X to Y" or a Top change, and stale regimes are listed under Data health (which no longer says "all ok" for them); value changes carry an "of which" note from `holdings_audit` since the previous snapshot (removals, additions, invested-amount adjustments with invested USD; capital flows are not recorded in FT and are stated as not separable) plus the same for the three earlier weeks; the Watchlist section lists "In entry zone without a thesis" (entry-zone tickers also in the gap report), and a ticker entering that state is a Top change; header `ft_snapshot_version: 2`, marker `END ft-snapshot v2`. Weeks before the first stored snapshot are filled ONLY from existing history tables (portfolio value, alerts raised, regimes, thesis scores and lock dates); everything else starts at its first snapshot. Monitor `snapshot`: alert when the newest snapshot is older than 8 days, weekly reminders, quiet before the first one |
 | Video digest sweep | 09:15, plus ~2 min after boot | SC-43: ingests any complete package in `/var/lib/video_digest` not yet digested (one governor LLM call per new video) |
@@ -422,48 +422,64 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, short form (≤ 800 characters). Full text and every older change: `docs/spec-archive/` (`INDEX.md` maps versions to files), mirrored to Drive `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12.
 
+### v1.145.2 · 2026-11-24 · pass 162 · FT-165
+
+**04:00 job is the only writer for held coins.** Part B skips the six held coins and held stocks, and inserts only when no row exists (never overwrites). Backfill plan: 36 calls. Supersedes v1.145.1.
+
+### v1.145.1 · 2026-11-24 · pass 161 · Jordi-46 Part B
+
+**Exempt daily-close call.** Above the soft stop the close may make ONE keyed `/coins/markets` call per UTC day; switch and key still apply. Supersedes v1.145.0.
+
+
 ### v1.145.0 · 2026-11-15 · pass 160 · Jordi-46 Part B
 
-**Visser 46 price data, kill switch off.** One keyed `/coins/markets` call per 30 min, a 365-day backfill, a daily close, breadth from stored closes. Kill switch `coingecko_partb_enabled` (ships off), 7,000-a-month soft stop with Telegram alert, per-endpoint call counts. Migration 0077. Supersedes v1.144.0.
+**Visser 46 data, switch off.** 30-min `/coins/markets`, backfill, daily close, breadth; kill switch, 7,000 soft stop. Migration 0077. Supersedes v1.143.0.
+
 
 ### v1.144.0 · 2026-11-22 · pass 159 · SC-91
 
-**22v brain MCP tools.** Loopback `brain_*` tools, hidden in demo mode; daily digest timer, Cowen cap 10. Supersedes v1.143.0.
+**22v brain MCP tools.** Loopback `brain_*` tools; daily digest timer. Supersedes v1.143.0.
+
+
 
 ### v1.143.0 · 2026-11-15 · pass 158 · SC-90
 
-**Commentary chips and drawer.** A "J 3d · C 12d" chip on Watchlist and AI Nexus rows opens the same panel in a drawer; off until `video_links_chips` = on. Audited: 100% snippet, 100% link, 0 dead. Supersedes v1.142.0.
+**Commentary chips and drawer.** Chips on Watchlist and AI Nexus rows open the panel in a drawer; off until `video_links_chips` = on. Supersedes v1.142.0.
+
+
 
 ### v1.142.0 · 2026-11-15 · pass 157 · SC-89
 
-**Commentary API for watchlist/universe.** `/api/commentary` (drawer) and `/api/commentary/summary` (chips), behind `video_links_panel` and the new `video_links_chips` (off). No UI yet. Supersedes v1.141.0.
+**Commentary API for watchlist/universe.** `/api/commentary` and `/api/commentary/summary`, behind `video_links_panel` and `video_links_chips` (off). Supersedes v1.141.0.
+
+
 
 ### v1.141.0 · 2026-11-15 · pass 156 · SC-88
 
-**Second batch of approved aliases.** 13 alias lines (Salana, Palanteer, ExxonMobil, Integris and others); every other fuzzy proposal stays unmapped. Supersedes v1.140.0.
+**Second batch of approved aliases.** 13 alias lines. Supersedes v1.140.0.
+
+
 
 ### v1.140.0 · 2026-11-14 · pass 155 · SC-87
 
 **Note rows link to the real mention.** Supersedes v1.139.0.
 
+
+
 ### v1.139.0 · 2026-11-14 · pass 154 · SC-86
 
 **Commentary panel fixes.** Supersedes v1.138.0.
 
+
+
 ### v1.138.0 · 2026-11-14 · pass 153 · SC-85
 
-**Bot shows every alert kind, acks only what it showed.** `ops/ft-bot`. Supersedes v1.137.0.
+**Bot shows every alert kind.** Supersedes v1.137.0.
 
-### v1.137.0 · 2026-11-14 · pass 152 · SC-84
 
-**Review queue skips mapped names.** Supersedes v1.136.0.
-
-### v1.136.0 · 2026-11-14 · pass 151 · SC-83
-
-**Seven approved aliases.** Supersedes v1.135.0.
 
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.145.0 -->
+<!-- END FT-master-spec v1.145.2 -->
