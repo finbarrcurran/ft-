@@ -235,7 +235,7 @@ func recentMonitorEvents(ctx context.Context, db *sql.DB) []map[string]any {
 		var src, kind, detail string
 		var delivered int
 		if rows.Scan(&ts, &src, &kind, &detail, &delivered) == nil {
-			out = append(out, map[string]any{"ts": ts, "source": src, "kind": kind, "detail": detail, "delivered": delivered == 1})
+			out = append(out, map[string]any{"ts": ts, "source": src, "kind": kind, "detail": detail, "delivered": delivered == 1, "held": delivered == 2})
 		}
 	}
 	return out

@@ -34,6 +34,11 @@ const (
 	reminderEvery = 24 * time.Hour
 	statusOK      = "ok"
 	statusDown    = "down"
+
+	// FT-170: monitor alerts raised from quietStartHour to quietEndHour UTC are held until quietEndHour.
+	quietStartHour = 22
+	quietEndHour   = 10
+	deliveredHeld  = 2 // monitor_events.delivered: 0 = not delivered, 1 = sent, 2 = held for the morning
 )
 
 // Probe reports a source's last success. found=false means it has never worked.
@@ -139,6 +144,7 @@ func (m *Monitor) Evaluate(ctx context.Context) []Result {
 // Tick evaluates, updates state and sends alerts for transitions.
 func (m *Monitor) Tick(ctx context.Context) {
 	now := m.now()
+	m.flushHeld(ctx, now)
 	results := m.Evaluate(ctx)
 	var initial []Result
 	for _, r := range results {
@@ -235,7 +241,10 @@ func (m *Monitor) upsert(ctx context.Context, r Result, status string, since int
 
 func (m *Monitor) alert(ctx context.Context, source, kind, text string, now time.Time) {
 	delivered := 0
-	if m.Notify != nil {
+	if m.Notify != nil && InQuietHours(now) {
+		// FT-170: no overnight Telegram. Held (delivered = 2) and sent as one message at 10:00 UTC or later.
+		delivered = deliveredHeld
+	} else if m.Notify != nil {
 		if err := m.Notify.Send(ctx, text); err != nil {
 			slog.Warn("monitor: alert not delivered", "source", source, "kind", kind, "err", err)
 		} else {
@@ -363,4 +372,47 @@ func (t *Telegram) Send(ctx context.Context, text string) error {
 		return fmt.Errorf("telegram http %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// InQuietHours reports whether t (UTC) falls in the 22:00-10:00 UTC window in which monitor Telegram alerts are held.
+func InQuietHours(t time.Time) bool {
+	h := t.UTC().Hour()
+	return h >= quietStartHour || h < quietEndHour
+}
+
+// flushHeld sends the alerts held overnight as ONE message once the quiet window has ended, then marks them sent.
+// If Telegram refuses, they stay held and the next tick tries again.
+func (m *Monitor) flushHeld(ctx context.Context, now time.Time) {
+	if m.Notify == nil || InQuietHours(now) {
+		return
+	}
+	rows, err := m.DB.QueryContext(ctx, `SELECT id, ts, COALESCE(detail,'') FROM monitor_events WHERE delivered = ? ORDER BY id`, deliveredHeld)
+	if err != nil {
+		slog.Warn("monitor: read held alerts", "err", err)
+		return
+	}
+	var ids []int64
+	var b strings.Builder
+	for rows.Next() {
+		var id, ts int64
+		var detail string
+		if rows.Scan(&id, &ts, &detail) == nil {
+			ids = append(ids, id)
+			fmt.Fprintf(&b, "\n[%s UTC] %s\n", time.Unix(ts, 0).UTC().Format("02 Jan 15:04"), detail)
+		}
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return
+	}
+	text := fmt.Sprintf("🌅 FT: %d monitor alert(s) held overnight (22:00-10:00 UTC)\n%s", len(ids), strings.TrimSpace(b.String()))
+	if err := m.Notify.Send(ctx, text); err != nil {
+		slog.Warn("monitor: held alerts not delivered", "count", len(ids), "err", err)
+		return
+	}
+	for _, id := range ids {
+		if _, err := m.DB.ExecContext(ctx, `UPDATE monitor_events SET delivered = 1 WHERE id = ?`, id); err != nil {
+			slog.Warn("monitor: mark held alert sent", "id", id, "err", err)
+		}
+	}
 }
