@@ -189,10 +189,10 @@ func TestBackfillDryRunMakesNoCall(t *testing.T) {
 	if f.count() != 0 {
 		t.Fatalf("dry run made %d calls", f.count())
 	}
-	if rep.PlannedCalls != 41 || len(rep.TokensSkipped) != 1 || rep.TokensSkipped[0] != "BTC" || len(rep.StocksPlanned) != 4 {
+	if rep.PlannedCalls != 36 || len(rep.HeldSkipped) != 6 || len(rep.StocksPlanned) != 4 {
 		t.Fatalf("plan = %+v", rep)
 	}
-	if !strings.Contains(out.String(), "CoinGecko calls it would make: 41") {
+	if !strings.Contains(out.String(), "CoinGecko calls it would make: 36") {
 		t.Fatalf("output:\n%s", out.String())
 	}
 }
@@ -227,7 +227,7 @@ func TestBackfillStoresAndFlagsThin(t *testing.T) {
 	if rep.StoppedBy != nil || len(rep.Failed) != 0 {
 		t.Fatalf("rep = %+v", rep)
 	}
-	if f.hits["market_chart"] != 42 || f.count() != 42 {
+	if f.hits["market_chart"] != 36 || f.count() != 36 {
 		t.Fatalf("calls = %v, want 42 market_chart", f.hits)
 	}
 	n, _, _ := st.CountPriceHistory(ctx, "TAO", "crypto")
@@ -244,7 +244,7 @@ func TestBackfillStoresAndFlagsThin(t *testing.T) {
 	if len(rep.StocksDone) != 4 {
 		t.Fatalf("stocks = %v", rep.StocksDone)
 	}
-	if k, _ := st.CoinGeckoMonthKeyed(ctx, time.Now().UTC()); k != 42 {
+	if k, _ := st.CoinGeckoMonthKeyed(ctx, time.Now().UTC()); k != 36 {
 		t.Fatalf("keyed counter = %d", k)
 	}
 	// run again: everything is backfilled, nothing is called
@@ -346,7 +346,7 @@ func TestDailyCloseBelowSoftStopNeedsNoCall(t *testing.T) {
 	if f.count() != before || res.ExemptCall {
 		t.Fatal("below the soft stop the daily close made a CoinGecko call")
 	}
-	if res.Appended != 42 || len(res.MissingTokens) != 0 || len(res.StocksUpdated) != 4 {
+	if res.Appended != 36 || len(res.MissingTokens) != 0 || len(res.StocksUpdated) != 4 {
 		t.Fatalf("res = %+v", res)
 	}
 	pts, _ := st.ListPriceHistory(ctx, "TAO", "crypto")
@@ -356,7 +356,7 @@ func TestDailyCloseBelowSoftStopNeedsNoCall(t *testing.T) {
 	// a snapshot older than today's 00:00 UTC is listed as missing, never filled
 	svc.Now = func() time.Time { return time.Now().UTC().AddDate(0, 0, 1) }
 	res, _ = svc.DailyClose(ctx)
-	if res.Appended != 0 || len(res.MissingTokens) != 42 {
+	if res.Appended != 0 || len(res.MissingTokens) != 36 {
 		t.Fatalf("stale snapshot: %+v", res)
 	}
 	// kill switch off: tokens still append from a fresh snapshot, stocks (Yahoo) are not fetched
@@ -366,7 +366,7 @@ func TestDailyCloseBelowSoftStopNeedsNoCall(t *testing.T) {
 		t.Fatal("Yahoo called with the switch off")
 		return nil, nil
 	}
-	if res, _ = svc.DailyClose(ctx); res.Appended != 42 || len(res.StocksUpdated) != 0 {
+	if res, _ = svc.DailyClose(ctx); res.Appended != 36 || len(res.StocksUpdated) != 0 {
 		t.Fatalf("switch off: %+v", res)
 	}
 }
@@ -556,7 +556,7 @@ func TestDailyCloseExemptCallAboveSoftStop(t *testing.T) {
 		t.Fatalf("refresh above the stop: %v calls=%d", err, f.count())
 	}
 	res, err := svc.DailyClose(ctx)
-	if err != nil || f.count() != 1 || f.hits["markets"] != 1 || !res.ExemptCall || res.Appended != 42 {
+	if err != nil || f.count() != 1 || f.hits["markets"] != 1 || !res.ExemptCall || res.Appended != 36 {
 		t.Fatalf("err=%v calls=%d res=%+v", err, f.count(), res)
 	}
 	if exemptUsage(t, st) != 1 {
@@ -606,5 +606,74 @@ func TestDailyCloseExemptFailedAttemptUsesTheDay(t *testing.T) {
 	_, _ = svc.DailyClose(ctx)
 	if f.count() != 1 {
 		t.Fatalf("calls = %d, want 1 (no retry, no second attempt)", f.count())
+	}
+}
+
+// FT-165: the 04:00 job is the only writer for held coins; for the other tokens the close only inserts and never
+// changes a row that already exists. Held stocks are left alone too.
+func TestDailyCloseNeverOverwritesAndSkipsHeld(t *testing.T) {
+	svc, _, st := setup(t)
+	turnOn(t, st)
+	ctx := context.Background()
+	today := time.Now().UTC().Format("2006-01-02")
+	if _, _, err := svc.RefreshOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// existing 04:00-style rows: a held coin (BTC) and a non-held token (TAO) with a value the snapshot (2.5) would change
+	for _, sym := range []string{"BTC", "TAO"} {
+		_ = st.InsertPriceHistoryBatch(ctx, sym, "crypto", []store.PricePoint{{Date: today, Close: 99}})
+	}
+	// COIN is held as a stock: its rows are not touched; HOOD is not held
+	if _, err := st.DB.Exec(`INSERT INTO users (id, email, password_hash, created_at) VALUES (1, 'fin@example.test', 'x', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.Exec(`INSERT INTO stock_holdings (user_id, name, ticker, invested_usd, updated_at) VALUES (1, 'Coinbase', 'COIN', 100, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	yday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
+	_ = st.InsertPriceHistoryBatch(ctx, "HOOD", "stock", []store.PricePoint{{Date: yday, Close: 77}})
+	svc.StockBars = func(ctx context.Context, tk, rng string) ([]market.OHLCBar, error) {
+		return []market.OHLCBar{{Date: yday, Close: 1}}, nil // would change every row it touches
+	}
+	res, err := svc.DailyClose(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOf := func(tk, kind, date string) float64 {
+		pts, _ := st.ListPriceHistory(ctx, tk, kind)
+		for _, p := range pts {
+			if p.Date == date {
+				return p.Close
+			}
+		}
+		return -1
+	}
+	if got := closeOf("TAO", "crypto", today); got != 99 {
+		t.Errorf("existing non-held row changed to %v", got)
+	}
+	if got := closeOf("BTC", "crypto", today); got != 99 {
+		t.Errorf("held coin row changed to %v", got)
+	}
+	if got := closeOf("HOOD", "stock", yday); got != 77 {
+		t.Errorf("existing stock row changed to %v", got)
+	}
+	if n, _, _ := st.CountPriceHistory(ctx, "COIN", "stock"); n != 0 {
+		t.Errorf("held stock COIN got %d rows from Part B", n)
+	}
+	// a token with no row yet still gets its close; held coins are listed as skipped
+	if got := closeOf("VIRTUAL", "crypto", today); got != 2.5 {
+		t.Errorf("new row = %v, want 2.5", got)
+	}
+	if len(res.HeldSkipped) < 2 { // BTC and COIN at least
+		t.Errorf("held skipped = %v", res.HeldSkipped)
+	}
+	// the backfill skips held coins too and does not overwrite
+	rep, _ := svc.Backfill(ctx, BackfillOptions{DryRun: true})
+	found := map[string]bool{}
+	for _, h := range rep.HeldSkipped {
+		found[h] = true
+	}
+	if !found["BTC"] || !found["COIN"] || found["TAO"] {
+		t.Errorf("backfill held skip = %v", rep.HeldSkipped)
 	}
 }

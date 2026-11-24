@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -54,6 +55,13 @@ func (s *Service) stockBars(ctx context.Context, t, rng string) ([]market.OHLCBa
 	return market.FetchYahooDailyBars(ctx, t, rng)
 }
 
+// heldTokens are the symbols the 04:00 job writes to price_history (held coins, market.SymbolToGeckoID): Part B
+// never writes their rows (FT-165). Held stocks are read from stock_holdings.
+func heldToken(sym string) bool {
+	_, ok := market.SymbolToGeckoID[strings.ToUpper(sym)]
+	return ok
+}
+
 func (s *Service) members(ctx context.Context) (tokens, stocks []store.CryptoIndexMember, err error) {
 	all, err := s.Store.ListCryptoIndexMembers(ctx, IndexKey)
 	if err != nil {
@@ -84,6 +92,7 @@ type BackfillReport struct {
 	PlannedCalls    int      // CoinGecko calls needed (tokens below 365 closes)
 	TokensAttempted int      // tokens whose call was started (0 in a dry run); a retried 429 is counted by the call counters, not here
 	TokensSkipped   []string // already had >= 365 closes
+	HeldSkipped     []string // held coins / held stocks: the 04:00 job is their only writer
 	StocksPlanned   []string
 	StocksDone      []string
 	Thin            []string // "SYMBOL (n closes)" below ThinCloses after the backfill (or before, in a dry run)
@@ -118,7 +127,15 @@ func (s *Service) Backfill(ctx context.Context, opt BackfillOptions) (*BackfillR
 		has int
 	}
 	var jobs []job
+	heldStocks, err := s.Store.HeldStockTickers(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for _, m := range tokens {
+		if heldToken(m.Symbol) {
+			rep.HeldSkipped = append(rep.HeldSkipped, m.Symbol)
+			continue
+		}
 		n, _, err := s.Store.CountPriceHistory(ctx, m.Symbol, "crypto")
 		if err != nil {
 			return nil, err
@@ -131,6 +148,10 @@ func (s *Service) Backfill(ctx context.Context, opt BackfillOptions) (*BackfillR
 	}
 	rep.PlannedCalls = len(jobs)
 	for _, m := range stocks {
+		if heldStocks[strings.ToUpper(*m.StockTicker)] {
+			rep.HeldSkipped = append(rep.HeldSkipped, *m.StockTicker)
+			continue
+		}
 		n, _, err := s.Store.CountPriceHistory(ctx, *m.StockTicker, "stock")
 		if err != nil {
 			return nil, err
@@ -152,7 +173,7 @@ func (s *Service) Backfill(ctx context.Context, opt BackfillOptions) (*BackfillR
 		for _, t := range rep.StocksPlanned {
 			say(opt.Out, "  would fetch %s daily bars from Yahoo (stock history path), not a CoinGecko call", t)
 		}
-		say(opt.Out, "skipped (>= %d closes already): %v", BackfillDays, rep.TokensSkipped)
+		say(opt.Out, "skipped (>= %d closes already): %v; held, written only by the 04:00 job: %v", BackfillDays, rep.TokensSkipped, rep.HeldSkipped)
 		say(opt.Out, "CoinGecko calls it would make: %d keyed market_chart; Yahoo stock fetches: %d; gap %s => about %s", rep.PlannedCalls, len(rep.StocksPlanned), s.gap(), (time.Duration(rep.PlannedCalls) * s.gap()).Round(time.Second))
 		return rep, nil
 	}
@@ -186,7 +207,7 @@ func (s *Service) Backfill(ctx context.Context, opt BackfillOptions) (*BackfillR
 			}
 			pts = append(pts, store.PricePoint{Date: c.Date, Close: c.Close})
 		}
-		if err := s.Store.InsertPriceHistoryBatch(ctx, j.m.Symbol, "crypto", pts); err != nil {
+		if err := s.Store.InsertPriceHistoryIfAbsent(ctx, j.m.Symbol, "crypto", pts); err != nil {
 			rep.Failed = append(rep.Failed, fmt.Sprintf("%s: write: %v", j.m.Symbol, err))
 			continue
 		}
@@ -215,7 +236,7 @@ func (s *Service) Backfill(ctx context.Context, opt BackfillOptions) (*BackfillR
 				pts = append(pts, store.PricePoint{Date: b.Date, Close: b.Close})
 			}
 		}
-		if err := s.Store.InsertPriceHistoryBatch(ctx, t, "stock", pts); err != nil {
+		if err := s.Store.InsertPriceHistoryIfAbsent(ctx, t, "stock", pts); err != nil {
 			rep.Failed = append(rep.Failed, fmt.Sprintf("%s: write: %v", t, err))
 			continue
 		}
@@ -332,6 +353,7 @@ type CloseResult struct {
 	Date          string
 	Appended      int
 	ExemptCall    bool     // the one exempt /coins/markets call was made above the soft stop
+	HeldSkipped   []string // held coins/stocks, left to the 04:00 job
 	MissingTokens []string // no snapshot from this UTC day: listed, never filled
 	StocksUpdated []string
 	StockErrors   []string
@@ -368,13 +390,21 @@ func (s *Service) DailyClose(ctx context.Context) (*CloseResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	heldStocks, err := s.Store.HeldStockTickers(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for _, m := range tokens {
+		if heldToken(m.Symbol) { // the 04:00 job is the only writer for held coins
+			res.HeldSkipped = append(res.HeldSkipped, m.Symbol)
+			continue
+		}
 		sn, ok := snaps[*m.CoinGeckoID]
 		if !ok || sn.FetchedAt < dayStart || sn.FetchedAt > now.Unix() || sn.PriceUSD == nil || *sn.PriceUSD <= 0 {
 			res.MissingTokens = append(res.MissingTokens, m.Symbol)
 			continue
 		}
-		if err := s.Store.InsertPriceHistoryBatch(ctx, m.Symbol, "crypto", []store.PricePoint{{Date: day, Close: *sn.PriceUSD}}); err != nil {
+		if err := s.Store.InsertPriceHistoryIfAbsent(ctx, m.Symbol, "crypto", []store.PricePoint{{Date: day, Close: *sn.PriceUSD}}); err != nil {
 			return res, err
 		}
 		res.Appended++
@@ -382,6 +412,10 @@ func (s *Service) DailyClose(ctx context.Context) (*CloseResult, error) {
 	if len(stocks) > 0 && s.Gate.KillSwitchOnly(ctx) == nil {
 		cutoff := now.AddDate(0, 0, -7).Format("2006-01-02")
 		for _, m := range stocks {
+			if heldStocks[strings.ToUpper(*m.StockTicker)] {
+				res.HeldSkipped = append(res.HeldSkipped, *m.StockTicker)
+				continue
+			}
 			bars, err := s.stockBars(ctx, *m.StockTicker, "1mo")
 			if err != nil {
 				res.StockErrors = append(res.StockErrors, fmt.Sprintf("%s: %v", *m.StockTicker, err))
@@ -393,7 +427,7 @@ func (s *Service) DailyClose(ctx context.Context) (*CloseResult, error) {
 					pts = append(pts, store.PricePoint{Date: b.Date, Close: b.Close})
 				}
 			}
-			if err := s.Store.InsertPriceHistoryBatch(ctx, *m.StockTicker, "stock", pts); err != nil {
+			if err := s.Store.InsertPriceHistoryIfAbsent(ctx, *m.StockTicker, "stock", pts); err != nil {
 				res.StockErrors = append(res.StockErrors, fmt.Sprintf("%s: write: %v", *m.StockTicker, err))
 				continue
 			}
