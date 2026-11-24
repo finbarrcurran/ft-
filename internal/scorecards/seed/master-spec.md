@@ -6,13 +6,13 @@
 >
 > **Editing.** `Edit` updates inline; `Save as new version` records the changelog.
 >
-> **Current version: v1.145.2 · 2026-11-24** — latest change: 04:00 job is the only writer for held coins (§13).
+> **Current version: v1.145.3 · 2026-11-24** — latest change: Monitor alerts held overnight (§13).
 >
 > Sections 1–12 are the current state of FT. §13 lists the ten newest changes in short form; every older entry, and the full text of these, is in the archive — `docs/spec-archive/` in the repo (`INDEX.md` maps every version and pass to its file), mirrored to Drive at `FT-Bridge/spec/archive/`.
 
 ---
 
-<!-- reference_reviewed: v1.145.2 2026-11-24 -->
+<!-- reference_reviewed: v1.145.3 2026-11-24 -->
 
 > **Sections 1–12 were re-derived from the running build on 2026-10-09 (v1.76.0)** and have been kept current since (each bump updates the affected parts). Items marked *(carried over)* were not re-verified in that pass. **These sections are the current state.**
 
@@ -167,7 +167,7 @@ Latest migration `0077_visser46_partb.sql`.
 | AI Nexus daily | 22:30 | Universe + benchmark bars, Trend Score + Exhaustion |
 | AI Nexus weekly | Sun 22:45 | Forward PEG recompute |
 | Signals ingest | 23:00 / 23:10 / 23:20 (+ quarterly legislators 02:00) | SEC Form 4 insiders (firehose + per-ticker), Congress, executive orders. The 23:10 Congress step (SC-47) imports the legacy Capitol Trades file into `congress_trades_raw` once, syncs Bargo (a rolling window of recent transaction dates, 7-day slices; first run backfills 3 months; Sundays re-read 60 days because disclosures lag up to ~45 days). **Before v1.80.1 only the 23:00 insider job ever ran** (see the scheduler note below), then turns recent raw rows into tiered `signal_events` |
-| Connectivity monitor | every 10 min (first run 5 min after start) | SC-47: reads each watched source's last success (`provider_health`, `bargo_sync_runs`, `etoro_sync_runs`, Farside file mtime, newest DB backup) and compares it with the silence that source is allowed (`internal/monitor/checks.go`). One Telegram message when a source goes stale, a reminder every 24 h while it stays stale, one on recovery; on first sight, already-stale sources are folded into a single "monitor is on" message. Known-dead feeds are flagged optional (shown, never alert). **Indicator data dates (SC-49b):** one check per series (`ci_pal_us2y`, `ci_pal_dxy`, `ci_pal_cfnai`, `ci_universal_stablecoin_supply`) alerts at the amber age of its rule, names the cause (FETCH FAILED versus SOURCE not updated), reminds every 24 h (CFNAI every 7 days) and says when it recovers; Diagnostics lists each series' data date, age in its own unit and last fetch result. **`statement_coverage` (SC-51)** watches the eToro statement coverage end (35 days, weekly reminders; `Check.ReminderEvery`). Alerts go straight to Telegram via `FT_TELEGRAM_BOT_TOKEN` / `FT_TELEGRAM_CHAT_ID`; with them unset events are recorded as undelivered **The Farside ETF-flow check (SC-49) judges the newest ROW's date in US trading days, not the file's modification time:** alert at ≥ 3 US trading days old (one message, reminder every 24 h, recovery note), and the text names the cause — scraper failed (its `fetchedAt` older than 30 h) versus source not updated (scraper fine, no newer row). |
+| Connectivity monitor | every 10 min (first run 5 min after start) | SC-47: reads each watched source's last success (`provider_health`, `bargo_sync_runs`, `etoro_sync_runs`, Farside file mtime, newest DB backup) and compares it with the silence that source is allowed (`internal/monitor/checks.go`). One Telegram message when a source goes stale, a reminder every 24 h while it stays stale, one on recovery; on first sight, already-stale sources are folded into a single "monitor is on" message. Known-dead feeds are flagged optional (shown, never alert). **Indicator data dates (SC-49b):** one check per series (`ci_pal_us2y`, `ci_pal_dxy`, `ci_pal_cfnai`, `ci_universal_stablecoin_supply`) alerts at the amber age of its rule, names the cause (FETCH FAILED versus SOURCE not updated), reminds every 24 h (CFNAI every 7 days) and says when it recovers; Diagnostics lists each series' data date, age in its own unit and last fetch result. **`statement_coverage` (SC-51)** watches the eToro statement coverage end (35 days, weekly reminders; `Check.ReminderEvery`). Alerts go straight to Telegram via `FT_TELEGRAM_BOT_TOKEN` / `FT_TELEGRAM_CHAT_ID`; with them unset events are recorded as undelivered **The Farside ETF-flow check (SC-49) judges the newest ROW's date in US trading days, not the file's modification time:** alert at ≥ 3 US trading days old (one message, reminder every 24 h, recovery note), and the text names the cause — scraper failed (its `fetchedAt` older than 30 h) versus source not updated (scraper fine, no newer row). FT-170: alerts raised 22:00-10:00 UTC are held to 10:00. |
 | Feed warm-up | 06:30 daily | SC-48: runs the real handlers for CNN Fear & Greed, crypto Fear & Greed, market news and crypto news once (same path as a user request, cache and stale fallback included) so request-driven feeds stay fresh; one Telegram alert naming any that still fail. Startup (30 s after boot): one Telegram alert naming any missing required provider variable (names only) |
 | Scheduler note | — | `scheduleAt` (cmd/ft/main.go) runs each job in its own goroutine since v1.80.1. It used to block, so in a goroutine that armed several jobs only the first ever fired: the Congress/Bargo ingest (23:10), the executive-order ingest (23:20), the quarterly legislator refresh (02:00) and the weekly Nexus fundamentals job (Sunday 22:45) had never run on schedule since v1.11.0 (Congress and EO data were only ever refreshed by manual buttons or one-off runs). A regression test arms three jobs in a row and requires all to fire |
 
@@ -422,6 +422,10 @@ Current as of 2026-10-12 (verified against the code and the repo unless marked):
 
 The ten newest changes, newest first, short form (≤ 800 characters). Full text and every older change: `docs/spec-archive/` (`INDEX.md` maps versions to files), mirrored to Drive `FT-Bridge/spec/archive/`. Anything that must stay true is in sections 1–12.
 
+### v1.145.3 · 2026-11-24 · pass 163 · FT-170
+
+**Monitor alerts held overnight.** Monitor Telegram alerts raised 22:00-10:00 UTC are held and sent as one message from 10:00 UTC. Stop-loss, price alerts, direct sends unchanged. No migration. Supersedes v1.145.2.
+
 ### v1.145.2 · 2026-11-24 · pass 162 · FT-165
 
 **04:00 job is the only writer for held coins.** Part B skips the six held coins and held stocks, and inserts only when no row exists (never overwrites). Backfill plan: 36 calls. Supersedes v1.145.1.
@@ -430,56 +434,36 @@ The ten newest changes, newest first, short form (≤ 800 characters). Full text
 
 **Exempt daily-close call.** Above the soft stop the close may make ONE keyed `/coins/markets` call per UTC day; switch and key still apply. Supersedes v1.145.0.
 
-
 ### v1.145.0 · 2026-11-15 · pass 160 · Jordi-46 Part B
 
 **Visser 46 data, switch off.** 30-min `/coins/markets`, backfill, daily close, breadth; kill switch, 7,000 soft stop. Migration 0077. Supersedes v1.143.0.
-
 
 ### v1.144.0 · 2026-11-22 · pass 159 · SC-91
 
 **22v brain MCP tools.** Loopback `brain_*` tools; daily digest timer. Supersedes v1.143.0.
 
-
-
 ### v1.143.0 · 2026-11-15 · pass 158 · SC-90
 
-**Commentary chips and drawer.** Chips on Watchlist and AI Nexus rows open the panel in a drawer; off until `video_links_chips` = on. Supersedes v1.142.0.
-
-
+**Commentary chips and drawer.** Off until `video_links_chips` = on. Supersedes v1.142.0.
 
 ### v1.142.0 · 2026-11-15 · pass 157 · SC-89
 
-**Commentary API for watchlist/universe.** `/api/commentary` and `/api/commentary/summary`, behind `video_links_panel` and `video_links_chips` (off). Supersedes v1.141.0.
-
-
+**Commentary API for watchlist/universe.** `/api/commentary`, off. Supersedes v1.141.0.
 
 ### v1.141.0 · 2026-11-15 · pass 156 · SC-88
 
 **Second batch of approved aliases.** 13 alias lines. Supersedes v1.140.0.
 
-
-
 ### v1.140.0 · 2026-11-14 · pass 155 · SC-87
 
 **Note rows link to the real mention.** Supersedes v1.139.0.
-
-
 
 ### v1.139.0 · 2026-11-14 · pass 154 · SC-86
 
 **Commentary panel fixes.** Supersedes v1.138.0.
 
-
-
-### v1.138.0 · 2026-11-14 · pass 153 · SC-85
-
-**Bot shows every alert kind.** Supersedes v1.137.0.
-
-
-
 ---
 
 *Personal use only. Not investment advice.*
 
-<!-- END FT-master-spec v1.145.2 -->
+<!-- END FT-master-spec v1.145.3 -->
